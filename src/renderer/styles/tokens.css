@@ -1,0 +1,857 @@
+/* Tokens, base reset, and shared UI primitives */
+:root {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --ui-font-body: "Geist Variable", "Segoe UI Variable", "Segoe UI", sans-serif;
+  --ui-font-mono: "Geist Mono Variable", "Cascadia Mono", "Consolas", monospace;
+  --ui-app-bg: var(--background);
+  --ui-app-bg-elevated: color-mix(in oklab, var(--sidebar) 92%, var(--foreground) 8%);
+  --ui-surface-1: color-mix(in oklab, var(--background) 86%, var(--foreground) 14%);
+  --ui-surface-2: var(--card);
+  --ui-surface-3: color-mix(in oklab, var(--secondary) 82%, var(--foreground) 18%);
+  --ui-surface-4: color-mix(in srgb, var(--popover) 94%, transparent);
+  --ui-surface-5: color-mix(in oklab, var(--secondary) 68%, var(--foreground) 32%);
+  --ui-menu-bg: color-mix(in srgb, var(--popover) 94%, transparent);
+  --ui-input-bg: color-mix(in srgb, var(--foreground) 2.5%, transparent);
+  --ui-input-bg-focus: color-mix(in srgb, var(--foreground) 4.5%, transparent);
+  --ui-hover: color-mix(in srgb, var(--foreground) 5.5%, transparent);
+  --ui-active: color-mix(in srgb, var(--foreground) 8.5%, transparent);
+  --ui-border: var(--border);
+  --ui-border-soft: color-mix(in srgb, var(--border) 70%, transparent);
+  --ui-border-strong: color-mix(in srgb, var(--border) 62%, var(--foreground) 38%);
+  --ui-text-title: var(--foreground);
+  --ui-text-title-soft: color-mix(in srgb, var(--ui-text-title) 88%, transparent);
+  --ui-composer-send-glyph: #111111;
+  --ui-text: color-mix(in srgb, var(--foreground) 92%, var(--background) 8%);
+  --ui-text-muted: var(--muted-foreground);
+  --ui-text-subtle: color-mix(in srgb, var(--muted-foreground) 82%, transparent);
+  --ui-accent: var(--primary);
+  --ui-accent-strong: color-mix(in srgb, var(--primary) 78%, var(--foreground) 22%);
+  --ui-accent-soft: color-mix(in srgb, var(--primary) 12%, transparent);
+  --ui-default-accent: #0078d4;
+  --ui-accent-foreground-light: #f5f5f5;
+  --ui-accent-foreground-dark: #111111;
+  --ui-danger: var(--destructive);
+  --ui-primary-bg: var(--primary);
+  --ui-primary-text: var(--primary-foreground);
+  --ui-primary-bg-hover: color-mix(in srgb, var(--primary) 92%, white 8%);
+  --ui-brand-border: color-mix(in srgb, var(--primary) 28%, transparent);
+  --ui-brand-border-strong: color-mix(in srgb, var(--primary) 38%, transparent);
+  --ui-brand-soft: color-mix(in srgb, var(--primary) 10%, transparent);
+  --ui-brand-soft-strong: color-mix(in srgb, var(--primary) 16%, transparent);
+  --ui-brand-text: color-mix(in srgb, var(--primary) 42%, var(--foreground) 58%);
+  --ui-brand-text-strong: color-mix(in srgb, var(--primary) 24%, var(--foreground) 76%);
+  --ui-brand-text-muted: color-mix(in srgb, var(--primary) 22%, var(--muted-foreground) 78%);
+  --ui-skill-accent: color-mix(in srgb, var(--foreground) 74%, var(--muted-foreground) 26%);
+  --ui-skill-soft: color-mix(in srgb, var(--ui-skill-accent) 14%, transparent);
+  --ui-skill-border: color-mix(in srgb, var(--ui-skill-accent) 28%, transparent);
+  --ui-skill-text: color-mix(in srgb, var(--ui-skill-accent) 46%, var(--foreground) 54%);
+  --ui-skill-text-strong: color-mix(in srgb, var(--ui-skill-accent) 68%, var(--foreground) 32%);
+  --ui-brand-gradient: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--primary) 88%, white 12%),
+    color-mix(in srgb, var(--primary) 56%, var(--background) 44%)
+  );
+  --ui-brand-panel-gradient:
+    radial-gradient(circle at 50% 28%, color-mix(in srgb, var(--primary) 28%, transparent), transparent 62%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--primary) 28%, transparent),
+      color-mix(in srgb, var(--primary) 18%, var(--background) 82%)
+    );
+  --ui-brand-panel-shadow:
+    0 0 0 1px color-mix(in srgb, var(--primary) 12%, transparent),
+    0 10px 24px color-mix(in srgb, black 28%, transparent);
+  --ui-brand-panel-shadow-strong:
+    0 0 0 1px color-mix(in srgb, var(--primary) 16%, transparent),
+    0 0 0 6px color-mix(in srgb, var(--primary) 8%, transparent),
+    0 12px 28px color-mix(in srgb, black 34%, transparent);
+  --ui-success: var(--color-emerald-500);
+  --ui-success-text: color-mix(in srgb, var(--color-emerald-500) 68%, var(--foreground) 32%);
+  --ui-success-text-strong: color-mix(in srgb, var(--color-emerald-500) 32%, var(--foreground) 68%);
+  --ui-success-soft: color-mix(in srgb, var(--color-emerald-500) 14%, transparent);
+  --ui-success-soft-strong: color-mix(in srgb, var(--color-emerald-500) 20%, transparent);
+  --ui-success-border: color-mix(in srgb, var(--color-emerald-500) 28%, transparent);
+  --ui-status-success-fg: var(--ui-success-text-strong);
+  --ui-warning: var(--color-amber-500);
+  --ui-warning-text: color-mix(in srgb, var(--color-amber-500) 72%, var(--foreground) 28%);
+  --ui-warning-text-strong: color-mix(in srgb, var(--color-amber-500) 32%, var(--foreground) 68%);
+  --ui-warning-soft: color-mix(in srgb, var(--color-amber-500) 14%, transparent);
+  --ui-warning-soft-strong: color-mix(in srgb, var(--color-amber-500) 20%, transparent);
+  --ui-warning-border: color-mix(in srgb, var(--color-amber-500) 28%, transparent);
+  --ui-status-warning-fg: var(--ui-warning-text-strong);
+  --ui-danger-text: color-mix(in srgb, var(--destructive) 72%, var(--foreground) 28%);
+  --ui-danger-text-strong: color-mix(in srgb, var(--destructive) 32%, var(--foreground) 68%);
+  --ui-danger-soft: color-mix(in srgb, var(--destructive) 14%, transparent);
+  --ui-danger-soft-strong: color-mix(in srgb, var(--destructive) 20%, transparent);
+  --ui-danger-border: color-mix(in srgb, var(--destructive) 28%, transparent);
+  --ui-alpha-02: color-mix(in srgb, var(--foreground) 2%, transparent);
+  --ui-alpha-025: color-mix(in srgb, var(--foreground) 2.5%, transparent);
+  --ui-alpha-03: color-mix(in srgb, var(--foreground) 3%, transparent);
+  --ui-alpha-035: color-mix(in srgb, var(--foreground) 3.5%, transparent);
+  --ui-alpha-04: color-mix(in srgb, var(--foreground) 4%, transparent);
+  --ui-alpha-045: color-mix(in srgb, var(--foreground) 4.5%, transparent);
+  --ui-alpha-05: color-mix(in srgb, var(--foreground) 5%, transparent);
+  --ui-alpha-06: color-mix(in srgb, var(--foreground) 6%, transparent);
+  --ui-alpha-065: color-mix(in srgb, var(--foreground) 6.5%, transparent);
+  --ui-alpha-075: color-mix(in srgb, var(--foreground) 7.5%, transparent);
+  --ui-alpha-08: color-mix(in srgb, var(--foreground) 8%, transparent);
+  --ui-alpha-10: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --ui-alpha-12: color-mix(in srgb, var(--foreground) 12%, transparent);
+  --ui-alpha-14: color-mix(in srgb, var(--foreground) 14%, transparent);
+  --ui-alpha-16: color-mix(in srgb, var(--foreground) 16%, transparent);
+  --ui-alpha-18: color-mix(in srgb, var(--foreground) 18%, transparent);
+  --ui-alpha-22: color-mix(in srgb, var(--foreground) 22%, transparent);
+  --ui-scrim-04: color-mix(in srgb, black 4%, transparent);
+  --ui-scrim-10: color-mix(in srgb, black 10%, transparent);
+  --ui-scrim-22: color-mix(in srgb, black 22%, transparent);
+  --ui-scrim-26: color-mix(in srgb, black 26%, transparent);
+  --ui-scrim-54: color-mix(in srgb, black 54%, transparent);
+  --ui-scrim-62: color-mix(in srgb, black 62%, transparent);
+  --ui-scrim-68: color-mix(in srgb, black 68%, transparent);
+  --ui-shell-gradient: linear-gradient(180deg, color-mix(in oklab, var(--sidebar) 94%, var(--foreground) 6%), color-mix(in oklab, var(--background) 92%, var(--foreground) 8%));
+  --ui-window-bar-gradient: linear-gradient(180deg, #fafafa, #f1f1f1);
+  --ui-window-sidebar-gradient: linear-gradient(180deg, #f3f3f3, #ebebeb);
+  --ui-window-pane-gradient: linear-gradient(180deg, #ffffff, #f8f8f8);
+  --ui-thread-surface: #ffffff;
+  --ui-thread-surface-secondary: #fafafa;
+  --ui-thread-composer-surface: #f2f2f2;
+  --ui-thread-composer-border: color-mix(in srgb, var(--border) 84%, transparent);
+  --ui-thread-code-surface: #f3f3f3;
+  --ui-thread-code-border: color-mix(in srgb, var(--border) 82%, transparent);
+  --ui-thread-tool-surface: #f4f4f4;
+  --ui-thread-tool-section-surface: #ededed;
+  --ui-panel-gradient: linear-gradient(180deg, #ffffff, color-mix(in oklab, var(--card) 86%, var(--background) 14%));
+  --ui-panel-gradient-strong: linear-gradient(180deg, #ffffff, color-mix(in oklab, var(--background) 78%, var(--card) 22%));
+  --ui-panel-gradient-soft: linear-gradient(180deg, color-mix(in srgb, white 88%, transparent), color-mix(in srgb, var(--background) 94%, white 6%));
+  --ui-code-bg: color-mix(in srgb, var(--background) 92%, #dce2e8 8%);
+  --ui-code-text: color-mix(in srgb, var(--foreground) 84%, var(--background) 16%);
+  --ui-code-text-strong: color-mix(in srgb, var(--foreground) 92%, var(--background) 8%);
+  --ui-code-text-muted: color-mix(in srgb, var(--muted-foreground) 86%, transparent);
+  --ui-monaco-diff-inserted-text: color-mix(in srgb, var(--ui-success) 34%, transparent);
+  --ui-monaco-diff-removed-text: color-mix(in srgb, var(--ui-danger) 34%, transparent);
+  --ui-monaco-diff-inserted-line: color-mix(in srgb, var(--ui-success) 18%, transparent);
+  --ui-monaco-diff-removed-line: color-mix(in srgb, var(--ui-danger) 18%, transparent);
+  --ui-follow-up-badge-follow-up-text: var(--ui-success-text-strong);
+  --ui-follow-up-badge-follow-up-bg: color-mix(in srgb, var(--ui-success) 18%, transparent);
+  --ui-follow-up-badge-follow-up-border: var(--ui-success-border);
+  --ui-follow-up-badge-steer-text: var(--ui-brand-text-strong);
+  --ui-follow-up-badge-steer-bg: color-mix(in srgb, var(--primary) 18%, transparent);
+  --ui-follow-up-badge-steer-border: color-mix(in srgb, var(--primary) 28%, transparent);
+  --ui-overlay: color-mix(in srgb, black 22%, transparent);
+  --ui-scrollbar-thumb: color-mix(in srgb, var(--foreground) 18%, transparent);
+  --ui-shimmer-gradient: linear-gradient(
+    110deg,
+    color-mix(in srgb, var(--foreground) 24%, var(--background) 76%) 22%,
+    color-mix(in srgb, var(--foreground) 92%, var(--background) 8%) 48%,
+    color-mix(in srgb, var(--foreground) 24%, var(--background) 76%) 74%
+  );
+  --ui-shimmer-gradient-soft: linear-gradient(
+    108deg,
+    color-mix(in srgb, var(--foreground) 32%, var(--background) 68%) 16%,
+    color-mix(in srgb, var(--foreground) 90%, var(--background) 10%) 48%,
+    color-mix(in srgb, var(--foreground) 32%, var(--background) 68%) 78%
+  );
+  --ui-landing-overlay:
+    radial-gradient(780px 420px at 50% 38%, var(--ui-alpha-08), transparent 58%),
+    radial-gradient(900px 520px at 50% 42%, var(--ui-scrim-04), var(--ui-scrim-62) 72%),
+    linear-gradient(to top, var(--ui-scrim-26), var(--ui-scrim-10) 40%, var(--ui-scrim-22));
+  --ui-landing-overlay-soft:
+    radial-gradient(680px 300px at 50% 42%, var(--ui-alpha-06), transparent 58%),
+    linear-gradient(180deg, var(--ui-scrim-26), var(--ui-scrim-54));
+  --ui-landing-button-bg: var(--ui-alpha-10);
+  --ui-landing-button-bg-hover: var(--ui-alpha-14);
+  --ui-landing-button-border: var(--ui-alpha-14);
+  --ui-landing-button-border-hover: var(--ui-alpha-18);
+  --ui-landing-button-shadow: 0 18px 40px color-mix(in srgb, black 22%, transparent);
+  --ui-font-size-xs: 11.5px;
+  --ui-font-size-sm: 12.5px;
+  --ui-font-size-body-sm: 13px;
+  --ui-font-size-body-md: 14px;
+  --ui-font-size-body-lg: 15px;
+  --ui-font-size-title-sm: 16px;
+  --ui-font-size-title-md: 18px;
+  --ui-font-size-title-lg: 22px;
+  --ui-line-height-tight: 1.12;
+  --ui-line-height-snug: 1.35;
+  --ui-line-height-body: 1.55;
+  --ui-line-height-relaxed: 1.68;
+  --ui-space-1: 4px;
+  --ui-space-2: 8px;
+  --ui-space-3: 12px;
+  --ui-space-4: 16px;
+  --ui-space-5: 20px;
+  --ui-space-6: 24px;
+  --ui-space-7: 28px;
+  --ui-radius-sm: 8px;
+  --ui-radius-md: 10px;
+  --ui-radius-lg: 14px;
+  --ui-radius-xl: 18px;
+  --ui-shadow-menu:
+    0 18px 48px rgba(15, 23, 42, 0.12),
+    0 1px 0 rgba(255, 255, 255, 0.72) inset;
+  --ui-shadow-card:
+    0 10px 30px rgba(15, 23, 42, 0.08),
+    0 1px 0 rgba(255, 255, 255, 0.86) inset;
+  --ui-segmented-control-shadow:
+    0 8px 18px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  --ui-segmented-control-shadow-light:
+    0 6px 14px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  --ui-shadow-apple:
+    0 1px 2px color-mix(in srgb, black 14%, transparent),
+    0 3px 8px color-mix(in srgb, black 6%, transparent);
+  --ui-focus:
+    0 0 0 1px color-mix(in srgb, var(--primary) 24%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--primary) 12%, transparent);
+  --ui-field-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.86),
+    0 1px 2px rgba(15, 23, 42, 0.06);
+  --ui-height-nav: 40px;
+  --ui-height-action: 36px;
+  --ui-height-compact: 30px;
+  --ui-height-icon: 34px;
+}
+
+.dark {
+  --ui-window-bar-gradient: linear-gradient(180deg, #1a1a1a, #181818);
+  --ui-window-sidebar-gradient: linear-gradient(180deg, #222222, #1f1f1f);
+  --ui-window-pane-gradient: linear-gradient(180deg, #1a1a1a, #181818);
+  --ui-thread-surface: #181818;
+  --ui-thread-surface-secondary: #1c1c1c;
+  --ui-thread-composer-surface: #2d2d2d;
+  --ui-thread-composer-border: color-mix(in srgb, white 10%, transparent);
+  --ui-thread-code-surface: #1f1f1f;
+  --ui-thread-code-border: color-mix(in srgb, white 10%, transparent);
+  --ui-thread-tool-surface: #202020;
+  --ui-thread-tool-section-surface: #1b1b1b;
+  --ui-panel-gradient: linear-gradient(180deg, color-mix(in oklab, var(--card) 96%, var(--foreground) 4%), color-mix(in oklab, var(--card) 88%, var(--background) 12%));
+  --ui-panel-gradient-strong: linear-gradient(180deg, color-mix(in oklab, var(--card) 94%, var(--foreground) 6%), color-mix(in oklab, var(--background) 90%, var(--card) 10%));
+  --ui-panel-gradient-soft: linear-gradient(180deg, var(--ui-alpha-03), var(--ui-alpha-02));
+  --ui-code-bg: color-mix(in srgb, var(--background) 86%, black 14%);
+  --ui-code-text: color-mix(in srgb, var(--foreground) 74%, var(--background) 26%);
+  --ui-code-text-strong: color-mix(in srgb, var(--foreground) 88%, var(--background) 12%);
+  --ui-overlay: color-mix(in srgb, black 68%, transparent);
+  --ui-scrollbar-thumb: color-mix(in srgb, var(--foreground) 22%, transparent);
+  --ui-shadow-menu:
+    0 24px 64px rgba(0, 0, 0, 0.38),
+    0 2px 0 var(--ui-alpha-04) inset;
+  --ui-shadow-card:
+    0 10px 30px rgba(0, 0, 0, 0.18),
+    0 1px 0 var(--ui-alpha-04) inset;
+  --ui-shadow-apple:
+    0 1px 2px color-mix(in srgb, black 20%, transparent),
+    0 6px 16px color-mix(in srgb, black 14%, transparent);
+  --ui-field-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.03) inset,
+    0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+
+:root,
+.light {
+  color-scheme: light;
+  background: var(--background);
+  color: var(--foreground);
+  --ui-composer-send-glyph: #ffffff;
+}
+
+.dark {
+  color-scheme: dark;
+  background: var(--background);
+  color: var(--foreground);
+  --ui-composer-send-glyph: #111111;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--ui-app-bg);
+  font-family: var(--ui-font-body);
+  color: var(--ui-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:focus-visible,
+[role='menuitem']:focus-visible,
+[role='menuitemcheckbox']:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-focus);
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-focus);
+}
+
+.ui-control-button,
+.ui-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid var(--ui-border-soft);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface-2);
+  box-shadow: var(--ui-shadow-card);
+  color: var(--ui-text);
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease,
+    opacity 150ms ease;
+}
+
+.ui-control-button {
+  min-width: 0;
+  padding: 0 14px;
+  text-align: left;
+  line-height: var(--ui-line-height-snug);
+  font-family: var(--ui-font-body);
+  font-size: var(--ui-font-size-body-sm);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.ui-control-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ui-control-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: inherit;
+}
+
+.ui-control-icon svg,
+.ui-icon-button svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.ui-control-nav {
+  min-height: var(--ui-height-nav);
+  width: 100%;
+  justify-content: flex-start;
+  padding: 0 14px;
+  color: var(--ui-text-title);
+  font-size: var(--ui-font-size-body-md);
+  font-weight: 550;
+}
+
+.ui-control-action,
+.ui-control-primary,
+.ui-control-danger,
+.ui-control-menu,
+.ui-project-button,
+.ui-thread-button {
+  min-height: var(--ui-height-action);
+}
+
+.ui-control-size-compact {
+  min-height: var(--ui-height-compact);
+  padding: 0 12px;
+  font-size: var(--ui-font-size-sm);
+}
+
+.ui-control-size-default {
+  min-height: var(--ui-height-action);
+}
+
+.ui-control-action,
+.ui-project-button,
+.ui-thread-button,
+.ui-control-tone-default {
+  border-color: var(--ui-border-soft);
+  background: var(--ui-surface-2);
+  color: var(--ui-text);
+}
+
+.ui-control-tone-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ui-text-muted);
+}
+
+.ui-control-menu {
+  width: 100%;
+  justify-content: space-between;
+  min-height: 38px;
+  padding: 0 14px;
+  color: var(--ui-text-title);
+}
+
+.ui-control-primary {
+  border-color: rgba(255, 255, 255, 0.06);
+  background: var(--ui-primary-bg);
+  color: var(--ui-primary-text);
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  font-weight: 650;
+}
+
+.ui-control-danger,
+.ui-control-tone-danger {
+  border-color: rgba(240, 173, 168, 0.18);
+  background: rgba(240, 173, 168, 0.08);
+  color: var(--ui-danger);
+}
+
+.ui-control-button:hover,
+.ui-icon-button:hover {
+  background: var(--ui-surface-3);
+  color: var(--ui-text-title);
+  border-color: var(--ui-border-strong);
+}
+
+.ui-control-primary:hover {
+  background: var(--ui-primary-bg-hover);
+  color: var(--ui-primary-text);
+  border-color: var(--ui-brand-border);
+}
+
+.ui-control-danger:hover,
+.ui-control-tone-danger:hover {
+  background: rgba(240, 173, 168, 0.14);
+}
+
+.ui-control-button:disabled,
+.ui-icon-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+  box-shadow: none;
+}
+
+.ui-control-button:active,
+.ui-icon-button:active {
+  background: var(--ui-active);
+}
+
+.ui-icon-button {
+  width: var(--ui-height-icon);
+  height: var(--ui-height-icon);
+  min-height: var(--ui-height-icon);
+  padding: 0;
+  border-radius: var(--ui-radius-sm);
+}
+
+.ui-icon-size-compact {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+}
+
+.ui-project-button {
+  width: 100%;
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+  padding: 8px 0;
+  color: var(--ui-text);
+  border-radius: 0;
+}
+
+.ui-thread-button {
+  width: 100%;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 12px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ui-text);
+}
+
+.ui-menu-content,
+.ui-popover-content,
+.ui-dialog-content {
+  border: 1px solid var(--ui-border);
+  background: var(--ui-menu-bg);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--ui-shadow-menu);
+}
+
+.ui-menu-content {
+  min-width: 180px;
+  padding: 8px;
+  border-radius: var(--ui-radius-md);
+  box-shadow: var(--ui-shadow-apple);
+  z-index: 90;
+}
+
+.app-loading-icon-shell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1em;
+  height: 1em;
+  color: currentColor;
+}
+
+.app-loading-icon {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: center;
+  will-change: transform, opacity, filter;
+}
+
+.app-loading-icon-primary {
+  opacity: 0.94;
+  animation: app-loading-spin 0.95s linear infinite;
+}
+
+.app-loading-icon-echo {
+  opacity: 0.3;
+  transform: scale(0.9);
+  animation: app-loading-echo 1.35s cubic-bezier(0.33, 0, 0.2, 1) infinite;
+}
+
+@keyframes app-loading-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes app-loading-echo {
+  0% {
+    transform: rotate(0deg) scale(0.72);
+    opacity: 0.08;
+  }
+
+  50% {
+    transform: rotate(-180deg) scale(1);
+    opacity: 0.32;
+  }
+
+  100% {
+    transform: rotate(-360deg) scale(0.72);
+    opacity: 0.08;
+  }
+}
+
+.ui-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--ui-text);
+  font-size: var(--ui-font-size-body-sm);
+  user-select: none;
+}
+
+.ui-menu-item[data-highlighted],
+.ui-menu-item:focus-visible,
+.ui-menu-item.is-selected {
+  outline: none;
+  background: var(--ui-hover);
+  color: var(--ui-text-title);
+  box-shadow: none;
+}
+
+.ui-menu-item[data-disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ui-menu-item-danger {
+  color: #f2c2be;
+}
+
+.ui-menu-item-danger[data-highlighted] {
+  background: rgba(240, 173, 168, 0.12);
+  color: #ffd3ce;
+}
+
+.ui-menu-item-label {
+  display: inline-flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ui-menu-item svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.ui-menu-label {
+  padding: 4px 8px 6px;
+  color: var(--ui-text-subtle);
+  font-size: var(--ui-font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+.ui-menu-separator {
+  height: 1px;
+  margin: 8px 0;
+  background: var(--ui-border-soft);
+}
+
+.ui-menu-indicator {
+  display: none;
+}
+
+.ui-popover-content {
+  border-radius: var(--ui-radius-lg);
+  z-index: 45;
+}
+
+.ui-tooltip-content {
+  padding: 6px 8px;
+  border: 1px solid var(--ui-border-soft);
+  border-radius: 8px;
+  background: var(--ui-menu-bg);
+  color: var(--ui-text-title);
+  font-size: var(--ui-font-size-xs);
+  box-shadow: var(--ui-shadow-apple);
+  z-index: 60;
+}
+
+.ui-stable-scroll {
+  overflow-y: scroll;
+  overflow-x: hidden;
+  scrollbar-gutter: stable both-edges;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.ui-stable-scroll:hover,
+.ui-stable-scroll:focus-within {
+  scrollbar-color: var(--ui-alpha-18) transparent;
+}
+
+.ui-stable-scroll::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+  background: transparent;
+}
+
+.ui-stable-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: transparent;
+  border-top: 11px solid transparent;
+  border-bottom: 11px solid transparent;
+  border-left: 1px solid transparent;
+  border-right: 1px solid transparent;
+  background-clip: padding-box;
+  min-height: 18px;
+  transition: background-color 140ms ease;
+}
+
+.ui-stable-scroll:hover::-webkit-scrollbar-thumb,
+.ui-stable-scroll:focus-within::-webkit-scrollbar-thumb {
+  background: var(--ui-scrollbar-thumb);
+}
+
+.ui-stable-scroll::-webkit-scrollbar-track,
+.ui-stable-scroll::-webkit-scrollbar-track-piece,
+.ui-stable-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.ui-detail-scroll {
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ui-alpha-18) transparent;
+}
+
+.ui-detail-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background: transparent;
+}
+
+.ui-detail-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background: color-mix(in srgb, var(--ui-alpha-18) 92%, transparent);
+  background-clip: content-box;
+  min-height: 18px;
+}
+
+.ui-detail-scroll::-webkit-scrollbar-track,
+.ui-detail-scroll::-webkit-scrollbar-track-piece,
+.ui-detail-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.ui-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--ui-overlay);
+  z-index: 70;
+}
+
+.ui-dialog-positioner {
+  position: fixed;
+  inset: 0;
+  z-index: 71;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.ui-dialog-content {
+  width: min(440px, calc(100vw - 32px));
+  padding: 20px;
+  border-radius: var(--ui-radius-lg);
+  margin: auto;
+  z-index: 71;
+}
+
+.ui-dialog-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.ui-dialog-title {
+  margin: 0;
+  color: var(--ui-text-title);
+  font-size: var(--ui-font-size-title-sm);
+  line-height: var(--ui-line-height-tight);
+}
+
+.ui-dialog-description {
+  margin: 0;
+  color: var(--ui-text-muted);
+  font-size: var(--ui-font-size-body-sm);
+  line-height: var(--ui-line-height-body);
+}
+
+.ui-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.ui-field {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-lg);
+  padding: 12px 14px;
+  color: var(--ui-text-title);
+  background: var(--ui-input-bg);
+  box-shadow: var(--ui-field-shadow);
+  font-family: var(--ui-font-body);
+  font-size: var(--ui-font-size-body-sm);
+  line-height: var(--ui-line-height-body);
+  transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+}
+
+.ui-field::placeholder {
+  color: var(--ui-text-subtle);
+}
+
+.ui-field:hover {
+  border-color: var(--ui-border-strong);
+}
+
+.ui-field:focus-visible,
+.ui-field[data-state='open'] {
+  border-color: var(--ui-border-strong);
+  background: var(--ui-input-bg-focus);
+}
+
+.ui-select {
+  appearance: none;
+  color-scheme: inherit;
+  padding-right: 40px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--ui-text-muted) 50%),
+    linear-gradient(135deg, var(--ui-text-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) calc(50% - 2px),
+    calc(100% - 13px) calc(50% - 2px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.ui-textarea {
+  resize: vertical;
+}
+
+.ui-surface-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--ui-border-soft);
+  border-radius: var(--ui-radius-xl);
+  background: var(--ui-panel-gradient);
+  box-shadow: var(--ui-shadow-card);
+}
+
+.ui-select option,
+.ui-select optgroup {
+  color: var(--ui-text-title);
+  background: var(--ui-surface-3);
+}
+
+.light .ui-menu-content,
+.light .ui-popover-content,
+.light .ui-dialog-content,
+.light .ui-tooltip-content {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+

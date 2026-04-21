@@ -1,0 +1,176 @@
+{
+  "name": "vicode-windows",
+  "version": "0.2.1",
+  "description": "Minimal Windows-first Electron desktop app inspired by Codex.",
+  "main": "out/main/index.js",
+  "bin": {
+    "vicode": "bin/vicode.mjs"
+  },
+  "author": "Codex",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lowluds/vicode-windows-public.git"
+  },
+  "homepage": "https://github.com/lowluds/vicode-windows-public",
+  "bugs": {
+    "url": "https://github.com/lowluds/vicode-windows-public/issues"
+  },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "engines": {
+    "node": ">=24 <25",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "postinstall": "node scripts/prepare-better-sqlite3.mjs electron",
+    "native:prepare:electron": "node scripts/prepare-better-sqlite3.mjs electron",
+    "native:prepare:node": "node scripts/prepare-better-sqlite3.mjs node",
+    "predev": "node scripts/prepare-better-sqlite3.mjs electron",
+    "dev": "electron-vite dev",
+    "build": "tsc --noEmit && electron-vite build",
+    "prepack": "npm run build",
+    "prepreview": "node scripts/prepare-better-sqlite3.mjs electron",
+    "preview": "electron-vite preview",
+    "pretest": "node scripts/prepare-better-sqlite3.mjs node",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify:desktop": "npm run build && npm test && npm run native:prepare:electron && npm run smoke && npm run e2e",
+    "presmoke": "npm run build",
+    "smoke": "node scripts/electron-smoke.mjs",
+    "smoke:packaged": "node scripts/electron-packaged-smoke.mjs",
+    "audit:release": "node scripts/audit-release-artifacts.mjs",
+    "audit:repo-public": "node scripts/audit-repo-public-safety.mjs",
+    "build:public-mirror": "node scripts/build-public-source-mirror.mjs",
+    "audit:public-mirror": "node scripts/audit-public-source-mirror.mjs",
+    "codex:upstream-check": "node scripts/check-codex-upstream.mjs",
+    "audit:maintainability": "node scripts/audit-maintainability.mjs",
+    "pree2e": "npm run build",
+    "e2e": "playwright test --grep-invert @live-provider",
+    "pree2e:live": "npm run build",
+    "e2e:live": "playwright test --grep @live-provider",
+    "bench:live": "node scripts/run-live-benchmarks.mjs",
+    "validate:mixed-use": "node scripts/run-mixed-use-provider-validation.mjs",
+    "validate:generated-memory-live": "node scripts/run-generated-memory-live-proof.mjs",
+    "pree2e:all": "npm run build",
+    "e2e:all": "playwright test",
+    "predist:win": "npm run native:prepare:electron && npm run build",
+    "dist:win": "set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win nsis --publish never",
+    "release:win": "set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win nsis --publish onTagOrDraft",
+    "postdist:win": "node scripts/cleanup-dist-win.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist": "^5.2.8",
+    "@fontsource-variable/geist-mono": "^5.2.7",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@mozilla/readability": "^0.6.0",
+    "@radix-ui/react-collapsible": "^1.1.12",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-dropdown-menu": "^2.1.16",
+    "@radix-ui/react-popover": "^1.1.15",
+    "@radix-ui/react-slot": "^1.2.4",
+    "@radix-ui/react-tooltip": "^1.2.8",
+    "@radix-ui/react-use-controllable-state": "^1.2.2",
+    "@streamdown/cjk": "^1.0.3",
+    "@streamdown/code": "^1.1.1",
+    "@streamdown/math": "^1.0.2",
+    "@streamdown/mermaid": "^1.0.2",
+    "@supabase/supabase-js": "^2.99.3",
+    "@tailwindcss/vite": "^4.2.2",
+    "better-sqlite3": "^12.4.1",
+    "cheerio": "^1.2.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "diff": "^8.0.3",
+    "dompurify": "^3.3.0",
+    "electron-updater": "^6.8.3",
+    "koffi": "^2.15.2",
+    "linkedom": "^0.18.12",
+    "lucide-react": "^0.577.0",
+    "marked": "^16.4.1",
+    "monaco-editor": "^0.53.0",
+    "motion": "^12.38.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "shadcn": "^4.1.0",
+    "streamdown": "^2.5.0",
+    "tailwind-merge": "^3.5.0",
+    "tailwindcss": "^4.2.2",
+    "tw-animate-css": "^1.4.0",
+    "zod": "^4.1.11",
+    "zustand": "^5.0.8"
+  },
+  "files": [
+    "bin/**/*",
+    "out/**/*",
+    "resources/**/*",
+    "scripts/prepare-better-sqlite3.mjs",
+    "package.json"
+  ],
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "@types/dompurify": "^3.2.0",
+    "@types/node": "^24.9.1",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.1.0",
+    "electron": "^39.2.3",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^4.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.2",
+    "vitest": "^4.0.0"
+  },
+  "build": {
+    "appId": "com.vicode.windows",
+    "productName": "Vicode",
+    "electronUpdaterCompatibility": ">=2.16",
+    "toolsets": {
+      "winCodeSign": "1.1.0"
+    },
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "extraResources": [
+      {
+        "from": "resources/whispercpp",
+        "to": "whispercpp"
+      },
+      {
+        "from": "resources/mcp",
+        "to": "mcp"
+      }
+    ],
+    "files": [
+      "out/**/*",
+      "resources/**/*",
+      "!resources/whispercpp/**/*",
+      "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "lowluds",
+        "repo": "vicode-windows-releases"
+      }
+    ],
+    "win": {
+      "icon": "resources/app-icon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "installerIcon": "resources/app-icon.ico",
+      "uninstallerIcon": "resources/app-icon.ico",
+      "installerHeaderIcon": "resources/app-icon.ico"
+    }
+  }
+}

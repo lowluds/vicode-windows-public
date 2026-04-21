@@ -1,0 +1,752 @@
+import type { ProviderId, SkillCategory } from './domain';
+
+export type CuratedSkillInstallKind = 'provider_native' | 'github_folder';
+export type CuratedMcpCatalogCategory = 'ui' | 'design' | 'component-system' | 'deploy' | 'backend' | 'collaboration';
+export type CuratedMcpSupportState = 'supported' | 'planned';
+export type CuratedSkillStatus = 'keep' | 'experimental';
+export type CuratedSkillVerification = 'vicode-reviewed' | 'source-reviewed';
+
+export interface CuratedSkillCatalogEntry {
+  id: string;
+  name: string;
+  publisher: string;
+  description: string;
+  installKind: CuratedSkillInstallKind;
+  providerTargets: ProviderId[];
+  browseUrl: string;
+  token: string;
+  category: SkillCategory;
+  official: boolean;
+  status: CuratedSkillStatus;
+  verification: CuratedSkillVerification;
+  notes: string[];
+  starterPack?: boolean;
+  providerId?: ProviderId;
+  owner?: string;
+  repo?: string;
+  path?: string;
+  installTarget?: string;
+  featured: boolean;
+}
+
+export interface CuratedMcpCatalogEntry {
+  id: string;
+  name: string;
+  publisher: string;
+  description: string;
+  docsUrl: string;
+  category: CuratedMcpCatalogCategory;
+  supportState: CuratedMcpSupportState;
+  transport: 'stdio' | 'http' | 'remote';
+  command?: string;
+  args?: string[];
+  envVars: string[];
+  setupNotes: string[];
+}
+
+export const officialSkillPack: CuratedSkillCatalogEntry[] = [
+  {
+    id: 'vercel-react-best-practices',
+    name: 'React Best Practices',
+    publisher: 'Vercel',
+    description: 'React and Next.js performance optimization guidance with 40+ rules across 8 categories.',
+    installKind: 'github_folder',
+    providerTargets: ['openai', 'gemini'],
+    browseUrl: 'https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices',
+    owner: 'vercel-labs',
+    repo: 'agent-skills',
+    path: 'skills/react-best-practices',
+    token: 'react-best-practices',
+    category: 'frontend',
+    official: true,
+    status: 'keep',
+    verification: 'vicode-reviewed',
+    notes: ['High-fit React and Next.js guidance for Vicode users building web apps.', 'Recommended starter-pack skill.'],
+    starterPack: true,
+    featured: true
+  },
+  {
+    id: 'vercel-composition-patterns',
+    name: 'Composition Patterns',
+    publisher: 'Vercel',
+    description: 'React composition patterns that scale and avoid boolean prop proliferation.',
+    installKind: 'github_folder',
+    providerTargets: ['openai', 'gemini'],
+    browseUrl: 'https://github.com/vercel-labs/agent-skills/tree/main/skills/composition-patterns',
+    owner: 'vercel-labs',
+    repo: 'agent-skills',
+    path: 'skills/composition-patterns',
+    token: 'composition-patterns',
+    category: 'frontend',
+    official: true,
+    status: 'keep',
+    verification: 'vicode-reviewed',
+    notes: ['High-fit component architecture guidance for React codebases.', 'Recommended starter-pack skill.'],
+    starterPack: true,
+    featured: true
+  },
+  {
+    id: 'vercel-next-best-practices',
+    name: 'Next Best Practices',
+    publisher: 'Vercel',
+    description: 'Next.js best practices covering file conventions, RSC boundaries, and data patterns.',
+    installKind: 'github_folder',
+    providerTargets: ['openai', 'gemini'],
+    browseUrl: 'https://github.com/vercel-labs/agent-skills/tree/main/skills/next-best-practices',
+    owner: 'vercel-labs',
+    repo: 'agent-skills',
+    path: 'skills/next-best-practices',
+    token: 'next-best-practices',
+    category: 'frontend',
+    official: true,
+    status: 'keep',
+    verification: 'vicode-reviewed',
+    notes: ['High-fit Next.js guidance for common app-router and data-boundary work.', 'Recommended starter-pack skill.'],
+    starterPack: true,
+    featured: true
+  },
+  {
+    id: 'vercel-web-design-guidelines',
+    name: 'Web Design Guidelines',
+    publisher: 'Vercel',
+    description: 'Review UI code for interface-guideline compliance across accessibility, performance, and UX.',
+    installKind: 'github_folder',
+    providerTargets: ['openai', 'gemini'],
+    browseUrl: 'https://github.com/vercel-labs/agent-skills/tree/main/skills/web-design-guidelines',
+    owner: 'vercel-labs',
+    repo: 'agent-skills',
+    path: 'skills/web-design-guidelines',
+    token: 'web-design-guidelines',
+    category: 'design',
+    official: true,
+    status: 'keep',
+    verification: 'vicode-reviewed',
+    notes: ['Fits Vicode frontend and polish workflows without requiring extra credentials.', 'Recommended starter-pack skill.'],
+    starterPack: true,
+    featured: true
+  },
+  {
+    id: 'vercel-building-components',
+    name: 'Building Components',
+    publisher: 'Vercel',
+    description: 'Guidance for building UI components with accessibility, composable APIs, and theming.',
+    installKind: 'github_folder',
+    providerTargets: ['openai', 'gemini'],
+    browseUrl: 'https://github.com/vercel-labs/agent-skills/tree/main/skills/building-components',
+    owner: 'vercel-labs',
+    repo: 'agent-skills',
+    path: 'skills/building-components',
+    token: 'building-components',
+    category: 'design',
+    official: true,
+    status: 'keep',
+    verification: 'source-reviewed',
+    notes: ['Good fit for shared-component work, but not in the starter pack by default.'],
+    featured: true
+  },
+  {
+    id: 'vercel-ai-elements',
+    name: 'AI Elements',
+    publisher: 'Vercel',
+    description: 'Component-library guidance for AI-native applications built on shadcn/ui patterns.',
+    installKind: 'github_folder',
+    providerTargets: ['openai', 'gemini'],
+    browseUrl: 'https://github.com/vercel-labs/agent-skills/tree/main/skills/ai-elements',
+    owner: 'vercel-labs',
+    repo: 'agent-skills',
+    path: 'skills/ai-elements',
+    token: 'ai-elements',
+    category: 'frontend',
+    official: true,
+    status: 'experimental',
+    verification: 'source-reviewed',
+    notes: ['Useful for AI-native UI work, but narrower than the default Vicode frontend path.', 'Keep out of the starter pack until it proves repeated value.'],
+    featured: false
+  },
+  {
+    id: 'vercel-ai-sdk',
+    name: 'AI SDK',
+    publisher: 'Vercel',
+    description: 'Build AI-powered app features including agents, chatbots, and RAG systems.',
+    installKind: 'github_folder',
+    providerTargets: ['openai', 'gemini'],
+    browseUrl: 'https://github.com/vercel-labs/agent-skills/tree/main/skills/ai-sdk',
+    owner: 'vercel-labs',
+    repo: 'agent-skills',
+    path: 'skills/ai-sdk',
+    token: 'ai-sdk',
+    category: 'backend',
+    official: true,
+    status: 'experimental',
+    verification: 'source-reviewed',
+    notes: ['Official and relevant, but still framework-specific and not a default install recommendation.'],
+    featured: false
+  },
+  {
+    id: 'vercel-workflow',
+    name: 'Workflow',
+    publisher: 'Vercel',
+    description: 'Durable async workflows with retries and step-based orchestration.',
+    installKind: 'github_folder',
+    providerTargets: ['openai', 'gemini'],
+    browseUrl: 'https://github.com/vercel-labs/agent-skills/tree/main/skills/workflow',
+    owner: 'vercel-labs',
+    repo: 'agent-skills',
+    path: 'skills/workflow',
+    token: 'workflow',
+    category: 'automation',
+    official: true,
+    status: 'experimental',
+    verification: 'source-reviewed',
+    notes: ['Potentially useful for async orchestration work, but narrower than the main Vicode workflow set.'],
+    featured: false
+  },
+  {
+    id: 'vercel-vercel-deploy',
+    name: 'Vercel Deploy',
+    publisher: 'Vercel',
+    description: 'Deploy applications and websites with framework auto-detection.',
+    installKind: 'github_folder',
+    providerTargets: ['openai', 'gemini'],
+    browseUrl: 'https://github.com/vercel-labs/agent-skills/tree/main/skills/vercel-deploy',
+    owner: 'vercel-labs',
+    repo: 'agent-skills',
+    path: 'skills/vercel-deploy',
+    token: 'vercel-deploy',
+    category: 'automation',
+    official: true,
+    status: 'keep',
+    verification: 'source-reviewed',
+    notes: ['Common deployment path for web projects and a strong fit for Vicode app users.'],
+    featured: false
+  }
+];
+
+export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
+  {
+    id: 'codex-aspnet-core',
+    name: 'AspNet Core',
+    publisher: 'OpenAI',
+    description: '[Windows only] Build and review ASP.NET Core apps.',
+    installKind: 'provider_native',
+    providerId: 'openai',
+    providerTargets: ['openai'],
+    browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated/aspnet-core',
+    token: 'aspnet-core',
+    category: 'backend',
+    official: true,
+    status: 'keep',
+    verification: 'source-reviewed',
+    notes: ['Strong Windows-specific fit for Vicode users shipping .NET applications.'],
+    featured: false
+  },
+  {
+    id: 'codex-chatgpt-apps',
+    name: 'ChatGPT Apps',
+    publisher: 'OpenAI',
+    description: 'Build and scaffold ChatGPT apps.',
+    installKind: 'provider_native',
+    providerId: 'openai',
+    providerTargets: ['openai'],
+    browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated/chatgpt-apps',
+    token: 'chatgpt-apps',
+    category: 'engineering',
+    official: true,
+    status: 'experimental',
+    verification: 'source-reviewed',
+    notes: ['Official and credible, but narrower than the core Vicode release surface.'],
+    featured: false
+  },
+  {
+    id: 'codex-figma',
+    name: 'Figma',
+    publisher: 'OpenAI',
+    description: 'Use Figma MCP for design-to-code workflows.',
+    installKind: 'provider_native',
+    providerId: 'openai',
+    providerTargets: ['openai'],
+    browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated/figma',
+    token: 'figma',
+    category: 'design',
+    official: true,
+    status: 'keep',
+    verification: 'source-reviewed',
+    notes: ['OpenAI highlights Figma-backed design implementation as a core Codex workflow.'],
+    featured: false
+  },
+  {
+    id: 'codex-gh-address-comments',
+    name: 'GH Address Comments',
+    publisher: 'OpenAI',
+    description: 'Address GitHub PR comments quickly.',
+    installKind: 'provider_native',
+    providerId: 'openai',
+    providerTargets: ['openai'],
+    browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated/gh-address-comments',
+    token: 'gh-address-comments',
+    category: 'engineering',
+    official: true,
+    status: 'keep',
+    verification: 'source-reviewed',
+    notes: ['Good fit for review-first engineering workflows inside Vicode.'],
+    featured: false
+  },
+  {
+    id: 'codex-gh-fix-ci',
+    name: 'GH Fix CI',
+    publisher: 'OpenAI',
+    description: 'Debug failing GitHub Actions CI.',
+    installKind: 'provider_native',
+    providerId: 'openai',
+    providerTargets: ['openai'],
+    browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated/gh-fix-ci',
+    token: 'gh-fix-ci',
+    category: 'engineering',
+    official: true,
+    status: 'keep',
+    verification: 'source-reviewed',
+    notes: ['High-frequency workflow with clear engineering value.'],
+    featured: false
+  },
+  {
+    id: 'codex-jupyter-notebook',
+    name: 'Jupyter Notebook',
+    publisher: 'OpenAI',
+    description: 'Create and iterate on notebooks.',
+    installKind: 'provider_native',
+    providerId: 'openai',
+    providerTargets: ['openai'],
+    browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated/jupyter-notebook',
+    token: 'jupyter-notebook',
+    category: 'engineering',
+    official: true,
+    status: 'experimental',
+    verification: 'source-reviewed',
+    notes: ['Useful, but more specialized than the default web-app focused starter pack.'],
+    featured: false
+  },
+  {
+    id: 'codex-linear',
+    name: 'Linear',
+    publisher: 'OpenAI',
+    description: 'Manage Linear issues from Codex.',
+    installKind: 'provider_native',
+    providerId: 'openai',
+    providerTargets: ['openai'],
+    browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated/linear',
+    token: 'linear',
+    category: 'engineering',
+    official: true,
+    status: 'keep',
+    verification: 'source-reviewed',
+    notes: ['OpenAI highlights Linear as a representative project-operations workflow.'],
+    featured: false
+  },
+  {
+    id: 'codex-pdf',
+    name: 'PDF',
+    publisher: 'OpenAI',
+    description: 'Work with and review PDF documents.',
+    installKind: 'provider_native',
+    providerId: 'openai',
+    providerTargets: ['openai'],
+    browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated/pdf',
+    token: 'pdf',
+    category: 'documents',
+    official: true,
+    status: 'keep',
+    verification: 'source-reviewed',
+    notes: ['Stronger than the built-in PDF prompt skill because it represents a real provider skill path.'],
+    featured: false
+  },
+  {
+    id: 'codex-slides',
+    name: 'Slides',
+    publisher: 'OpenAI',
+    description: 'Create and refine presentation decks.',
+    installKind: 'provider_native',
+    providerId: 'openai',
+    providerTargets: ['openai'],
+    browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated/slides',
+    token: 'slides',
+    category: 'documents',
+    official: true,
+    status: 'experimental',
+    verification: 'source-reviewed',
+    notes: ['Document-oriented and credible, but not a core default recommendation for Vicode.'],
+    featured: false
+  },
+  {
+    id: 'gemini-context7',
+    name: 'Context7',
+    publisher: 'Upstash',
+    description: 'Up-to-date code docs for any prompt.',
+    installKind: 'provider_native',
+    providerId: 'gemini',
+    providerTargets: ['gemini'],
+    browseUrl: 'https://github.com/upstash/context7',
+    token: 'context7',
+    category: 'engineering',
+    official: true,
+    status: 'keep',
+    verification: 'source-reviewed',
+    notes: ['High-signal docs workflow that complements provider-native generation without being intrusive.'],
+    featured: false
+  },
+  {
+    id: 'gemini-stitch',
+    name: 'Stitch',
+    publisher: 'Google',
+    description: 'Gemini UI generation and app stitching workflows.',
+    installKind: 'provider_native',
+    providerId: 'gemini',
+    providerTargets: ['gemini'],
+    browseUrl: 'https://github.com/gemini-cli-extensions/stitch',
+    installTarget: 'https://github.com/gemini-cli-extensions/stitch',
+    token: '@gemini-cli-extensions/stitch',
+    category: 'frontend',
+    official: true,
+    status: 'experimental',
+    verification: 'source-reviewed',
+    notes: ['Promising frontend workflow, but still narrower than the main Vicode frontend path.'],
+    featured: false
+  },
+  {
+    id: 'gemini-browserbase-mcp',
+    name: 'Browserbase MCP',
+    publisher: 'Browserbase',
+    description: 'Browserbase remote browser automation for Gemini CLI.',
+    installKind: 'provider_native',
+    providerId: 'gemini',
+    providerTargets: ['gemini'],
+    browseUrl: 'https://github.com/browserbase/mcp-server-browserbase',
+    installTarget: 'https://github.com/browserbase/mcp-server-browserbase',
+    token: '@browserbase/mcp-server-browserbase',
+    category: 'mcp',
+    official: true,
+    status: 'keep',
+    verification: 'source-reviewed',
+    notes: ['Strong browser-automation workflow when users explicitly need remote browser tooling.'],
+    featured: false
+  },
+  {
+    id: 'gemini-chrome-devtools',
+    name: 'Chrome DevTools MCP',
+    publisher: 'Chrome DevTools',
+    description: 'Browser inspection and debugging through Chrome DevTools.',
+    installKind: 'provider_native',
+    providerId: 'gemini',
+    providerTargets: ['gemini'],
+    browseUrl: 'https://github.com/ChromeDevTools/chrome-devtools-mcp',
+    installTarget: 'https://github.com/ChromeDevTools/chrome-devtools-mcp',
+    token: '@ChromeDevTools/chrome-devtools-mcp',
+    category: 'mcp',
+    official: true,
+    status: 'keep',
+    verification: 'source-reviewed',
+    notes: ['High-fit UI debugging workflow for web projects.'],
+    featured: false
+  },
+  {
+    id: 'gemini-github-mcp',
+    name: 'GitHub MCP Server',
+    publisher: 'GitHub',
+    description: 'GitHub-aware workflows and repository operations.',
+    installKind: 'provider_native',
+    providerId: 'gemini',
+    providerTargets: ['gemini'],
+    browseUrl: 'https://github.com/github/github-mcp-server',
+    token: 'github-mcp-server',
+    category: 'mcp',
+    official: true,
+    status: 'keep',
+    verification: 'source-reviewed',
+    notes: ['High-fit repo and issue workflow for engineering-heavy projects.'],
+    featured: false
+  },
+  {
+    id: 'gemini-genai-toolbox',
+    name: 'GenAI Toolbox',
+    publisher: 'Google',
+    description: 'Google APIs and tools for Gemini workflows.',
+    installKind: 'provider_native',
+    providerId: 'gemini',
+    providerTargets: ['gemini'],
+    browseUrl: 'https://github.com/googleapis/genai-toolbox',
+    token: 'genai-toolbox',
+    category: 'automation',
+    official: true,
+    status: 'experimental',
+    verification: 'source-reviewed',
+    notes: ['Official, but broad and service-heavy relative to the default Vicode workflow set.'],
+    featured: false
+  },
+  {
+    id: 'gemini-elasticsearch',
+    name: 'Elasticsearch',
+    publisher: 'Elastic',
+    description: 'Official Elasticsearch extension for Gemini CLI.',
+    installKind: 'provider_native',
+    providerId: 'gemini',
+    providerTargets: ['gemini'],
+    browseUrl: 'https://github.com/elastic/gemini-cli-elasticsearch',
+    token: 'gemini-cli-elasticsearch',
+    category: 'backend',
+    official: true,
+    status: 'experimental',
+    verification: 'source-reviewed',
+    notes: ['Official backend workflow, but specialized and not a default recommendation.'],
+    featured: false
+  },
+  {
+    id: 'anthropic-docx',
+    name: 'Docx',
+    publisher: 'Anthropic',
+    description: 'Create, edit, and analyze Word documents.',
+    installKind: 'github_folder',
+    providerTargets: ['openai', 'gemini'],
+    browseUrl: 'https://github.com/anthropics/skills/tree/main/skills/docx',
+    owner: 'anthropics',
+    repo: 'skills',
+    path: 'skills/docx',
+    token: 'docx',
+    category: 'documents',
+    official: true,
+    status: 'keep',
+    verification: 'source-reviewed',
+    notes: ['Strong fit for document-heavy workflows and a clearer path than prompt-only built-ins.'],
+    featured: false
+  },
+  {
+    id: 'anthropic-pptx',
+    name: 'Pptx',
+    publisher: 'Anthropic',
+    description: 'Create, edit, and analyze PowerPoint presentations.',
+    installKind: 'github_folder',
+    providerTargets: ['openai', 'gemini'],
+    browseUrl: 'https://github.com/anthropics/skills/tree/main/skills/pptx',
+    owner: 'anthropics',
+    repo: 'skills',
+    path: 'skills/pptx',
+    token: 'pptx',
+    category: 'documents',
+    official: true,
+    status: 'experimental',
+    verification: 'source-reviewed',
+    notes: ['Useful, but presentation generation remains secondary to core engineering workflows.'],
+    featured: false
+  },
+  {
+    id: 'anthropic-xlsx',
+    name: 'Xlsx',
+    publisher: 'Anthropic',
+    description: 'Create, edit, and analyze Excel spreadsheets.',
+    installKind: 'github_folder',
+    providerTargets: ['openai', 'gemini'],
+    browseUrl: 'https://github.com/anthropics/skills/tree/main/skills/xlsx',
+    owner: 'anthropics',
+    repo: 'skills',
+    path: 'skills/xlsx',
+    token: 'xlsx',
+    category: 'documents',
+    official: true,
+    status: 'keep',
+    verification: 'source-reviewed',
+    notes: ['Strong fit for structured-data workflows that exceed prompt-only spreadsheet helpers.'],
+    featured: false
+  },
+  {
+    id: 'anthropic-pdf',
+    name: 'PDF',
+    publisher: 'Anthropic',
+    description: 'Extract text, create PDFs, and handle forms.',
+    installKind: 'github_folder',
+    providerTargets: ['openai', 'gemini'],
+    browseUrl: 'https://github.com/anthropics/skills/tree/main/skills/pdf',
+    owner: 'anthropics',
+    repo: 'skills',
+    path: 'skills/pdf',
+    token: 'pdf',
+    category: 'documents',
+    official: true,
+    status: 'keep',
+    verification: 'source-reviewed',
+    notes: ['High-fit document workflow that aligns with OpenAI and Anthropic product direction.'],
+    featured: false
+  },
+  {
+    id: 'anthropic-frontend-design',
+    name: 'Frontend Design',
+    publisher: 'Anthropic',
+    description: 'Frontend design and UI/UX development tools.',
+    installKind: 'github_folder',
+    providerTargets: ['openai', 'gemini'],
+    browseUrl: 'https://github.com/anthropics/skills/tree/main/skills/frontend-design',
+    owner: 'anthropics',
+    repo: 'skills',
+    path: 'skills/frontend-design',
+    token: 'frontend-design',
+    category: 'frontend',
+    official: true,
+    status: 'keep',
+    verification: 'source-reviewed',
+    notes: ['Good fit for Vicode’s web-app and UI-oriented workflows.'],
+    featured: false
+  },
+  {
+    id: 'anthropic-web-artifacts-builder',
+    name: 'Web Artifacts Builder',
+    publisher: 'Anthropic',
+    description: 'Build complex HTML artifacts with React and Tailwind.',
+    installKind: 'github_folder',
+    providerTargets: ['openai', 'gemini'],
+    browseUrl: 'https://github.com/anthropics/skills/tree/main/skills/web-artifacts-builder',
+    owner: 'anthropics',
+    repo: 'skills',
+    path: 'skills/web-artifacts-builder',
+    token: 'web-artifacts-builder',
+    category: 'frontend',
+    official: true,
+    status: 'keep',
+    verification: 'source-reviewed',
+    notes: ['Directly aligned with artifact and UI-building workflows in Vicode.'],
+    featured: false
+  },
+  {
+    id: 'anthropic-mcp-builder',
+    name: 'MCP Builder',
+    publisher: 'Anthropic',
+    description: 'Create MCP servers to integrate external APIs and services.',
+    installKind: 'github_folder',
+    providerTargets: ['openai', 'gemini'],
+    browseUrl: 'https://github.com/anthropics/skills/tree/main/skills/mcp-builder',
+    owner: 'anthropics',
+    repo: 'skills',
+    path: 'skills/mcp-builder',
+    token: 'mcp-builder',
+    category: 'mcp',
+    official: true,
+    status: 'experimental',
+    verification: 'source-reviewed',
+    notes: ['Powerful but advanced; keep discoverable without presenting it as a default recommendation.'],
+    featured: false
+  },
+  {
+    id: 'anthropic-webapp-testing',
+    name: 'Webapp Testing',
+    publisher: 'Anthropic',
+    description: 'Test local web applications using Playwright.',
+    installKind: 'github_folder',
+    providerTargets: ['openai', 'gemini'],
+    browseUrl: 'https://github.com/anthropics/skills/tree/main/skills/webapp-testing',
+    owner: 'anthropics',
+    repo: 'skills',
+    path: 'skills/webapp-testing',
+    token: 'webapp-testing',
+    category: 'testing',
+    official: true,
+    status: 'keep',
+    verification: 'source-reviewed',
+    notes: ['Strong fit for release-quality UI testing workflows in Vicode.'],
+    featured: false
+  }
+];
+
+export const curatedSkillCatalog: CuratedSkillCatalogEntry[] = [...officialSkillPack, ...extendedSkillCatalog];
+
+export const officialMcpCatalog: CuratedMcpCatalogEntry[] = [
+  {
+    id: 'internal-analysis',
+    name: 'Vicode Internal Analysis MCP',
+    publisher: 'Vicode',
+    description: 'Bounded local analysis MCP for engineering docs, build-control summaries, and safe workspace inspection.',
+    docsUrl: 'https://github.com/openai/codex',
+    category: 'backend',
+    supportState: 'supported',
+    transport: 'stdio',
+    envVars: [],
+    setupNotes: [
+      'Project-scoped setup that binds to the selected trusted workspace root.',
+      'Exposes engineering docs, build-control summary, and bounded source inspection for autonomous analysis.'
+    ]
+  },
+  {
+    id: 'shadcn',
+    name: 'shadcn MCP',
+    publisher: 'shadcn',
+    description: 'Search, browse, and install components from shadcn and compatible registries using natural language.',
+    docsUrl: 'https://ui.shadcn.com/docs/mcp',
+    category: 'ui',
+    supportState: 'supported',
+    transport: 'stdio',
+    command: 'npx',
+    args: ['shadcn@latest', 'mcp'],
+    envVars: [],
+    setupNotes: [
+      'Best fit for React projects using shadcn-compatible component registries.',
+      'Can use the default registry or custom registries configured through components.json.'
+    ]
+  },
+  {
+    id: 'playwright',
+    name: 'Playwright MCP',
+    publisher: 'Microsoft',
+    description: 'Official browser automation MCP for accessibility-first page interaction, testing, and debugging.',
+    docsUrl: 'https://github.com/microsoft/playwright-mcp',
+    category: 'ui',
+    supportState: 'supported',
+    transport: 'stdio',
+    command: 'npx',
+    args: ['@playwright/mcp@latest'],
+    envVars: [],
+    setupNotes: [
+      'Official Microsoft MCP server for browser automation using Playwright.',
+      'Useful for building and testing websites and app flows from natural-language agent prompts.'
+    ]
+  },
+  {
+    id: 'figma',
+    name: 'Figma MCP',
+    publisher: 'Figma',
+    description: 'Provide design context, frame-to-code workflows, and design-system metadata through Figma.',
+    docsUrl: 'https://help.figma.com/hc/en-us/articles/32132100833559-Guide-to-the-Figma-MCP-server',
+    category: 'design',
+    supportState: 'planned',
+    transport: 'remote',
+    envVars: [],
+    setupNotes: [
+      'Officially supported by Figma, but current Vicode MCP support is stdio-only.',
+      'Desktop and remote modes have different account and seat requirements.'
+    ]
+  },
+  {
+    id: 'storybook',
+    name: 'Storybook MCP',
+    publisher: 'Storybook',
+    description: 'Expose component context and story/test workflows from a local Storybook setup.',
+    docsUrl: 'https://storybook.js.org/addons/%40storybook/addon-mcp',
+    category: 'component-system',
+    supportState: 'planned',
+    transport: 'http',
+    envVars: [],
+    setupNotes: [
+      'Requires Storybook in the target repo.',
+      'Current Vicode MCP support is stdio-only, so this stays cataloged but not activatable yet.'
+    ]
+  },
+  {
+    id: 'v0',
+    name: 'v0 MCP',
+    publisher: 'Vercel',
+    description: 'Connect to v0 chats and generation workflows for frontend ideation and implementation.',
+    docsUrl: 'https://v0.app/docs/api/platform/adapters/mcp-server',
+    category: 'ui',
+    supportState: 'planned',
+    transport: 'remote',
+    envVars: ['V0_API_KEY'],
+    setupNotes: [
+      'Useful for frontend generation workflows, but current Vicode MCP support is stdio-only.',
+      'Requires authenticated remote access.'
+    ]
+  }
+];

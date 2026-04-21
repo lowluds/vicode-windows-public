@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "target": "ES2022",
+    "strict": true,
+    "types": ["node", "electron-vite/node"]
+  },
+  "include": [
+    "electron.vite.config.ts",
+    "src/main/**/*.ts",
+    "src/preload/**/*.ts",
+    "src/shared/**/*.ts",
+    "src/providers/**/*.ts",
+    "src/storage/**/*.ts"
+  ],
+  "exclude": [
+    "src/main/app-services.ts",
+    "src/main/window.ts",
+    "src/providers/adapter.ts",
+    "src/providers/manager.ts",
+    "src/providers/models.ts",
+    "src/storage/repository.ts",
+    "src/shared/**/*.test.ts"
+  ]
+}

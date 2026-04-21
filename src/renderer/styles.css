@@ -1,0 +1,2 @@
+/* Compatibility shim: renderer styles now live under ./styles/ */
+@import './styles/index.css';
