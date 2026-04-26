@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 import type { RunActivityViewModel, TerminalCommandViewModel, ThinkingLineViewModel } from '../lib/run-activity';
-import { Reasoning, ReasoningContent, ReasoningTrigger } from './ai-elements/reasoning';
 import { Shimmer } from './ai-elements/shimmer';
 
 export interface LiveRunStatusSnapshot {
@@ -15,26 +14,26 @@ function summarizeLiveActivityLine(line: ThinkingLineViewModel | null) {
   }
 
   if (line.kind === 'web_search') {
-    return line.label || 'Searching the web';
+    return 'Searching the web';
   }
 
   if (line.kind === 'thinking') {
-    return line.label || 'Thinking';
+    return 'Thinking';
   }
 
   if (line.kind === 'tool_call' || line.kind === 'tool_result') {
-    return line.label || 'Working';
+    return 'Working';
   }
 
   if (line.kind === 'file_open' || line.kind === 'file_read' || line.kind === 'file_search') {
-    return line.label || 'Inspecting files';
+    return 'Inspecting files';
   }
 
   if (line.kind === 'file_write' || line.kind === 'file_edit' || line.kind === 'mkdir') {
-    return line.label || 'Working';
+    return 'Editing files';
   }
 
-  return line.label || line.text || 'Working';
+  return 'Working';
 }
 
 function summarizeTerminalCommand(command: TerminalCommandViewModel | null) {
@@ -42,22 +41,15 @@ function summarizeTerminalCommand(command: TerminalCommandViewModel | null) {
     return null;
   }
 
-  const normalizedCommand = command.command?.trim() ?? '';
-  if (normalizedCommand.length > 0) {
-    if (command.status === 'running') {
-      return `Running ${normalizedCommand}`;
-    }
-    if (command.status === 'stopped') {
-      return `Stopped ${normalizedCommand}`;
-    }
-    return `Ran ${normalizedCommand}`;
+  if (command.status === 'running') {
+    return 'Running command';
   }
 
-  if (command.label.trim().length > 0) {
-    return command.label;
+  if (command.status === 'stopped') {
+    return 'Stopped';
   }
 
-  return command.status === 'running' ? 'Running command' : 'Working';
+  return null;
 }
 
 function normalizeReasoningText(line: ThinkingLineViewModel | null) {
@@ -94,16 +86,16 @@ export function deriveLiveRunStatusSnapshot(
       .reverse()
       .find((line) => line.kind !== 'thinking' && line.kind !== 'skill' && line.kind !== 'memory_checkpoint') ?? null;
   const latestTerminalCommand =
-    [...activity.terminalCommands].reverse().find((command) => command.status === 'running') ??
-    activity.terminalCommands.at(-1) ??
-    null;
+    [...activity.terminalCommands].reverse().find((command) => command.status === 'running') ?? null;
 
   const reasoningText = normalizeReasoningText(latestReasoningLine);
   const reasoningLabel = latestReasoningLine?.label?.trim() || null;
   const actionLabel =
     summarizeTerminalCommand(latestTerminalCommand) ??
     summarizeLiveActivityLine(latestActionLine) ??
-    (reasoningText ? null : activity.activeHeading ?? 'Working');
+    summarizeLiveActivityLine(latestReasoningLine) ??
+    activity.activeHeading ??
+    'Working';
 
   return {
     actionLabel,
@@ -114,13 +106,13 @@ export function deriveLiveRunStatusSnapshot(
 
 export function shouldShowLiveRunAction(snapshot: LiveRunStatusSnapshot) {
   const actionLabel = snapshot.actionLabel?.trim() ?? '';
-  return actionLabel.length > 0 && (actionLabel !== 'Thinking' || !snapshot.reasoningText);
+  return actionLabel.length > 0;
 }
 
 export function LiveRunStatus({ activity }: { activity: RunActivityViewModel | null }) {
   const snapshot = useMemo(() => deriveLiveRunStatusSnapshot(activity), [activity]);
 
-  if (!snapshot.actionLabel && !snapshot.reasoningText) {
+  if (!snapshot.actionLabel) {
     return null;
   }
 
@@ -134,26 +126,6 @@ export function LiveRunStatus({ activity }: { activity: RunActivityViewModel | n
             {snapshot.actionLabel!}
           </Shimmer>
         </div>
-      ) : null}
-
-      {snapshot.reasoningText ? (
-        <Reasoning className="thread-live-status-reasoning" isStreaming>
-          <ReasoningTrigger
-            className="thread-live-status-reasoning-trigger"
-            getThinkingMessage={(isStreaming) =>
-              isStreaming ? (
-                <Shimmer className="thread-live-status-thinking-text" duration={1.25}>
-                  Thinking
-                </Shimmer>
-              ) : (
-                <span className="thread-live-status-thinking-static">Reasoning</span>
-              )
-            }
-          />
-          <ReasoningContent className="thread-live-status-reasoning-content">
-            {snapshot.reasoningText}
-          </ReasoningContent>
-        </Reasoning>
       ) : null}
     </section>
   );

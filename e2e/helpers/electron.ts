@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { _electron as electron, expect, type ElectronApplication, type Page } from '@playwright/test';
+import { _electron as electron, expect, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { prepareBetterSqlite3 } from '../../scripts/prepare-better-sqlite3.mjs';
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -115,12 +115,95 @@ export async function waitForBridge(window: Page, requiredPaths: string[] = ['vi
   throw new Error('Vicode preload bridge did not become ready.');
 }
 
+export async function waitForStartupSurface(window: Page, timeoutMs = 30_000) {
+  const startupSurfaces = [
+    {
+      label: 'welcome-screen',
+      isVisible: () => window.getByRole('button', { name: 'Get Started' }).isVisible()
+    },
+    {
+      label: 'composer',
+      isVisible: () => window.getByTestId('composer-input').isVisible()
+    },
+    {
+      label: 'settings-nav',
+      isVisible: () => window.getByTestId('nav-settings').isVisible()
+    },
+    {
+      label: 'empty-thread-open-project',
+      isVisible: () => window.getByRole('button', { name: 'Open project' }).isVisible()
+    }
+  ];
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    for (const surface of startupSurfaces) {
+      try {
+        if (await surface.isVisible()) {
+          return surface.label;
+        }
+      } catch {
+        continue;
+      }
+    }
+    await sleep(250);
+  }
+
+  throw new Error(
+    `Timed out waiting for a startup surface (${startupSurfaces.map((surface) => surface.label).join(', ')}).`
+  );
+}
+
+export async function waitForThreadSurfaceReady(window: Page, timeoutMs = 30_000) {
+  await expect(window.getByTestId('composer-input')).toBeVisible({ timeout: timeoutMs });
+  await sleep(250);
+}
+
+export async function openTitlebarSurface(
+  window: Page,
+  navTestId: string,
+  readyLocator: Locator,
+  timeoutMs = 30_000
+) {
+  const navButton = window.getByTestId(navTestId);
+  await expect(navButton).toBeVisible({ timeout: timeoutMs });
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (await readyLocator.isVisible().catch(() => false)) {
+      return;
+    }
+
+    await navButton.click({ force: attempt > 0 });
+    try {
+      await readyLocator.waitFor({ state: 'visible', timeout: 2_000 });
+      return;
+    } catch {
+      await sleep(250);
+    }
+  }
+
+  await expect(readyLocator).toBeVisible({ timeout: timeoutMs });
+}
+
 export async function dismissWelcomeIfVisible(window: Page) {
   const getStarted = window.getByRole('button', { name: 'Get Started' });
-  if (await getStarted.isVisible().catch(() => false)) {
-    await getStarted.click();
-    await expect(getStarted).toHaveCount(0);
+  const landingPage = window.locator('.landing-page');
+  if ((await getStarted.count().catch(() => 0)) === 0 && (await landingPage.count().catch(() => 0)) === 0) {
+    return;
   }
+
+  await getStarted.click({ force: true }).catch(async () => {
+    await window.locator('.landing-get-started').click({ force: true });
+  });
+
+  await expect(landingPage).toHaveCount(0, { timeout: 2_000 }).catch(async () => {
+    await window.evaluate(async () => {
+      await window.vicode.settings.save({ onboardingComplete: true });
+    });
+    await window.reload({ waitUntil: 'domcontentloaded' });
+    await waitForBridge(window, ['vicode.app']);
+    await expect(landingPage).toHaveCount(0, { timeout: 5_000 });
+  });
 }
 
 export async function launchApp(options?: {
@@ -149,7 +232,9 @@ export async function launchApp(options?: {
   try {
     const window = await getAppWindow(app, options?.timeoutMs);
     await waitForBridge(window, options?.bridgePaths ?? ['vicode.app'], options?.timeoutMs);
+    await waitForStartupSurface(window, options?.timeoutMs);
     await dismissWelcomeIfVisible(window);
+    await waitForStartupSurface(window, options?.timeoutMs);
     if (isolatedState) {
       isolatedStateCleanupByApp.set(app, isolatedState.cleanup);
     }

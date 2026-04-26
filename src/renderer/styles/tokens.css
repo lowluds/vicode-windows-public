@@ -25,23 +25,23 @@
   --ui-text: color-mix(in srgb, var(--foreground) 92%, var(--background) 8%);
   --ui-text-muted: var(--muted-foreground);
   --ui-text-subtle: color-mix(in srgb, var(--muted-foreground) 82%, transparent);
-  --ui-accent: var(--primary);
-  --ui-accent-strong: color-mix(in srgb, var(--primary) 78%, var(--foreground) 22%);
-  --ui-accent-soft: color-mix(in srgb, var(--primary) 12%, transparent);
-  --ui-default-accent: #0078d4;
+  --ui-accent: color-mix(in srgb, var(--foreground) 78%, var(--muted-foreground) 22%);
+  --ui-accent-strong: var(--foreground);
+  --ui-accent-soft: color-mix(in srgb, var(--foreground) 8%, transparent);
+  --ui-default-accent: #3f3f3f;
   --ui-accent-foreground-light: #f5f5f5;
   --ui-accent-foreground-dark: #111111;
   --ui-danger: var(--destructive);
-  --ui-primary-bg: var(--primary);
-  --ui-primary-text: var(--primary-foreground);
-  --ui-primary-bg-hover: color-mix(in srgb, var(--primary) 92%, white 8%);
-  --ui-brand-border: color-mix(in srgb, var(--primary) 28%, transparent);
-  --ui-brand-border-strong: color-mix(in srgb, var(--primary) 38%, transparent);
-  --ui-brand-soft: color-mix(in srgb, var(--primary) 10%, transparent);
-  --ui-brand-soft-strong: color-mix(in srgb, var(--primary) 16%, transparent);
-  --ui-brand-text: color-mix(in srgb, var(--primary) 42%, var(--foreground) 58%);
-  --ui-brand-text-strong: color-mix(in srgb, var(--primary) 24%, var(--foreground) 76%);
-  --ui-brand-text-muted: color-mix(in srgb, var(--primary) 22%, var(--muted-foreground) 78%);
+  --ui-primary-bg: color-mix(in srgb, var(--foreground) 92%, var(--background) 8%);
+  --ui-primary-text: var(--background);
+  --ui-primary-bg-hover: color-mix(in srgb, var(--foreground) 84%, var(--background) 16%);
+  --ui-brand-border: color-mix(in srgb, var(--foreground) 12%, transparent);
+  --ui-brand-border-strong: color-mix(in srgb, var(--foreground) 18%, transparent);
+  --ui-brand-soft: color-mix(in srgb, var(--foreground) 6%, transparent);
+  --ui-brand-soft-strong: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --ui-brand-text: color-mix(in srgb, var(--foreground) 82%, var(--muted-foreground) 18%);
+  --ui-brand-text-strong: var(--foreground);
+  --ui-brand-text-muted: var(--muted-foreground);
   --ui-skill-accent: color-mix(in srgb, var(--foreground) 74%, var(--muted-foreground) 26%);
   --ui-skill-soft: color-mix(in srgb, var(--ui-skill-accent) 14%, transparent);
   --ui-skill-border: color-mix(in srgb, var(--ui-skill-accent) 28%, transparent);
@@ -49,23 +49,23 @@
   --ui-skill-text-strong: color-mix(in srgb, var(--ui-skill-accent) 68%, var(--foreground) 32%);
   --ui-brand-gradient: linear-gradient(
     135deg,
-    color-mix(in srgb, var(--primary) 88%, white 12%),
-    color-mix(in srgb, var(--primary) 56%, var(--background) 44%)
+    color-mix(in srgb, var(--foreground) 14%, var(--ui-surface-2) 86%),
+    color-mix(in srgb, var(--foreground) 8%, var(--background) 92%)
   );
   --ui-brand-panel-gradient:
-    radial-gradient(circle at 50% 28%, color-mix(in srgb, var(--primary) 28%, transparent), transparent 62%),
+    radial-gradient(circle at 50% 28%, color-mix(in srgb, var(--foreground) 8%, transparent), transparent 62%),
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--primary) 28%, transparent),
-      color-mix(in srgb, var(--primary) 18%, var(--background) 82%)
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 4%, var(--background) 96%)
     );
   --ui-brand-panel-shadow:
-    0 0 0 1px color-mix(in srgb, var(--primary) 12%, transparent),
-    0 10px 24px color-mix(in srgb, black 28%, transparent);
+    0 0 0 1px var(--ui-border-soft),
+    var(--ui-shadow-apple);
   --ui-brand-panel-shadow-strong:
-    0 0 0 1px color-mix(in srgb, var(--primary) 16%, transparent),
-    0 0 0 6px color-mix(in srgb, var(--primary) 8%, transparent),
-    0 12px 28px color-mix(in srgb, black 34%, transparent);
+    0 0 0 1px var(--ui-border-strong),
+    0 0 0 4px var(--ui-alpha-04),
+    var(--ui-shadow-apple);
   --ui-success: var(--color-emerald-500);
   --ui-success-text: color-mix(in srgb, var(--color-emerald-500) 68%, var(--foreground) 32%);
   --ui-success-text-strong: color-mix(in srgb, var(--color-emerald-500) 32%, var(--foreground) 68%);
@@ -136,8 +136,8 @@
   --ui-follow-up-badge-follow-up-bg: color-mix(in srgb, var(--ui-success) 18%, transparent);
   --ui-follow-up-badge-follow-up-border: var(--ui-success-border);
   --ui-follow-up-badge-steer-text: var(--ui-brand-text-strong);
-  --ui-follow-up-badge-steer-bg: color-mix(in srgb, var(--primary) 18%, transparent);
-  --ui-follow-up-badge-steer-border: color-mix(in srgb, var(--primary) 28%, transparent);
+  --ui-follow-up-badge-steer-bg: var(--ui-brand-soft-strong);
+  --ui-follow-up-badge-steer-border: var(--ui-brand-border);
   --ui-overlay: color-mix(in srgb, black 22%, transparent);
   --ui-scrollbar-thumb: color-mix(in srgb, var(--foreground) 18%, transparent);
   --ui-shimmer-gradient: linear-gradient(
@@ -163,7 +163,7 @@
   --ui-landing-button-bg-hover: var(--ui-alpha-14);
   --ui-landing-button-border: var(--ui-alpha-14);
   --ui-landing-button-border-hover: var(--ui-alpha-18);
-  --ui-landing-button-shadow: 0 18px 40px color-mix(in srgb, black 22%, transparent);
+  --ui-landing-button-shadow: 0 8px 16px color-mix(in srgb, black 16%, transparent);
   --ui-font-size-xs: 11.5px;
   --ui-font-size-sm: 12.5px;
   --ui-font-size-body-sm: 13px;
@@ -188,23 +188,23 @@
   --ui-radius-lg: 14px;
   --ui-radius-xl: 18px;
   --ui-shadow-menu:
-    0 18px 48px rgba(15, 23, 42, 0.12),
+    0 8px 24px rgba(15, 23, 42, 0.1),
     0 1px 0 rgba(255, 255, 255, 0.72) inset;
   --ui-shadow-card:
-    0 10px 30px rgba(15, 23, 42, 0.08),
-    0 1px 0 rgba(255, 255, 255, 0.86) inset;
+    0 4px 14px rgba(15, 23, 42, 0.07),
+    0 1px 0 rgba(255, 255, 255, 0.82) inset;
   --ui-segmented-control-shadow:
-    0 8px 18px rgba(15, 23, 42, 0.08),
+    0 4px 12px rgba(15, 23, 42, 0.07),
     inset 0 1px 0 rgba(255, 255, 255, 0.72);
   --ui-segmented-control-shadow-light:
-    0 6px 14px rgba(15, 23, 42, 0.06),
+    0 2px 8px rgba(15, 23, 42, 0.05),
     inset 0 1px 0 rgba(255, 255, 255, 0.82);
   --ui-shadow-apple:
-    0 1px 2px color-mix(in srgb, black 14%, transparent),
-    0 3px 8px color-mix(in srgb, black 6%, transparent);
+    0 1px 2px color-mix(in srgb, black 12%, transparent),
+    0 4px 12px color-mix(in srgb, black 7%, transparent);
   --ui-focus:
-    0 0 0 1px color-mix(in srgb, var(--primary) 24%, transparent),
-    0 0 0 4px color-mix(in srgb, var(--primary) 12%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--foreground) 28%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--foreground) 10%, transparent);
   --ui-field-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.86),
     0 1px 2px rgba(15, 23, 42, 0.06);
@@ -235,14 +235,14 @@
   --ui-overlay: color-mix(in srgb, black 68%, transparent);
   --ui-scrollbar-thumb: color-mix(in srgb, var(--foreground) 22%, transparent);
   --ui-shadow-menu:
-    0 24px 64px rgba(0, 0, 0, 0.38),
-    0 2px 0 var(--ui-alpha-04) inset;
+    0 10px 24px rgba(0, 0, 0, 0.32),
+    0 1px 0 var(--ui-alpha-04) inset;
   --ui-shadow-card:
-    0 10px 30px rgba(0, 0, 0, 0.18),
+    0 4px 14px rgba(0, 0, 0, 0.22),
     0 1px 0 var(--ui-alpha-04) inset;
   --ui-shadow-apple:
     0 1px 2px color-mix(in srgb, black 20%, transparent),
-    0 6px 16px color-mix(in srgb, black 14%, transparent);
+    0 6px 14px color-mix(in srgb, black 14%, transparent);
   --ui-field-shadow:
     0 1px 0 rgba(255, 255, 255, 0.03) inset,
     0 0 0 1px rgba(0, 0, 0, 0.04);
@@ -272,6 +272,7 @@ body,
 #root {
   height: 100%;
   margin: 0;
+  overflow: hidden;
 }
 
 body {
@@ -416,12 +417,12 @@ textarea:focus-visible {
 }
 
 .ui-control-primary {
-  border-color: rgba(255, 255, 255, 0.06);
+  border-color: var(--ui-border-soft);
   background: var(--ui-primary-bg);
   color: var(--ui-primary-text);
   box-shadow:
-    0 10px 24px rgba(0, 0, 0, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.24);
+    var(--ui-shadow-apple),
+    inset 0 1px 0 var(--ui-alpha-10);
   font-weight: 650;
 }
 
@@ -442,7 +443,7 @@ textarea:focus-visible {
 .ui-control-primary:hover {
   background: var(--ui-primary-bg-hover);
   color: var(--ui-primary-text);
-  border-color: var(--ui-brand-border);
+  border-color: var(--ui-border-strong);
 }
 
 .ui-control-danger:hover,

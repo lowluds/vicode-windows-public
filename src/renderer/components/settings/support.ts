@@ -61,11 +61,10 @@ export const ollamaTransportModeOptions: Array<{
 ];
 
 export const settingsSections: Array<{ value: SettingsSection; label: string }> = [
-  { value: 'general', label: 'General' },
+  { value: 'general', label: 'App' },
   { value: 'providers', label: 'Providers' },
-  { value: 'personalization', label: 'Profile' },
-  { value: 'diagnostics', label: 'Diagnostics' },
-  { value: 'storage', label: 'Local storage' },
+  { value: 'personalization', label: 'Instructions' },
+  { value: 'diagnostics', label: 'Advanced' },
   { value: 'archived_threads', label: 'Archived threads' }
 ];
 

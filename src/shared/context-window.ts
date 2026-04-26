@@ -39,6 +39,7 @@ const KIMI_CONTEXT_WINDOW_DEFAULT: ContextWindowPolicy = {
 // GPT-5.4 now supports an explicit 1M Codex context window when configured.
 // We keep auto-compaction at 75% so tool-heavy turns still have enough reserve.
 const OPENAI_CONTEXT_WINDOW_BY_MODEL: Record<string, ContextWindowPolicy> = {
+  'gpt-5.5': OPENAI_CONTEXT_WINDOW_DEFAULT,
   'gpt-5.4': {
     maxTokens: 1_000_000,
     autoCompactTokenLimit: 750_000,

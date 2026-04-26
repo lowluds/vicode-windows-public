@@ -71,9 +71,9 @@ export function ExecutionPermissionBar({
   const providerBoundaryNote = providerPermissionBoundaryNote(providerId, executionPermission);
   const ollamaAccessSummary =
     executionPermission === 'default'
-      ? activeRuntimeNetworkPolicy === 'enabled'
-        ? 'Files plus native web research. The model can inspect the trusted workspace and research online headlessly, but it cannot run shell commands.'
-        : 'Files plus native web research. The model can inspect the trusted workspace and research online headlessly, but host-network shell commands stay blocked here.'
+        ? activeRuntimeNetworkPolicy === 'enabled'
+        ? 'Files plus native web research. The model can inspect the workspace and research online headlessly, but it cannot run shell commands.'
+        : 'Files plus native web research. The model can inspect the workspace and research online headlessly, but host-network shell commands stay blocked here.'
       : activeRuntimeCommandPolicy === 'disabled'
         ? 'This workspace keeps commands off, even with Full access.'
         : activeRuntimeCommandPolicy === 'auto_approve'

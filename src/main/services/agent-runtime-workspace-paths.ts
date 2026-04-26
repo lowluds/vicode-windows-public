@@ -27,7 +27,7 @@ export function normalizeWorkspacePath(
 
   if (relativePath.startsWith('..')) {
     throw new Error(
-      `Tool path must stay inside the trusted workspace: ${trimmed}`
+      `Tool path must stay inside the workspace: ${trimmed}`
     );
   }
 

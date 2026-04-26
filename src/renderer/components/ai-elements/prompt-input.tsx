@@ -48,7 +48,7 @@ export const PromptInputTextarea = forwardRef<HTMLTextAreaElement, PromptInputTe
       <textarea
         ref={ref}
         className={cx(
-          'composer-input min-h-[56px] w-full resize-none bg-transparent text-[color:var(--ui-text-title)] outline-none placeholder:text-[color:var(--ui-text-subtle)]',
+          'composer-input w-full resize-none bg-transparent text-[color:var(--ui-text-title)] outline-none placeholder:text-[color:var(--ui-text-subtle)]',
           className
         )}
         {...props}

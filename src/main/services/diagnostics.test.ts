@@ -430,23 +430,51 @@ describe('DiagnosticsService', () => {
     } as unknown as Parameters<typeof DiagnosticsService>[0];
     const providers: ProviderDescriptor[] = [];
 
-    const service = new DiagnosticsService(db, exportsDir, () => ({
-      bootstrap: {
-        config: { connectionState: 'connected' },
-        account: { userId: 'user-1' }
-      },
-      roomSessions: [{ roomId: 'room-1', userId: 'user-1', sessionToken: 'token-1', updatedAt: '2026-03-20T15:00:00.000Z', expiresAt: null }],
-      recentLifecycleEvents: [
-        {
-          recordedAt: '2026-03-20T15:00:01.000Z',
-          level: 'info',
-          event: 'channel.subscribed',
-          roomId: 'room-1'
+    const service = new DiagnosticsService(
+      db,
+      exportsDir,
+      () => ({
+        bootstrap: {
+          config: { connectionState: 'connected' },
+          account: { userId: 'user-1' }
+        },
+        roomSessions: [{ roomId: 'room-1', userId: 'user-1', sessionToken: 'token-1', updatedAt: '2026-03-20T15:00:00.000Z', expiresAt: null }],
+        recentLifecycleEvents: [
+          {
+            recordedAt: '2026-03-20T15:00:01.000Z',
+            level: 'info',
+            event: 'channel.subscribed',
+            roomId: 'room-1'
+          }
+        ]
+      }),
+      () => ({
+        bootstrapDiagnostics: {
+          capturedAt: '2026-03-20T15:05:00.000Z',
+          durationMs: 14,
+          projectCount: 1
+        },
+        skillCatalogDiagnostics: {
+          capturedAt: '2026-03-20T15:05:01.000Z',
+          durationMs: 9,
+          skillCount: 0
         }
-      ]
-    }));
+      })
+    );
     const filePath = await service.export(providers);
     const exported = JSON.parse(await readFile(filePath, 'utf8')) as {
+      instrumentationDiagnostics: {
+        bootstrapDiagnostics: {
+          capturedAt: string;
+          durationMs: number;
+          projectCount: number;
+        } | null;
+        skillCatalogDiagnostics: {
+          capturedAt: string;
+          durationMs: number;
+          skillCount: number;
+        } | null;
+      };
       runProgressDiagnostics: {
         providerEventDiagnostics: Array<Record<string, unknown>>;
         nativeProgressSnapshots: Array<Record<string, unknown>>;
@@ -569,6 +597,18 @@ describe('DiagnosticsService', () => {
         lastTerminalCommand: null
       })
     ]);
+    expect(exported.instrumentationDiagnostics.bootstrapDiagnostics).toEqual(
+      expect.objectContaining({
+        durationMs: 14,
+        projectCount: 1
+      })
+    );
+    expect(exported.instrumentationDiagnostics.skillCatalogDiagnostics).toEqual(
+      expect.objectContaining({
+        durationMs: 9,
+        skillCount: 0
+      })
+    );
     expect(exported.collaborationDiagnostics.bootstrap.config.connectionState).toBe('connected');
     expect(exported.collaborationDiagnostics.roomSessions).toHaveLength(1);
     expect(exported.collaborationDiagnostics.recentLifecycleEvents).toEqual([

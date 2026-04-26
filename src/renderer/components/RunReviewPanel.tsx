@@ -82,7 +82,7 @@ export function RunReviewPanel({ evidence }: { evidence: RunReviewEvidenceViewMo
             <p>
               {providerReportedChanges
                 ? 'Review the provider-reported change summary before treating it as a final diff.'
-                : 'Review the diff summary Vicode captured from the trusted workspace before accepting the result.'}
+                : 'Review the diff summary Vicode captured from the workspace before accepting the result.'}
             </p>
           </div>
           <RunChangeArtifactCard

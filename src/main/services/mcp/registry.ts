@@ -240,7 +240,7 @@ export class McpRegistryService {
 
     if (entry.id === INTERNAL_ANALYSIS_MCP_ID) {
       if (!projectId) {
-        throw new Error('Select a trusted project before adding the internal analysis MCP.');
+        throw new Error('Select a project with a folder before adding the internal analysis MCP.');
       }
 
       const existing = this.listServers().find((server) =>

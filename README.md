@@ -18,7 +18,7 @@ Supported secondary lane:
 
 - `Ollama`
 
-Compatibility-only lanes:
+Temporarily hidden compatibility lanes in the current beta UI:
 
 - `Qwen`
 - `Kimi`
@@ -27,7 +27,7 @@ Compatibility-only lanes:
 
 Current package version:
 
-- `0.2.1`
+- `0.2.6`
 
 Current platform stance:
 
@@ -40,10 +40,11 @@ Current external beta path:
 - packaged Windows installer and unpacked app are the active external handoff path
 - installed Windows builds now check for desktop updates on launch
 - update status is visible in `Settings > General` and in the titlebar
-- when a desktop update is ready, clicking the titlebar update action queues install until the current run finishes instead of interrupting it
+- when a desktop update is ready, clicking the titlebar update action restarts Vicode immediately and installs it, even if that interrupts the current run
 - desktop update artifacts publish to the public release-only repo at [lowluds/vicode-windows-releases](https://github.com/lowluds/vicode-windows-releases)
 - public beta source snapshots should publish through the curated mirror repo at [lowluds/vicode-windows-public](https://github.com/lowluds/vicode-windows-public), not by making the internal working repo public directly
 - npm packaging is still under audit and is not yet a supported end-user install route
+- beta bug reports should go through [GitHub Issues](https://github.com/lowluds/vicode-windows/issues)
 
 If you are beta testing Vicode for the first time, start here:
 
@@ -51,13 +52,13 @@ If you are beta testing Vicode for the first time, start here:
 
 If you are reviewing the current release line in more detail, start here:
 
-- [docs/releases/0.2.1-reviewer-guide.md](./docs/releases/0.2.1-reviewer-guide.md)
+- [docs/releases/0.2.6-reviewer-guide.md](./docs/releases/0.2.6-reviewer-guide.md)
 
 ## What Vicode Already Does
 
 - project and thread persistence
-- trusted workspace gating
-- provider execution across OpenAI, Gemini, Ollama, Qwen, and Kimi
+- attached-workspace execution and bootstrap flows
+- provider execution across OpenAI, Gemini, and Ollama, with parked compatibility adapters for Qwen and Kimi kept in the repo but hidden from the current beta UI
 - skills and MCP integration surfaces
 - run evidence, review surfaces, and transcript compaction
 - collaboration is currently parked from the primary app shell while the core coding workflow is hardened
@@ -121,13 +122,15 @@ That guide covers:
 - OpenAI / Codex CLI
 - Gemini CLI
 - Ollama local and hosted modes as the supported secondary lane
-- current expectations for compatibility-only Qwen and Kimi lanes
+- current expectations for the parked Qwen and Kimi compatibility lanes
 
 Auth/privacy model:
 
 - Vicode can detect an existing provider CLI login on the current machine
 - it does not automatically import, sync, or silently adopt that local sign-in
 - the user explicitly chooses whether to use an existing CLI sign-in inside Vicode
+- Vicode and the OpenAI Codex app are separate applications; Vicode should not
+  mutate the operator's real Codex app files under `~/.codex`
 
 ## Verification
 
@@ -180,7 +183,8 @@ npm run release:win
 
 Use that only when the release is backed by a tag or draft release in
 `lowluds/vicode-windows-releases` and the required `GH_TOKEN` /
-`GITHUB_TOKEN` publish credentials are available.
+`GITHUB_TOKEN` publish credentials are available. The release path should run
+the same Electron native-prep/build steps as `dist:win` before publishing.
 
 ## Contributing
 
@@ -192,8 +196,14 @@ See:
 
 - [CHANGELOG.md](./CHANGELOG.md)
 - [docs/releases/beta-tester-quick-start.md](./docs/releases/beta-tester-quick-start.md)
-- [docs/releases/0.2.1.md](./docs/releases/0.2.1.md)
-- [docs/releases/0.2.1-reviewer-guide.md](./docs/releases/0.2.1-reviewer-guide.md)
+- [docs/releases/0.2.6.md](./docs/releases/0.2.6.md)
+- [docs/releases/0.2.6-reviewer-guide.md](./docs/releases/0.2.6-reviewer-guide.md)
+
+## Internal Engineering Docs
+
+Canonical internal execution docs live in:
+
+- [docs/engineering/README.md](./docs/engineering/README.md)
 
 ## License
 

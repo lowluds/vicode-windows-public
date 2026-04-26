@@ -10,7 +10,7 @@ import {
 } from './runtime-policy';
 
 describe('runtime policy', () => {
-  it('keeps default permissions on trusted-workspace file tools plus native web research', () => {
+  it('keeps default permissions on workspace file tools plus native web research', () => {
     const policy = deriveRuntimePolicy('default');
 
     expect(policy.commandAccess).toBe('blocked');
@@ -187,7 +187,7 @@ describe('runtime policy', () => {
     });
   });
 
-  it('blocks obvious path references that resolve outside the trusted workspace', () => {
+  it('blocks obvious path references that resolve outside the workspace', () => {
     const workspaceRoot = 'C:\\repo';
 
     expect(
@@ -349,8 +349,8 @@ describe('runtime policy', () => {
       )
     ).toEqual(
       expect.objectContaining({
-        deniedReason: expect.stringContaining('absolute path outside the trusted workspace'),
-        pathDeniedReason: expect.stringContaining('absolute path outside the trusted workspace')
+        deniedReason: expect.stringContaining('absolute path outside the workspace'),
+        pathDeniedReason: expect.stringContaining('absolute path outside the workspace')
       })
     );
   });

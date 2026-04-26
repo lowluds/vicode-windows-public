@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import type { BrowserWindow } from 'electron';
 import type { ProviderId } from '../shared/domain';
 import type { MicrophoneAccessStatus } from '../shared/ipc';
+import { createEmptyCollaborationBootstrap } from '../shared/collaboration-bootstrap';
+import { COLLABORATION_ENABLED } from '../shared/product-flags';
 import {
   archivedThreadsListSchema,
   automationIdSchema,
@@ -122,7 +124,7 @@ interface Services {
   composerTextAttachments: ComposerTextAttachmentService;
 }
 
-const DEFAULT_WINDOWS_ACCENT = '#0078d4';
+const DEFAULT_WINDOWS_ACCENT = '#3f3f3f';
 const APP_ZOOM_STEP = 0.1;
 const APP_ZOOM_MIN = 0.75;
 const APP_ZOOM_MAX = 1.6;
@@ -188,7 +190,7 @@ export function registerIpc(
   const unsubscribeAutomations = services.automations.onEvent(sendEvent);
   const unsubscribeSubagents = services.subagents?.onEvent(sendEvent) ?? (() => undefined);
   const unsubscribeOllamaRuntime = services.ollamaRuntime?.onEvent(sendEvent) ?? (() => undefined);
-  const unsubscribeCollab = services.collab?.onEvent(sendEvent) ?? (() => undefined);
+  const unsubscribeCollab = COLLABORATION_ENABLED ? services.collab?.onEvent(sendEvent) ?? (() => undefined) : (() => undefined);
   const unsubscribeUpdater = services.updater?.onEvent(sendEvent) ?? (() => undefined);
 
   ipcMain.handle('app:getBootstrap', async () => {
@@ -539,7 +541,9 @@ export function registerIpc(
   ipcMain.handle('diagnostics:maintainStorage', (_event, input) =>
     services.db.maintainStorage(diagnosticsMaintenanceSchema.parse(input ?? {}))
   );
-  ipcMain.handle('collab:getBootstrap', () => services.collab?.getBootstrap() ?? services.db.getCollabBootstrap());
+  ipcMain.handle('collab:getBootstrap', () =>
+    COLLABORATION_ENABLED ? services.collab?.getBootstrap() ?? services.db.getCollabBootstrap() : createEmptyCollaborationBootstrap()
+  );
   ipcMain.handle('collab:configure', (_event, input) => services.collab?.configure(collabConfigSaveSchema.parse(input)));
   ipcMain.handle('collab:clearConfig', () => services.collab?.clearConfig());
   ipcMain.handle('collab:createGuestProfile', (_event, input) =>

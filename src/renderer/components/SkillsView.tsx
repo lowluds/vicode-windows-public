@@ -5,7 +5,11 @@ import {
   ActionButton,
   DangerButton,
   IconButton,
-  InlineActionButton,
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuItemLabel,
+  MenuTrigger,
   ModalDialog,
   PrimaryButton,
   SelectableSurface,
@@ -13,7 +17,7 @@ import {
   TextArea,
   TextInput
 } from './ui';
-import type { McpServerView, Project, ProviderId, SkillCategory, SkillDefinition, SkillDetail, SkillSaveInput } from '../../shared/domain';
+import type { McpCatalogSnapshot, McpServerView, Project, ProviderId, SkillCategory, SkillDefinition, SkillDetail, SkillSaveInput } from '../../shared/domain';
 import type { CuratedSkillCatalogEntry } from '../../shared/curatedCatalog';
 import { curatedSkillCatalog, officialMcpCatalog, officialSkillPack } from '../../shared/curatedCatalog';
 import {
@@ -27,9 +31,24 @@ import {
   getSkillSyncTargets
 } from '../../shared/skills';
 import {
+  installCatalogSkill as installCatalogSkillFlow,
+  installSuggestedSkill as installSuggestedSkillFlow,
+  refreshCurrentCatalogTab as refreshCurrentCatalogTabFlow,
+  refreshPluginsCatalog as refreshPluginsCatalogFlow,
+  type SkillsCatalogSyncHost
+} from '../lib/skills-catalog-sync';
+import {
+  approveMcpLaunch as approveMcpLaunchFlow,
+  refreshMcpServer as refreshMcpServerFlow,
+  removeMcpServer as removeMcpServerFlow,
+  setupRecommendedMcp as setupRecommendedMcpFlow,
+  toggleMcpServer as toggleMcpServerFlow,
+  type SkillsMcpServerActionsHost
+} from '../lib/skills-mcp-server-actions';
+import {
   AutomationIcon,
-  BookIcon,
   BrushIcon,
+  ChevronDownIcon,
   CheckIcon,
   CloseIcon,
   CopyIcon,
@@ -37,11 +56,13 @@ import {
   DocumentIcon,
   FolderIcon,
   GlobeIcon,
+  LoadingIcon,
   MonitorIcon,
   PlayIcon,
   PlusIcon,
   RefreshIcon,
   SaveIcon,
+  SettingsIcon,
   ShieldIcon,
   SkillsIcon,
   TaskIcon,
@@ -84,14 +105,6 @@ type SuggestedSkill = {
   notes: string[];
   starterPack?: boolean;
   featured?: boolean;
-};
-
-const CATALOG_LINKS: Record<ProviderId, string> = {
-  openai: 'https://github.com/openai/skills/tree/main/skills/.curated',
-  gemini: 'https://geminicli.com/extensions/',
-  ollama: 'https://ollama.com/library',
-  kimi: 'https://moonshotai.github.io/kimi-cli/en/',
-  qwen: 'https://qwenlm.github.io/qwen-code-docs/en/users/overview/'
 };
 
 const PROVIDER_OPTIONS: ProviderId[] = ['openai', 'gemini', 'qwen'];
@@ -229,6 +242,28 @@ function compatibilityLabel(providerTargets: ProviderId[]) {
     return providerTargets.map((providerId) => providerLabel(providerId)).join(' + ');
   }
   return providerTargets[0] ? providerLabel(providerTargets[0]) : 'Provider';
+}
+
+function pluginCategoryLabel(category: (typeof officialMcpCatalog)[number]['category']) {
+  switch (category) {
+    case 'ui':
+      return 'Coding';
+    case 'design':
+    case 'component-system':
+      return 'Design';
+    case 'deploy':
+    case 'backend':
+      return 'Engineering';
+    case 'collaboration':
+      return 'Collaboration';
+    default:
+      return 'Plugins';
+  }
+}
+
+function isSystemSkill(skill: SkillDefinition) {
+  const token = getSkillCommandToken(skill);
+  return token === 'skill-creator' || token === 'plugin-creator' || token === 'skill-installer';
 }
 
 function resolveSkillCategoryLabel(skill: SkillDefinition) {
@@ -415,6 +450,33 @@ export function SkillsView({
   const [mcpCatalog, setMcpCatalog] = useState<McpCatalogSnapshot | null>(null);
   const [settingUpMcpId, setSettingUpMcpId] = useState<string | null>(null);
 
+  const catalogSyncHost: SkillsCatalogSyncHost = {
+    refreshSkills,
+    toggleSkill,
+    syncMcpImports: () => window.vicode.mcp.syncImports(),
+    listMcpServers: () => window.vicode.mcp.listServers(),
+    listMcpCatalog: () => window.vicode.mcp.listCatalog(),
+    installSuggestedSkill: (input) => window.vicode.skills.installSuggested(input),
+    setMcpServers,
+    setMcpCatalog: (value) => setMcpCatalog(value),
+    setInstallingSkillId,
+    showToast
+  };
+  const mcpServerActionsHost: SkillsMcpServerActionsHost = {
+    getSelectedProjectId: () => selectedProject?.id ?? null,
+    getMcpServers: () => mcpServers,
+    setupRecommendedMcp: (input) => window.vicode.mcp.setupRecommended(input),
+    approveMcpLaunch: (serverId) => window.vicode.mcp.approveLaunch(serverId),
+    refreshMcpServer: (serverId) => window.vicode.mcp.refreshServer(serverId),
+    setMcpServerEnabled: (serverId, enabled) => window.vicode.mcp.setEnabled(serverId, enabled),
+    removeMcpServer: (serverId) => window.vicode.mcp.removeServer(serverId),
+    listMcpCatalog: () => window.vicode.mcp.listCatalog(),
+    setMcpServers,
+    setMcpCatalog: (value) => setMcpCatalog(value),
+    setSettingUpMcpId,
+    showToast
+  };
+
   const filteredSkills = useMemo(() => {
     const needle = deferredQuery.trim().toLowerCase();
     if (!needle) {
@@ -581,26 +643,20 @@ export function SkillsView({
     }
   }, [selectedMcpId]);
 
-  const pageShellClass = 'skills-page-shell flex h-full min-h-0 w-full max-w-[1160px] flex-1 flex-col overflow-y-auto px-6';
-  const pageHeaderClass = 'view-header skills-page-header flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between';
-  const pageTitleClass = 'text-[28px] font-semibold tracking-[-0.04em] text-[color:var(--ui-text-title)]';
-  const pageCopyClass = 'max-w-4xl text-[14px] leading-6 text-[color:var(--ui-text-muted)]';
-  const inlineLinkClass =
-    'skills-inline-link text-[color:var(--ui-text)] underline underline-offset-4 transition-colors hover:text-[color:var(--ui-text-title)]';
-  const headerActionsClass = 'skills-header-actions flex items-center gap-3';
-  const controlsRowClass = 'skills-controls-row flex flex-wrap items-center justify-between gap-3';
-  const catalogControlsClass = 'skills-catalog-controls flex flex-wrap items-center gap-3';
-  const subnavClass = 'skills-subnav inline-flex w-fit items-center gap-1 rounded-2xl border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-alpha-03)] p-1';
-  const catalogShellClass = 'skills-catalog-shell flex flex-col gap-6 pb-6';
-  const sectionClass = 'skills-section flex flex-col gap-4';
-  const sectionHeadingClass = 'skills-section-heading flex items-start justify-between gap-3';
-  const listClass = 'skills-list flex flex-col gap-3';
-  const listItemClass =
-    'skills-list-item flex items-start justify-between gap-4 rounded-[24px] border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-surface-2)] p-5 text-left transition-colors hover:border-[color:var(--ui-border)] hover:bg-[color:var(--ui-surface-3)]';
-  const listLeadingClass = 'skills-list-leading flex min-w-0 flex-1 items-start gap-4';
-  const listCopyClass = 'skills-list-copy flex min-w-0 flex-1 flex-col gap-2';
-  const listTitleRowClass = 'skills-list-title-row flex flex-wrap items-center gap-2';
-  const listTrailingClass = 'skills-list-trailing flex shrink-0 items-center gap-2';
+  const pageShellClass = 'skills-page-shell';
+  const headerActionsClass = 'skills-header-actions';
+  const controlsRowClass = 'skills-controls-row';
+  const catalogControlsClass = 'skills-catalog-controls';
+  const subnavClass = 'skills-subnav';
+  const catalogShellClass = 'skills-catalog-shell';
+  const sectionClass = 'skills-section';
+  const sectionHeadingClass = 'skills-section-heading';
+  const listClass = 'skills-list';
+  const listItemClass = 'skills-list-item';
+  const listLeadingClass = 'skills-list-leading';
+  const listCopyClass = 'skills-list-copy';
+  const listTitleRowClass = 'skills-list-title-row';
+  const listTrailingClass = 'skills-list-trailing';
   const isPluginTab = catalogTab === 'plugins';
 
   function updateDraft(patch: Partial<SkillDraft>) {
@@ -717,41 +773,11 @@ export function SkillsView({
   }
 
   async function handleInstallCatalogSkill(skill: SkillDefinition) {
-    try {
-      await toggleSkill(skill.id, true);
-      showToast('info', `Installed ${skill.name}.`);
-    } catch (error) {
-      showToast('error', error instanceof Error ? error.message : `Failed to install ${skill.name}.`);
-    }
+    await installCatalogSkillFlow(catalogSyncHost, skill);
   }
 
   async function handleInstallSuggested(skill: SuggestedSkill) {
-    setInstallingSkillId(skill.id);
-
-    try {
-      const result = await window.vicode.skills.installSuggested({
-        installKind: skill.installKind,
-        providerId: skill.providerId ?? null,
-        providerTargets: skill.providerTargets,
-        token: skill.token,
-        installTarget: skill.installTarget ?? skill.browseUrl,
-        owner: skill.owner ?? null,
-        repo: skill.repo ?? null,
-        path: skill.path ?? null,
-        name: skill.name,
-        description: skill.description,
-        browseUrl: skill.browseUrl,
-        category: skill.category
-      });
-      if (result.status === 'completed') {
-        await refreshSkills();
-      }
-      showToast('info', result.message || `Installed ${skill.name}.`);
-    } catch (error) {
-      showToast('error', error instanceof Error ? error.message : `Failed to install ${skill.name}.`);
-    } finally {
-      setInstallingSkillId(null);
-    }
+    await installSuggestedSkillFlow(catalogSyncHost, skill);
   }
 
   async function handleRevealPath(path: string) {
@@ -759,26 +785,11 @@ export function SkillsView({
   }
 
   async function refreshPluginsCatalog(showMessage = true) {
-    await window.vicode.mcp.syncImports();
-    const [servers, catalog] = await Promise.all([window.vicode.mcp.listServers(), window.vicode.mcp.listCatalog()]);
-    setMcpServers(servers);
-    setMcpCatalog(catalog);
-    if (showMessage) {
-      showToast('info', 'Plugins refreshed.');
-    }
+    await refreshPluginsCatalogFlow(catalogSyncHost, showMessage);
   }
 
   async function handleRefreshCurrentTab() {
-    try {
-      if (catalogTab === 'plugins') {
-        await refreshPluginsCatalog();
-      } else {
-        await refreshSkills();
-        showToast('info', 'Skills refreshed.');
-      }
-    } catch (error) {
-      showToast('error', error instanceof Error ? error.message : `Failed to refresh ${catalogTab}.`);
-    }
+    await refreshCurrentCatalogTabFlow(catalogSyncHost, catalogTab);
   }
 
   function isAttachable(skill: SkillDefinition) {
@@ -828,91 +839,24 @@ export function SkillsView({
     );
   }
 
-  function upsertMcpServer(server: McpServerView) {
-    setMcpServers((current) => {
-      const next = current.filter((item) => item.id !== server.id);
-      next.push(server);
-      return next.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }));
-    });
-  }
-
   async function handleSetupRecommendedMcp(entryId: string) {
-    setSettingUpMcpId(entryId);
-    try {
-      const server = await window.vicode.mcp.setupRecommended({
-        entryId,
-        projectId: entryId === 'internal-analysis' ? selectedProject?.id ?? null : null
-      });
-      upsertMcpServer(server);
-      setMcpCatalog(await window.vicode.mcp.listCatalog());
-      showToast(
-        'info',
-        server.launchApproved
-          ? `${server.name} added and started.`
-          : `${server.name} added. Launch remains approval-gated.`
-      );
-    } catch (error) {
-      showToast('error', error instanceof Error ? error.message : 'Failed to configure MCP integration.');
-    } finally {
-      setSettingUpMcpId(null);
-    }
+    await setupRecommendedMcpFlow(mcpServerActionsHost, entryId);
   }
 
   async function handleApproveMcpLaunch(serverId: string) {
-    setSettingUpMcpId(serverId);
-    try {
-      const server = await window.vicode.mcp.approveLaunch(serverId);
-      upsertMcpServer(server);
-      setMcpCatalog(await window.vicode.mcp.listCatalog());
-      showToast('info', `${server.name} approved and started.`);
-    } catch (error) {
-      showToast('error', error instanceof Error ? error.message : 'Failed to approve MCP server launch.');
-    } finally {
-      setSettingUpMcpId(null);
-    }
+    await approveMcpLaunchFlow(mcpServerActionsHost, serverId);
   }
 
   async function handleRefreshMcpServer(serverId: string) {
-    setSettingUpMcpId(serverId);
-    try {
-      const server = await window.vicode.mcp.refreshServer(serverId);
-      upsertMcpServer(server);
-      setMcpCatalog(await window.vicode.mcp.listCatalog());
-      showToast('info', `${server.name} refreshed.`);
-    } catch (error) {
-      showToast('error', error instanceof Error ? error.message : 'Failed to refresh MCP server.');
-    } finally {
-      setSettingUpMcpId(null);
-    }
+    await refreshMcpServerFlow(mcpServerActionsHost, serverId);
   }
 
   async function handleToggleMcpServer(server: McpServerView, enabled: boolean) {
-    setSettingUpMcpId(server.id);
-    try {
-      const updated = await window.vicode.mcp.setEnabled(server.id, enabled);
-      upsertMcpServer(updated);
-      setMcpCatalog(await window.vicode.mcp.listCatalog());
-      showToast('info', `${server.name} ${enabled ? 'enabled' : 'disabled'}.`);
-    } catch (error) {
-      showToast('error', error instanceof Error ? error.message : `Failed to ${enabled ? 'enable' : 'disable'} MCP server.`);
-    } finally {
-      setSettingUpMcpId(null);
-    }
+    await toggleMcpServerFlow(mcpServerActionsHost, server, enabled);
   }
 
   async function handleRemoveMcpServer(serverId: string) {
-    setSettingUpMcpId(serverId);
-    try {
-      const server = mcpServers.find((item) => item.id === serverId) ?? null;
-      await window.vicode.mcp.removeServer(serverId);
-      setMcpServers((current) => current.filter((item) => item.id !== serverId));
-      setMcpCatalog(await window.vicode.mcp.listCatalog());
-      showToast('info', `${server?.name ?? 'Integration'} removed.`);
-    } catch (error) {
-      showToast('error', error instanceof Error ? error.message : 'Failed to remove MCP server.');
-    } finally {
-      setSettingUpMcpId(null);
-    }
+    await removeMcpServerFlow(mcpServerActionsHost, serverId);
   }
 
   function renderSkillCard(skill: SkillDefinition) {
@@ -926,31 +870,26 @@ export function SkillsView({
       >
         <div className={listLeadingClass}>
           <SkillAvatar skill={skill} />
-              <div className={listCopyClass}>
-                <div className={listTitleRowClass}>
-                  <strong>{skill.name}</strong>
-                </div>
-                  <p>{skill.description}</p>
-                  <div className="skill-meta">
-                    <span className="skill-meta-category">{resolveSkillCategoryLabel(skill)}</span>
-                    <span className="skill-meta-compatibility">{compatibilityLabel(skill.providerTargets)}</span>
-                </div>
-              </div>
+          <div className={listCopyClass}>
+            <div className={listTitleRowClass}>
+              <strong>{skill.name}</strong>
+            </div>
+            <p>{skill.description}</p>
+          </div>
         </div>
         <div className={listTrailingClass}>
           {installable ? (
-            <PrimaryButton
+            <IconButton
               size="compact"
-              className="min-w-[88px]"
-              leadingIcon={<PlusIcon />}
-              aria-label={`Install ${skill.name}`}
+              className="skills-row-action"
+              label={`Install ${skill.name}`}
               onClick={(event) => {
                 event.stopPropagation();
                 void handleInstallCatalogSkill(skill);
               }}
             >
-              Install
-            </PrimaryButton>
+              <PlusIcon />
+            </IconButton>
           ) : attached ? (
             <span className="skills-card-state is-attached">
               <CheckIcon />
@@ -973,11 +912,11 @@ export function SkillsView({
     }
 
     return (
-      <section className={sectionClass}>
+      <section key={title} className={sectionClass}>
         <div className={sectionHeadingClass}>
           <h3>{title}</h3>
         </div>
-                  <div className={listClass}>
+        <div className={listClass}>
           {items.map(renderSkillCard)}
           {suggestedItems.map((skill) => (
             <SelectableSurface
@@ -992,31 +931,23 @@ export function SkillsView({
                 <div className={listCopyClass}>
                   <div className={listTitleRowClass}>
                     <strong>{skill.name}</strong>
-                    {skill.official ? <span className="skills-official-badge">Official</span> : null}
-                    {skill.status === 'experimental' ? <span className="skills-experimental-badge">Experimental</span> : null}
-                    {skill.publisher ? <span className="skills-publisher-badge">{skill.publisher}</span> : null}
                   </div>
                   <p>{skill.description}</p>
-                  <div className="skill-meta">
-                    <span className="skill-meta-category">{skillCategoryLabel(skill.category)}</span>
-                    <span className="skill-meta-compatibility">{compatibilityLabel(skill.providerTargets)}</span>
-                  </div>
                 </div>
               </div>
               <div className={listTrailingClass}>
-                <PrimaryButton
+                <IconButton
                   size="compact"
-                  className="min-w-[88px]"
-                  leadingIcon={<PlusIcon />}
-                  aria-label={`Install ${skill.name}`}
+                  className="skills-row-action"
+                  label={`Install ${skill.name}`}
                   disabled={installingSkillId === skill.id}
                   onClick={(event) => {
                     event.stopPropagation();
                     void handleInstallSuggested(skill);
                   }}
                 >
-                  {installingSkillId === skill.id ? 'Installing…' : 'Install'}
-                </PrimaryButton>
+                  {installingSkillId === skill.id ? <LoadingIcon /> : <PlusIcon />}
+                </IconButton>
               </div>
             </SelectableSurface>
           ))}
@@ -1026,373 +957,216 @@ export function SkillsView({
   }
 
   function renderPluginsSection() {
-    const selectedEntry =
-      filteredPluginEntries.find((entry) => entry.id === selectedMcpId) ?? filteredPluginEntries[0] ?? null;
-    const selectedConfiguredServer = selectedEntry ? findConfiguredMcpServer(selectedEntry.id) : null;
-    const selectedToolPreview = selectedConfiguredServer
-      ? (mcpCatalog?.tools ?? []).filter((tool) => tool.serverId === selectedConfiguredServer.id).slice(0, 4)
-      : [];
-    const selectedResourcePreview = selectedConfiguredServer
-      ? (mcpCatalog?.resources ?? []).filter((resource) => resource.serverId === selectedConfiguredServer.id).slice(0, 3)
-      : [];
-    const selectedPromptPreview = selectedConfiguredServer
-      ? (mcpCatalog?.prompts ?? []).filter((prompt) => prompt.serverId === selectedConfiguredServer.id).slice(0, 3)
-      : [];
     const configuredServers = filteredConfiguredServers;
+    const featuredEntries = filteredPluginEntries.filter((entry) => entry.supportState === 'supported');
+    const categorizedEntries = filteredPluginEntries.filter((entry) => entry.supportState !== 'supported');
+    const pluginSections = ['Design', 'Engineering', 'Collaboration', 'Plugins']
+      .map((title) => ({
+        title,
+        entries: categorizedEntries.filter((entry) => pluginCategoryLabel(entry.category) === title)
+      }))
+      .filter((section) => section.entries.length > 0);
 
-    return (
-      <section className={sectionClass}>
-        <div className="skills-section-heading is-stack flex flex-col gap-2">
-          <div>
-            <h3>Recommended plugins</h3>
-            <p className="skills-section-note max-w-4xl text-[14px] leading-6 text-[color:var(--ui-text-muted)]">
-              Connect app-managed MCP plugins from the same shell as your skills. Recommended entries are Vicode-vetted
-              stdio servers, and custom plugins can be added here too. Live Vicode-managed MCP execution is currently
-              verified on the app-owned runtime lane.
-            </p>
+    function renderPluginEntry(entry: (typeof officialMcpCatalog)[number]) {
+      const configuredServer = findConfiguredMcpServer(entry.id);
+      const isConfigured = Boolean(configuredServer);
+      const needsApproval = configuredServer?.state?.status === 'approval_required';
+
+      return (
+        <SelectableSurface
+          key={entry.id}
+          className={`skills-list-item skills-integration-item ${selectedMcpId === entry.id ? 'is-selected' : ''}`}
+          selected={selectedMcpId === entry.id}
+          data-testid={`mcp-official-entry-${entry.id}`}
+          onPress={() => {
+            setSelectedMcpId(entry.id);
+            void handleBrowse(entry.docsUrl);
+          }}
+        >
+          <div className={listLeadingClass}>
+            <span className={`skills-avatar is-vicode ${isConfigured ? 'is-installed' : 'is-available'}`} aria-hidden="true">
+              <GlobeIcon size={20} />
+            </span>
+            <div className={listCopyClass}>
+              <div className={listTitleRowClass}>
+                <strong>{entry.name}</strong>
+              </div>
+              <p>{entry.description}</p>
+            </div>
+          </div>
+          <div className={listTrailingClass}>
+            {needsApproval && configuredServer ? (
+              <IconButton
+                size="compact"
+                className="skills-row-action"
+                data-testid={`mcp-official-approve-${entry.id}`}
+                label={`Approve ${entry.name}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleApproveMcpLaunch(configuredServer.id);
+                }}
+                disabled={settingUpMcpId === configuredServer.id}
+              >
+                {settingUpMcpId === configuredServer.id ? <LoadingIcon /> : <PlayIcon />}
+              </IconButton>
+            ) : null}
+            {entry.supportState === 'supported' && !isConfigured ? (
+              <IconButton
+                size="compact"
+                className="skills-row-action"
+                data-testid={`mcp-official-add-${entry.id}`}
+                label={`Add ${entry.name}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleSetupRecommendedMcp(entry.id);
+                }}
+                disabled={settingUpMcpId === entry.id}
+              >
+                {settingUpMcpId === entry.id ? <LoadingIcon /> : <PlusIcon />}
+              </IconButton>
+            ) : null}
+            {isConfigured && !needsApproval ? (
+              <span className="skills-card-state is-enabled">
+                <CheckIcon />
+              </span>
+            ) : null}
+            {entry.supportState !== 'supported' ? (
+              <IconButton
+                size="compact"
+                className="skills-row-action is-disabled"
+                label={`${entry.name} is planned`}
+                disabled
+              >
+                <PlusIcon />
+              </IconButton>
+            ) : null}
+          </div>
+        </SelectableSurface>
+      );
+    }
+
+    function renderConnectedPlugin(server: McpServerView) {
+      const officialEntry = findOfficialEntryForServer(server);
+      const isBusy = settingUpMcpId === server.id;
+      const status = server.state?.status ?? 'unknown';
+
+      return (
+        <div key={server.id} className="skills-list-item skills-integration-item" data-testid={`mcp-configured-card-${server.id}`}>
+          <div className={listLeadingClass}>
+            <span className={`skills-avatar is-vicode ${status === 'connected' ? 'is-installed' : 'is-available'}`} aria-hidden="true">
+              <GlobeIcon size={20} />
+            </span>
+            <div className={listCopyClass}>
+              <div className={listTitleRowClass}>
+                <strong>{server.name}</strong>
+                <span
+                  className={`skills-integration-status ${status === 'connected' ? 'is-configured' : status === 'error' ? 'is-planned' : 'is-supported'}`}
+                  data-testid={`mcp-configured-state-${server.id}`}
+                >
+                  {status}
+                </span>
+              </div>
+              <p>{officialEntry?.description ?? `${server.transportType} integration managed by Vicode.`}</p>
+            </div>
+          </div>
+          <div className={listTrailingClass}>
+            {status === 'approval_required' ? (
+              <IconButton
+                size="compact"
+                className="skills-row-action"
+                data-testid={`mcp-configured-approve-${server.id}`}
+                label={`Approve ${server.name}`}
+                onClick={() => void handleApproveMcpLaunch(server.id)}
+                disabled={isBusy}
+              >
+                {isBusy ? <LoadingIcon /> : <PlayIcon />}
+              </IconButton>
+            ) : null}
+            {server.enabled ? (
+              <IconButton
+                size="compact"
+                className="skills-row-action"
+                data-testid={`mcp-configured-disable-${server.id}`}
+                label={`Disable ${server.name}`}
+                onClick={() => void handleToggleMcpServer(server, false)}
+                disabled={isBusy}
+              >
+                <CloseIcon />
+              </IconButton>
+            ) : (
+              <IconButton
+                size="compact"
+                className="skills-row-action"
+                data-testid={`mcp-configured-enable-${server.id}`}
+                label={`Enable ${server.name}`}
+                onClick={() => void handleToggleMcpServer(server, true)}
+                disabled={isBusy}
+              >
+                <PlayIcon />
+              </IconButton>
+            )}
+            <IconButton
+              size="compact"
+              className="skills-row-action"
+              data-testid={`mcp-configured-refresh-${server.id}`}
+              label={`Refresh ${server.name}`}
+              onClick={() => void handleRefreshMcpServer(server.id)}
+              disabled={isBusy || !server.enabled}
+            >
+              <RefreshIcon />
+            </IconButton>
+            <IconButton
+              size="compact"
+              className="skills-row-action"
+              data-testid={`mcp-configured-remove-${server.id}`}
+              label={`Remove ${server.name}`}
+              onClick={() => void handleRemoveMcpServer(server.id)}
+              disabled={isBusy}
+            >
+              <TrashIcon />
+            </IconButton>
           </div>
         </div>
-        <div className="skills-list">
-          {filteredPluginEntries.map((entry) => {
-            const configuredServer = findConfiguredMcpServer(entry.id);
-            const isConfigured = Boolean(configuredServer);
-            const statusLabel = isConfigured ? 'Configured' : entry.supportState === 'supported' ? 'Supported now' : 'Planned';
-            const needsApproval = configuredServer?.state?.status === 'approval_required';
+      );
+    }
 
-            return (
-              <SelectableSurface
-                key={entry.id}
-                className={`skills-list-item skills-integration-item ${selectedMcpId === entry.id ? 'is-selected' : ''}`}
-                selected={selectedMcpId === entry.id}
-                data-testid={`mcp-official-entry-${entry.id}`}
-                onPress={() => setSelectedMcpId(entry.id)}
-              >
-                <div className="skills-list-leading">
-                  <span className={`skills-avatar is-vicode ${isConfigured ? 'is-installed' : 'is-available'}`} aria-hidden="true">
-                    <GlobeIcon size={20} />
-                  </span>
-                  <div className="skills-list-copy">
-                    <div className="skills-list-title-row">
-                      <strong>{entry.name}</strong>
-                      <span
-                        className={`skills-integration-status ${isConfigured ? 'is-configured' : entry.supportState === 'supported' ? 'is-supported' : 'is-planned'}`}
-                      >
-                        {statusLabel}
-                      </span>
-                    </div>
-                    <p>{entry.description}</p>
-                    <div className="skill-meta">
-                      <span className="skill-meta-category">{entry.category}</span>
-                      <span className="skill-meta-compatibility">{entry.publisher}</span>
-                    </div>
-                    <ul className="skills-integration-notes">
-                      {entry.setupNotes.slice(0, 2).map((note) => (
-                        <li key={note}>{note}</li>
-                      ))}
-                    </ul>
-                    {isConfigured && configuredServer ? (
-                      <p className="skills-integration-footnote">
-                        Connected as <code>{configuredServer.name}</code>.
-                      </p>
-                    ) : entry.command && entry.args?.length ? (
-                      <p className="skills-integration-footnote">
-                        Default command: <code>{[entry.command, ...entry.args].join(' ')}</code>
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="skills-list-trailing">
-                  {needsApproval && configuredServer ? (
-                    <PrimaryButton
-                      size="compact"
-                      data-testid={`mcp-official-approve-${entry.id}`}
-                      leadingIcon={<PlayIcon />}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void handleApproveMcpLaunch(configuredServer.id);
-                      }}
-                      disabled={settingUpMcpId === configuredServer.id}
-                    >
-                      {settingUpMcpId === configuredServer.id ? 'Starting…' : 'Approve'}
-                    </PrimaryButton>
-                  ) : null}
-                  {entry.supportState === 'supported' && !isConfigured ? (
-                    <PrimaryButton
-                      size="compact"
-                      data-testid={`mcp-official-add-${entry.id}`}
-                      leadingIcon={<PlusIcon />}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void handleSetupRecommendedMcp(entry.id);
-                      }}
-                      disabled={settingUpMcpId === entry.id}
-                    >
-                      {settingUpMcpId === entry.id ? 'Adding…' : 'Add'}
-                    </PrimaryButton>
-                  ) : null}
-                  <ActionButton
-                    size="compact"
-                    tone="quiet"
-                    leadingIcon={<BookIcon />}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void handleBrowse(entry.docsUrl);
-                    }}
-                  >
-                    Docs
-                  </ActionButton>
-                </div>
-              </SelectableSurface>
-            );
-          })}
-        </div>
+    function renderPluginCatalogSection(title: string, entries: (typeof officialMcpCatalog)[number][]) {
+      if (entries.length === 0) {
+        return null;
+      }
+
+      return (
+        <section key={title} className={sectionClass}>
+          <div className={sectionHeadingClass}>
+            <h3>{title}</h3>
+          </div>
+          <div className={listClass}>
+            {entries.map(renderPluginEntry)}
+          </div>
+        </section>
+      );
+    }
+
+    return (
+      <>
+        {configuredServers.length > 0 ? (
+          <section className={sectionClass}>
+            <div className={sectionHeadingClass}>
+              <h3>Connected</h3>
+            </div>
+            <div className={`${listClass} skills-list-single-column`}>
+              {configuredServers.map(renderConnectedPlugin)}
+            </div>
+          </section>
+        ) : null}
+        {renderPluginCatalogSection('Featured', featuredEntries)}
+        {pluginSections.map((section) => renderPluginCatalogSection(section.title, section.entries))}
         {filteredPluginEntries.length === 0 && configuredServers.length === 0 ? (
           <div className="empty-state compact">
             <p>No plugins match this search yet.</p>
           </div>
         ) : null}
-        {selectedEntry ? (
-          <div className="skills-integration-detail skills-plugin-detail flex flex-col gap-4 rounded-[28px] border border-[color:var(--ui-border-soft)] p-6">
-            <div className="skills-integration-detail-header flex items-start justify-between gap-4">
-              <div>
-                <h4>{selectedEntry.name}</h4>
-                <p>{selectedEntry.description}</p>
-              </div>
-              <div className="skills-detail-meta">
-                <span>{selectedEntry.publisher}</span>
-                <span>{selectedEntry.category}</span>
-                <span>{selectedConfiguredServer?.state?.status ?? (selectedEntry.supportState === 'supported' ? 'not configured' : 'planned')}</span>
-              </div>
-            </div>
-            <div className="skills-integration-detail-grid">
-              <div className="skills-integration-detail-card">
-                <strong>Command</strong>
-                <p>
-                  {selectedEntry.command ? <code>{[selectedEntry.command, ...(selectedEntry.args ?? [])].join(' ')}</code> : 'No local stdio command yet.'}
-                </p>
-              </div>
-              <div className="skills-integration-detail-card">
-                <strong>Environment</strong>
-                <p>
-                  {selectedEntry.envVars.length > 0 ? selectedEntry.envVars.join(', ') : 'No required environment variables documented.'}
-                </p>
-              </div>
-              <div className="skills-integration-detail-card">
-                <strong>Connection</strong>
-                <p>
-                  {selectedConfiguredServer
-                    ? `${selectedConfiguredServer.state?.status ?? 'configured'}`
-                    : 'Not configured in this app yet.'}
-                </p>
-              </div>
-              <div className="skills-integration-detail-card">
-                <strong>Catalog counts</strong>
-                <p>
-                  {selectedConfiguredServer?.state
-                    ? `${selectedConfiguredServer.state.toolCount} tools, ${selectedConfiguredServer.state.resourceCount} resources, ${selectedConfiguredServer.state.promptCount} prompts`
-                    : 'No live catalog data yet.'}
-                </p>
-              </div>
-            </div>
-            {selectedConfiguredServer?.envKeys.length ? (
-              <p className="skills-integration-footnote">
-                Configured env keys: <code>{selectedConfiguredServer.envKeys.join(', ')}</code>
-              </p>
-            ) : null}
-            <p className="skills-integration-footnote">
-              Plugins are app-managed MCP servers. They do not appear in the composer <code>$skill</code> picker because
-              skills and plugins are separate surfaces.
-            </p>
-            {selectedConfiguredServer ? (
-              <div className="skills-integration-preview-grid grid grid-cols-1 gap-3 xl:grid-cols-3">
-                <div className="skills-integration-preview-card rounded-2xl border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-alpha-03)] p-4">
-                  <strong>Tools</strong>
-                  {selectedToolPreview.length > 0 ? (
-                    <ul>
-                      {selectedToolPreview.map((tool) => (
-                        <li key={`${tool.serverId}:${tool.name}`}>
-                          <code>{tool.name}</code>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p>No tools discovered yet.</p>
-                  )}
-                </div>
-                <div className="skills-integration-preview-card rounded-2xl border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-alpha-03)] p-4">
-                  <strong>Resources</strong>
-                  {selectedResourcePreview.length > 0 ? (
-                    <ul>
-                      {selectedResourcePreview.map((resource) => (
-                        <li key={`${resource.serverId}:${resource.uri}`}>
-                          <code>{resource.name || resource.uri}</code>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p>No resources discovered yet.</p>
-                  )}
-                </div>
-                <div className="skills-integration-preview-card rounded-2xl border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-alpha-03)] p-4">
-                  <strong>Prompts</strong>
-                  {selectedPromptPreview.length > 0 ? (
-                    <ul>
-                      {selectedPromptPreview.map((prompt) => (
-                        <li key={`${prompt.serverId}:${prompt.name}`}>
-                          <code>{prompt.name}</code>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p>No prompts discovered yet.</p>
-                  )}
-                </div>
-              </div>
-            ) : null}
-            {selectedConfiguredServer ? (
-              <div className="skills-integration-detail-actions">
-                <ActionButton
-                  size="compact"
-                  leadingIcon={<RefreshIcon />}
-                  onClick={() => void handleRefreshMcpServer(selectedConfiguredServer.id)}
-                  disabled={settingUpMcpId === selectedConfiguredServer.id}
-                >
-                  {settingUpMcpId === selectedConfiguredServer.id ? 'Refreshing…' : 'Refresh'}
-                </ActionButton>
-                <ActionButton size="compact" tone="quiet" leadingIcon={<BookIcon />} onClick={() => void handleBrowse(selectedEntry.docsUrl)}>
-                  Open docs
-                </ActionButton>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-        {configuredServers.length > 0 ? (
-          <div className="skills-integration-configured flex flex-col gap-4">
-            <div className="skills-integration-detail-header flex items-start justify-between gap-4">
-              <div>
-                <h4>Connected plugins</h4>
-                <p>App-managed MCP connections that currently exist in this workspace state.</p>
-              </div>
-            </div>
-            <div className={`${listClass} skills-list-single-column`}>
-              {configuredServers.map((server) => {
-                const officialEntry = findOfficialEntryForServer(server);
-                const serverTools = (mcpCatalog?.tools ?? []).filter((tool) => tool.serverId === server.id).slice(0, 3);
-                const serverResources = (mcpCatalog?.resources ?? []).filter((resource) => resource.serverId === server.id).slice(0, 2);
-                const serverPrompts = (mcpCatalog?.prompts ?? []).filter((prompt) => prompt.serverId === server.id).slice(0, 2);
-                const isBusy = settingUpMcpId === server.id;
-                const status = server.state?.status ?? 'unknown';
-
-                return (
-                  <div key={server.id} className="skills-list-item skills-integration-item" data-testid={`mcp-configured-card-${server.id}`}>
-                    <div className="skills-list-leading">
-                      <span className={`skills-avatar is-vicode ${status === 'connected' ? 'is-installed' : 'is-available'}`} aria-hidden="true">
-                        <GlobeIcon size={20} />
-                      </span>
-                      <div className="skills-list-copy">
-                        <div className="skills-list-title-row">
-                          <strong>{server.name}</strong>
-                          <span
-                            className={`skills-integration-status ${status === 'connected' ? 'is-configured' : status === 'error' ? 'is-planned' : 'is-supported'}`}
-                            data-testid={`mcp-configured-state-${server.id}`}
-                          >
-                            {status}
-                          </span>
-                        </div>
-                        <p>{officialEntry?.description ?? `${server.transportType} integration managed by Vicode.`}</p>
-                        <div className="skill-meta">
-                          <span className="skill-meta-category">{officialEntry?.category ?? 'custom'}</span>
-                          <span className="skill-meta-compatibility">{server.toolInvocationMode}</span>
-                        </div>
-                        <p className="skills-integration-footnote">
-                          <code>{[server.command, ...server.args].join(' ')}</code>
-                        </p>
-                        <p className="skills-integration-footnote">
-                          {server.state
-                            ? `${server.state.toolCount} tools, ${server.state.resourceCount} resources, ${server.state.promptCount} prompts`
-                            : 'No live catalog data yet.'}
-                        </p>
-                        {serverTools.length > 0 || serverResources.length > 0 || serverPrompts.length > 0 ? (
-                          <ul className="skills-integration-notes">
-                            {serverTools.map((tool) => (
-                              <li key={`${server.id}:tool:${tool.name}`} data-testid={`mcp-configured-tool-${server.id}-${tool.name}`}>
-                                Tool: <code>{tool.name}</code>
-                              </li>
-                            ))}
-                            {serverResources.map((resource) => (
-                              <li key={`${server.id}:resource:${resource.uri}`} data-testid={`mcp-configured-resource-${server.id}-${resource.uri}`}>
-                                Resource: <code>{resource.name || resource.uri}</code>
-                              </li>
-                            ))}
-                            {serverPrompts.map((prompt) => (
-                              <li key={`${server.id}:prompt:${prompt.name}`} data-testid={`mcp-configured-prompt-${server.id}-${prompt.name}`}>
-                                Prompt: <code>{prompt.name}</code>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : null}
-                      </div>
-                    </div>
-                    <div className="skills-list-trailing">
-                      {status === 'approval_required' ? (
-                        <PrimaryButton
-                          size="compact"
-                          data-testid={`mcp-configured-approve-${server.id}`}
-                          leadingIcon={<PlayIcon />}
-                          onClick={() => void handleApproveMcpLaunch(server.id)}
-                          disabled={isBusy}
-                        >
-                          {isBusy ? 'Starting…' : 'Approve'}
-                        </PrimaryButton>
-                      ) : null}
-                      {server.enabled ? (
-                        <ActionButton
-                          size="compact"
-                          data-testid={`mcp-configured-disable-${server.id}`}
-                          leadingIcon={<CloseIcon />}
-                          onClick={() => void handleToggleMcpServer(server, false)}
-                          disabled={isBusy}
-                        >
-                          {isBusy ? 'Updating…' : 'Disable'}
-                        </ActionButton>
-                      ) : (
-                        <ActionButton
-                          size="compact"
-                          data-testid={`mcp-configured-enable-${server.id}`}
-                          leadingIcon={<PlayIcon />}
-                          onClick={() => void handleToggleMcpServer(server, true)}
-                          disabled={isBusy}
-                        >
-                          {isBusy ? 'Updating…' : 'Enable'}
-                        </ActionButton>
-                      )}
-                      <ActionButton
-                        size="compact"
-                        data-testid={`mcp-configured-refresh-${server.id}`}
-                        leadingIcon={<RefreshIcon />}
-                        onClick={() => void handleRefreshMcpServer(server.id)}
-                        disabled={isBusy || !server.enabled}
-                      >
-                        {isBusy ? 'Refreshing…' : 'Refresh'}
-                      </ActionButton>
-                      <ActionButton
-                        size="compact"
-                        tone="quiet"
-                        data-testid={`mcp-configured-remove-${server.id}`}
-                        leadingIcon={<TrashIcon />}
-                        onClick={() => void handleRemoveMcpServer(server.id)}
-                        disabled={isBusy}
-                      >
-                        Remove
-                      </ActionButton>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
-      </section>
+      </>
     );
   }
 
@@ -1408,108 +1182,106 @@ export function SkillsView({
   return (
     <section className="catalog-view skills-view">
       <div className={pageShellClass}>
-        <header className={pageHeaderClass}>
-          <div>
-            <h2 className={pageTitleClass}>Plugins</h2>
-            {isPluginTab ? (
-              <p className={pageCopyClass}>
-                Connect app-managed MCP plugins and inspect their live catalogs from one place. Recommended plugins stay
-                aligned with Vicode&apos;s current host, while custom stdio plugins let you bring your own server commands
-                into the app.
-              </p>
-            ) : (
-              <p className={pageCopyClass}>
-                Browse skills by type, then attach them from the composer when they support that provider. Provider-owned
-                runtime installs are currently curated around Codex and Gemini from here. Browse{' '}
-                <InlineActionButton className={inlineLinkClass} onClick={() => void handleBrowse(CATALOG_LINKS.openai)}>
-                  Codex skills
-                </InlineActionButton>{' '}
-                and{' '}
-                <InlineActionButton className={inlineLinkClass} onClick={() => void handleBrowse(CATALOG_LINKS.gemini)}>
-                  Gemini extensions
-                </InlineActionButton>
-                .
-              </p>
-            )}
-          </div>
-          {onBack ? (
-            <IconButton className="skills-toolbar-close" label="Close plugins" onClick={onBack}>
-              <CloseIcon />
-            </IconButton>
-          ) : null}
-        </header>
-
-        <div className={controlsRowClass}>
-          <div className={catalogControlsClass}>
-            <div className={subnavClass} role="tablist" aria-label="Plugin and skill catalog sections">
-              <ActionButton
-                size="compact"
-                tone={catalogTab === 'plugins' ? 'default' : 'quiet'}
-                className="skills-subnav-button rounded-xl px-3"
-                data-testid="skills-tab-plugins"
-                aria-selected={catalogTab === 'plugins'}
-                onClick={() => setCatalogTab('plugins')}
-                leadingIcon={<CpuIcon />}
-              >
-                Plugins
-                <span className="skills-subnav-count">{officialMcpCatalog.length}</span>
-              </ActionButton>
-              <ActionButton
-                size="compact"
-                tone={catalogTab === 'skills' ? 'default' : 'quiet'}
-                className="skills-subnav-button rounded-xl px-3"
-                data-testid="skills-tab-skills"
-                aria-selected={catalogTab === 'skills'}
-                onClick={() => setCatalogTab('skills')}
-                leadingIcon={<SkillsIcon />}
-              >
-                Skills
-                <span className="skills-subnav-count">{skills.length}</span>
-              </ActionButton>
-            </div>
-            <TextInput
-              className="skills-search min-w-[240px] max-w-sm"
-              placeholder={isPluginTab ? 'Search plugins' : 'Search skills'}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
+        <header className="skills-topbar">
+          <div className={subnavClass} role="tablist" aria-label="Plugin and skill catalog sections">
+            <ActionButton
+              size="compact"
+              tone={catalogTab === 'plugins' ? 'default' : 'quiet'}
+              className="skills-subnav-button"
+              data-testid="skills-tab-plugins"
+              role="tab"
+              aria-selected={catalogTab === 'plugins'}
+              onClick={() => setCatalogTab('plugins')}
+            >
+              Plugins
+            </ActionButton>
+            <ActionButton
+              size="compact"
+              tone={catalogTab === 'skills' ? 'default' : 'quiet'}
+              className="skills-subnav-button"
+              data-testid="skills-tab-skills"
+              role="tab"
+              aria-selected={catalogTab === 'skills'}
+              onClick={() => setCatalogTab('skills')}
+            >
+              Skills
+            </ActionButton>
           </div>
           <div className={headerActionsClass}>
             <ActionButton
-              className="skills-toolbar-button skills-toolbar-button-refresh"
+              className="skills-toolbar-button"
               onClick={() => void handleRefreshCurrentTab()}
               size="compact"
-              leadingIcon={<RefreshIcon />}
+              leadingIcon={<SettingsIcon />}
             >
-              Refresh
+              Manage
             </ActionButton>
-            <ActionButton
-              className="skills-toolbar-button"
-              onClick={isPluginTab ? onCreatePlugin : onCreateSkill}
-              size="compact"
-              leadingIcon={<PlusIcon />}
-            >
-              {isPluginTab ? 'Create plugin' : 'Create skill'}
-            </ActionButton>
+            <Menu>
+              <MenuTrigger asChild>
+                <ActionButton
+                  className="skills-toolbar-button"
+                  size="compact"
+                  trailingIcon={<ChevronDownIcon />}
+                >
+                  Create
+                </ActionButton>
+              </MenuTrigger>
+              <MenuContent className="skills-create-menu" align="end">
+                <MenuItem onSelect={() => onCreatePlugin()}>
+                  <MenuItemLabel>Create plugin</MenuItemLabel>
+                </MenuItem>
+                <MenuItem onSelect={() => onCreateSkill()}>
+                  <MenuItemLabel>Create skill</MenuItemLabel>
+                </MenuItem>
+              </MenuContent>
+            </Menu>
+            {onBack ? (
+              <IconButton
+                className="skills-toolbar-close"
+                label="Close plugins and skills"
+                size="compact"
+                onClick={onBack}
+              >
+                <CloseIcon />
+              </IconButton>
+            ) : null}
           </div>
-        </div>
+        </header>
 
-        <div className={catalogShellClass}>
-          {catalogTab === 'plugins' ? (
-            renderPluginsSection()
-          ) : (
-            <>
-              {renderSection('Installed', sectionedSkills.installed)}
-              {renderSection('Official starter pack', [], sectionedSkills.officialSuggestions)}
-              {sectionedSkills.categories.map((section) => renderSection(section.title, section.installed, section.suggested))}
-              {filteredSkills.length === 0 && filteredSuggestedSkills.length === 0 ? (
-                <div className="empty-state compact">
-                  <p>No skills match this search yet.</p>
-                </div>
-              ) : null}
-            </>
-          )}
-        </div>
+        <main className="skills-catalog-stage">
+          <div className="skills-hero">
+            <h2>Make Vicode work your way</h2>
+          </div>
+
+          <div className={controlsRowClass}>
+            <div className={catalogControlsClass}>
+              <TextInput
+                className="skills-search"
+                placeholder={isPluginTab ? 'Search plugins' : 'Search skills'}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className={catalogShellClass}>
+            {catalogTab === 'plugins' ? (
+              renderPluginsSection()
+            ) : (
+              <>
+                {renderSection('Recommended', [], sectionedSkills.officialSuggestions)}
+                {renderSection('System', sectionedSkills.installed.filter(isSystemSkill))}
+                {renderSection('Personal', sectionedSkills.installed.filter((skill) => !isSystemSkill(skill)))}
+                {sectionedSkills.categories.map((section) => renderSection(section.title, section.installed, section.suggested))}
+                {filteredSkills.length === 0 && filteredSuggestedSkills.length === 0 ? (
+                  <div className="empty-state compact">
+                    <p>No skills match this search yet.</p>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+        </main>
       </div>
 
       <ModalDialog open={detailOpen} onOpenChange={setDetailOpen} className="skills-dialog-content w-[min(980px,calc(100vw-32px))]">
@@ -1770,6 +1542,7 @@ export function SkillsView({
                   key={`provider-target-${providerId}`}
                   size="compact"
                   className={draft.providerTargets.includes(providerId) ? 'skills-toggle-button is-active' : 'skills-toggle-button'}
+                  aria-pressed={draft.providerTargets.includes(providerId)}
                   onClick={() => toggleDraftProvider(providerId)}
                 >
                   {providerLabel(providerId)}
@@ -1791,6 +1564,7 @@ export function SkillsView({
                     key={`provider-sync-${providerId}`}
                     size="compact"
                     className={draft.syncTargets.includes(providerId) ? 'skills-toggle-button is-active' : 'skills-toggle-button'}
+                    aria-pressed={draft.syncTargets.includes(providerId)}
                     onClick={() => toggleDraftSync(providerId)}
                     disabled={disabled}
                   >

@@ -3,16 +3,8 @@
   --ui-accent: color-mix(in srgb, var(--foreground) 62%, var(--muted-foreground) 38%);
   --ui-accent-strong: color-mix(in srgb, var(--foreground) 90%, var(--muted-foreground) 10%);
   --ui-accent-soft: color-mix(in srgb, var(--foreground) 8%, transparent);
-  --ui-primary-bg: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--ui-surface-4) 80%, white 20%),
-    color-mix(in srgb, var(--ui-surface-3) 90%, black 10%)
-  );
-  --ui-primary-bg-hover: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--ui-surface-5) 72%, white 28%),
-    color-mix(in srgb, var(--ui-surface-4) 88%, black 12%)
-  );
+  --ui-primary-bg: var(--ui-surface-3);
+  --ui-primary-bg-hover: var(--ui-surface-4);
   --ui-primary-text: var(--ui-text-title);
   --ui-brand-border: color-mix(in srgb, var(--foreground) 12%, transparent);
   --ui-brand-border-strong: color-mix(in srgb, var(--foreground) 18%, transparent);
@@ -21,11 +13,7 @@
   --ui-brand-text: color-mix(in srgb, var(--foreground) 82%, var(--muted-foreground) 18%);
   --ui-brand-text-strong: var(--ui-text-title);
   --ui-brand-text-muted: var(--ui-text-muted);
-  --ui-brand-gradient: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--ui-surface-4) 82%, white 18%),
-    color-mix(in srgb, var(--ui-surface-2) 90%, black 10%)
-  );
+  --ui-brand-gradient: var(--ui-surface-2);
   --ui-shadow-menu: var(--ui-shadow-apple);
   --ui-focus:
     0 0 0 1px color-mix(in srgb, var(--foreground) 14%, transparent),
@@ -39,16 +27,8 @@
   --ui-accent: color-mix(in srgb, var(--foreground) 62%, var(--muted-foreground) 38%);
   --ui-accent-strong: color-mix(in srgb, var(--foreground) 90%, var(--muted-foreground) 10%);
   --ui-accent-soft: color-mix(in srgb, var(--foreground) 8%, transparent);
-  --ui-primary-bg: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--ui-surface-4) 80%, white 20%),
-    color-mix(in srgb, var(--ui-surface-3) 90%, black 10%)
-  );
-  --ui-primary-bg-hover: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--ui-surface-5) 72%, white 28%),
-    color-mix(in srgb, var(--ui-surface-4) 88%, black 12%)
-  );
+  --ui-primary-bg: var(--ui-surface-3);
+  --ui-primary-bg-hover: var(--ui-surface-4);
   --ui-primary-text: var(--ui-text-title);
   --ui-brand-border: color-mix(in srgb, var(--foreground) 12%, transparent);
   --ui-brand-border-strong: color-mix(in srgb, var(--foreground) 18%, transparent);
@@ -57,22 +37,25 @@
   --ui-brand-text: color-mix(in srgb, var(--foreground) 82%, var(--muted-foreground) 18%);
   --ui-brand-text-strong: var(--ui-text-title);
   --ui-brand-text-muted: var(--ui-text-muted);
-  --ui-brand-gradient: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--ui-surface-4) 82%, white 18%),
-    color-mix(in srgb, var(--ui-surface-2) 90%, black 10%)
-  );
+  --ui-brand-gradient: var(--ui-surface-2);
   --ui-shadow-menu: var(--ui-shadow-apple);
   --ui-focus:
     0 0 0 1px color-mix(in srgb, var(--foreground) 14%, transparent),
     0 0 0 4px color-mix(in srgb, white 4%, transparent);
   border-color: var(--ui-border-soft);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--ui-surface-2) 94%, white 6%),
-    color-mix(in srgb, var(--ui-surface-1) 94%, black 6%)
-  );
+  background: var(--ui-surface-2);
   box-shadow: var(--ui-shadow-apple);
+}
+
+.skills-view .ui-control-button,
+.skills-view .ui-icon-button,
+.skills-dialog-content .ui-control-button,
+.skills-dialog-content .ui-icon-button,
+.skills-editor-dialog .ui-control-button,
+.skills-editor-dialog .ui-icon-button,
+.skills-plugin-dialog .ui-control-button,
+.skills-plugin-dialog .ui-icon-button {
+  box-shadow: none;
 }
 
 .skills-view .ui-control-primary,
@@ -80,9 +63,7 @@
 .skills-editor-dialog .ui-control-primary,
 .skills-plugin-dialog .ui-control-primary {
   border-color: var(--ui-border-soft);
-  box-shadow:
-    var(--ui-shadow-apple),
-    inset 0 1px 0 color-mix(in srgb, white 10%, transparent);
+  box-shadow: none;
 }
 
 .skills-view .ui-control-primary:hover,
@@ -94,18 +75,19 @@
 .skills-plugin-dialog .ui-control-primary:hover,
 .skills-plugin-dialog .ui-control-primary:focus-visible {
   border-color: var(--ui-border-strong);
-  box-shadow:
-    var(--ui-shadow-apple),
-    inset 0 1px 0 color-mix(in srgb, white 14%, transparent);
+  box-shadow: none;
 }
 
 .skills-page-shell {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  width: min(100%, 1160px);
+  gap: 0;
+  width: 100%;
+  min-height: 0;
+  height: 100%;
   margin: 0 auto;
-  padding: 18px 24px 32px;
+  padding: 4px 32px 34px;
+  overflow-y: auto;
 }
 
 .skills-back-link {
@@ -121,12 +103,45 @@
   border-color: transparent;
 }
 
-.skills-page-header {
-  align-items: flex-start;
+.skills-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 38px;
+  width: 100%;
 }
 
 .skills-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex: 0 0 auto;
+}
+
+.skills-catalog-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: min(100%, 840px);
+  margin: 0 auto;
+  padding: 28px 0 0;
+}
+
+.skills-hero {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.skills-hero h2 {
+  margin: 0;
+  color: var(--ui-text-title);
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: 0;
+  text-align: center;
 }
 
 .skills-controls-row,
@@ -136,33 +151,38 @@
 }
 
 .skills-controls-row {
-  gap: 16px;
+  justify-content: center;
+  gap: 10px;
 }
 
 .skills-catalog-controls {
-  flex: 1 1 520px;
+  flex: 0 1 720px;
   min-width: 0;
-  gap: 12px;
+  justify-content: center;
+  gap: 8px;
 }
 
 .skills-subnav {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px;
+  gap: 2px;
+  padding: 2px;
   border: 1px solid var(--ui-border-soft);
-  border-radius: 12px;
-  background: var(--ui-surface-2);
+  border-radius: 10px;
+  background: var(--ui-surface-1);
   box-shadow: none;
 }
 
 .skills-subnav-button {
-  min-height: 32px;
-  gap: 8px;
-  padding: 0 12px;
-  border-radius: 9px;
+  min-height: 28px;
+  gap: 0;
+  padding: 0 9px;
+  border-radius: 8px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
   font-weight: 600;
-  color: var(--ui-text);
+  color: var(--ui-text-muted);
 }
 
 .skills-subnav-button[aria-selected='false'] {
@@ -171,7 +191,7 @@
 
 .skills-subnav-button[aria-selected='false']:hover,
 .skills-subnav-button[aria-selected='false']:focus-visible {
-  background: var(--ui-hover);
+  background: var(--ui-alpha-04);
   color: var(--ui-text-title);
 }
 
@@ -206,15 +226,28 @@
 }
 
 .skills-search {
-  width: min(320px, 100%);
-  flex: 0 1 320px;
-  min-height: 40px;
+  width: min(100%, 610px);
+  flex: 0 1 610px;
+  min-height: 30px;
+  border-radius: 9px;
+  border-color: var(--ui-border-strong);
+  background: var(--ui-surface-2);
+  box-shadow: none;
+}
+
+.skills-search:hover,
+.skills-search:focus-visible {
+  border-color: var(--ui-border-strong);
+  background: var(--ui-surface-2);
+  box-shadow: var(--ui-focus);
 }
 
 .skills-toolbar-button {
-  min-height: 40px;
-  border-radius: 12px;
+  min-height: 30px;
+  border-radius: 9px;
   border-color: var(--ui-border-soft);
+  background: var(--ui-surface-2);
+  color: var(--ui-text-title);
   box-shadow: none;
 }
 
@@ -238,13 +271,21 @@
 }
 
 .skills-toolbar-close {
-  min-width: 40px;
-  min-height: 40px;
-  border-radius: 12px;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  min-width: 30px;
+  min-height: 30px;
+  border-radius: 9px;
   border: 1px solid var(--ui-border-soft);
-  background: var(--ui-surface-1);
+  background: var(--ui-surface-2);
   color: var(--ui-text-muted);
   box-shadow: none;
+}
+
+.skills-toolbar-close svg {
+  width: 14px;
+  height: 14px;
 }
 
 .skills-toolbar-close:hover,
@@ -280,12 +321,15 @@
 
 .skills-catalog-shell {
   min-width: 0;
+  gap: 28px;
+  padding-top: 12px;
+  padding-bottom: 24px;
 }
 
 .skills-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .skills-section-heading,
@@ -307,7 +351,16 @@
 .skills-section-heading h3 {
   margin: 0;
   color: var(--ui-text-title);
-  font-size: var(--ui-font-size-title-sm);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.2;
+}
+
+.skills-section-heading {
+  min-height: 26px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--ui-border-soft);
 }
 
 .skills-section-heading.is-stack {
@@ -323,7 +376,8 @@
 
 .skills-list {
   display: grid;
-  gap: 12px;
+  column-gap: 38px;
+  row-gap: 14px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -335,13 +389,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
   width: 100%;
-  min-height: 92px;
-  padding: 16px 18px;
-  border: 1px solid var(--ui-border-soft);
-  border-radius: calc(var(--ui-radius-xl) + 2px);
-  background: color-mix(in srgb, var(--ui-surface-2) 88%, transparent 12%);
+  min-height: 54px;
+  padding: 5px 6px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
   color: inherit;
   text-align: left;
   cursor: pointer;
@@ -352,26 +406,26 @@
 
 .skills-list-item:hover,
 .skills-list-item:focus-visible {
-  border-color: var(--ui-border-strong);
-  background: var(--ui-surface-3);
+  border-color: transparent;
+  background: var(--ui-alpha-04);
 }
 
 .skills-integration-item {
-  cursor: default;
-  flex-wrap: wrap;
-  align-items: flex-start;
+  cursor: pointer;
+  flex-wrap: nowrap;
+  align-items: center;
 }
 
 .skills-integration-item:hover,
 .skills-integration-item:focus-visible {
-  border-color: var(--ui-border);
-  background: var(--ui-surface-3);
+  border-color: transparent;
+  background: var(--ui-alpha-04);
 }
 
 .skills-integration-item.is-selected {
-  border-color: var(--ui-border-strong);
-  background: color-mix(in srgb, var(--ui-surface-3) 90%, transparent 10%);
-  box-shadow: inset 0 0 0 1px var(--ui-alpha-08);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }
 
 .skills-list-leading {
@@ -379,7 +433,7 @@
   flex: 1;
   min-width: 0;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 .skills-list-copy {
@@ -387,7 +441,7 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 6px;
+  gap: 3px;
 }
 
 .skills-list-title-row {
@@ -398,12 +452,12 @@
 .skills-integration-status {
   display: inline-flex;
   align-items: center;
-  padding: 4px 8px;
+  padding: 2px 6px;
   border-radius: 999px;
   border: 1px solid var(--ui-border-soft);
   color: var(--ui-text);
   background: var(--ui-surface-3);
-  font-size: var(--ui-font-size-xs);
+  font-size: 11px;
   font-weight: 600;
 }
 
@@ -457,8 +511,8 @@
 .skills-list-copy strong,
 .skills-dialog-title-row h3 {
   margin: 0;
-  font-size: 18px;
-  letter-spacing: -0.03em;
+  font-size: 14px;
+  letter-spacing: 0;
   color: var(--ui-text-title);
 }
 
@@ -478,6 +532,17 @@
   margin: 0;
   color: var(--ui-text-muted);
   line-height: var(--ui-line-height-body);
+}
+
+.skills-list-copy p {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--ui-text-muted);
+  font-size: 13px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
 }
 
 .skills-detail-meta {
@@ -511,13 +576,9 @@
   gap: 14px;
   padding: 18px 20px;
   border-radius: var(--ui-radius-xl);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--ui-surface-2) 94%, white 6%),
-    color-mix(in srgb, var(--ui-surface-1) 92%, black 8%)
-  );
+  background: var(--ui-surface-2);
   border: 1px solid var(--ui-border-soft);
-  box-shadow: var(--ui-shadow-apple);
+  box-shadow: none;
 }
 
 .skills-integration-detail-header {
@@ -626,17 +687,42 @@
   justify-content: center;
   flex: 0 0 auto;
   flex-wrap: wrap;
-  gap: 8px;
-  min-width: 84px;
+  gap: 6px;
+  min-width: 26px;
   margin-left: auto;
+}
+
+.skills-row-action {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+  border-radius: 999px;
+  border-color: transparent;
+  background: var(--ui-alpha-04);
+  color: var(--ui-text-muted);
+  box-shadow: none;
+}
+
+.skills-row-action:hover,
+.skills-row-action:focus-visible {
+  border-color: transparent;
+  background: var(--ui-alpha-08);
+  color: var(--ui-text-title);
+  box-shadow: none;
+}
+
+.skills-row-action.is-disabled,
+.skills-row-action:disabled {
+  opacity: 0.4;
 }
 
 .skills-card-state {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 24px;
-  min-height: 24px;
+  min-width: 26px;
+  min-height: 26px;
   padding: 0;
   border-radius: 999px;
   color: var(--ui-text-subtle);
@@ -660,9 +746,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
   overflow: hidden;
   border: 1px solid transparent;
   color: var(--ui-text-title);
@@ -689,48 +775,32 @@
 }
 
 .skills-avatar.is-gemini {
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--ui-surface-4) 78%, white 22%),
-    color-mix(in srgb, var(--ui-surface-2) 88%, black 12%)
-  );
+  background: var(--ui-surface-3);
   border-color: var(--ui-alpha-08);
 }
 
 .skills-avatar.is-vicode {
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--ui-surface-4) 82%, white 18%),
-    color-mix(in srgb, var(--ui-surface-2) 88%, black 12%)
-  );
+  background: var(--ui-surface-3);
   border-color: var(--ui-alpha-08);
 }
 
 .skills-avatar.is-built-in {
-  background: linear-gradient(135deg, var(--ui-surface-4), var(--ui-surface-5));
+  background: var(--ui-surface-3);
 }
 
 .skills-avatar.is-custom {
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--ui-surface-4) 72%, white 28%),
-    color-mix(in srgb, var(--ui-surface-2) 84%, black 16%)
-  );
+  background: var(--ui-surface-3);
   border-color: var(--ui-alpha-08);
 }
 
 .skills-avatar.is-project {
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--ui-surface-3) 78%, white 22%),
-    color-mix(in srgb, var(--ui-surface-1) 86%, black 14%)
-  );
+  background: var(--ui-surface-3);
   border-color: var(--ui-alpha-08);
 }
 
 .skills-avatar svg {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
 }
 
 .skills-avatar.is-large svg {
@@ -1000,11 +1070,7 @@
 }
 
 .skills-plugin-detail {
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--ui-surface-2) 95%, white 5%),
-    color-mix(in srgb, var(--ui-surface-1) 94%, black 6%)
-  );
+  background: var(--ui-surface-2);
 }
 
 .composer-inline-skill-line {
@@ -1014,6 +1080,23 @@
   gap: 6px;
   min-height: 22px;
   margin-bottom: -2px;
+}
+
+.composer-input-wrap.has-attached-skills {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.composer-input-wrap.has-attached-skills .composer-inline-skill-line {
+  flex: 0 0 auto;
+  padding-top: 2px;
+  margin-bottom: 0;
+}
+
+.composer-input-wrap.has-attached-skills .composer-input {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .skill-pill {
@@ -1237,11 +1320,34 @@
   min-height: 24px;
   padding: 0 9px;
   border-radius: 9px;
+  border-color: var(--ui-skill-border);
+  background: var(--ui-skill-soft);
+  color: var(--ui-skill-text-strong);
   vertical-align: baseline;
 }
 
-.composer-inline-skill-chip .skill-pill-label {
+.composer-inline-skill-chip.ui-control-button {
+  border-color: var(--ui-skill-border);
+  background: var(--ui-skill-soft);
+  color: var(--ui-skill-text-strong);
+  box-shadow: inset 0 0 0 1px var(--ui-skill-border);
+}
+
+.composer-inline-skill-chip.ui-control-button:hover,
+.composer-inline-skill-chip.ui-control-button:focus-visible {
+  border-color: var(--ui-skill-border);
+  background: color-mix(in srgb, var(--ui-skill-soft) 76%, var(--ui-alpha-08) 24%);
+  color: var(--ui-skill-text-strong);
+  box-shadow: inset 0 0 0 1px var(--ui-skill-border);
+}
+
+.composer-inline-skill-chip .ui-control-icon {
+  color: var(--ui-skill-text);
+}
+
+.composer-inline-skill-chip .ui-control-label {
   font-size: 12.5px;
+  font-weight: 500;
 }
 
 .composer-skills-menu {
@@ -1294,6 +1400,7 @@
 
 @media (max-width: 900px) {
   .skills-form-grid,
+  .skills-list,
   .skills-integration-detail-grid,
   .skills-integration-preview-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -1305,11 +1412,28 @@
     padding: 14px 16px 24px;
   }
 
+  .skills-topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .skills-catalog-stage {
+    padding-top: 20px;
+  }
+
+  .skills-hero h2 {
+    font-size: 26px;
+  }
+
   .skills-controls-row,
   .skills-catalog-controls,
   .skills-header-actions {
     width: 100%;
     flex-wrap: wrap;
+  }
+
+  .skills-header-actions {
+    justify-content: flex-start;
   }
 
   .skills-search {

@@ -161,6 +161,25 @@ describe('AgentRuntimeService', () => {
     ]);
   });
 
+  it('exposes creator bundle tools when the Vicode creator bridge is configured', async () => {
+    const service = new AgentRuntimeService();
+    service.setCreators({
+      createSkillBundle: async () => {
+        throw new Error('not used');
+      },
+      createPluginBundle: async () => {
+        throw new Error('not used');
+      }
+    });
+
+    const catalog = await service.listToolCatalog({
+      executionPermission: 'default'
+    });
+
+    expect(catalog.nativeTools.some((tool) => tool.callName === 'create_skill_bundle')).toBe(true);
+    expect(catalog.nativeTools.some((tool) => tool.callName === 'create_plugin_bundle')).toBe(true);
+  });
+
   it('suppresses ask-mode MCP approvals in trusted workspace tool catalogs', async () => {
     const service = new AgentRuntimeService({
       listCatalog: async () => ({
@@ -518,7 +537,7 @@ describe('AgentRuntimeService', () => {
     );
   });
 
-  it('rejects path traversal outside the trusted workspace', async () => {
+  it('rejects path traversal outside the workspace', async () => {
     const workspace = createWorkspace({
       'src/example.ts': 'export const value = 1;\n'
     });
@@ -537,7 +556,7 @@ describe('AgentRuntimeService', () => {
 
     expect(result.isError).toBe(true);
     expect(result.content).toContain(
-      'Tool path must stay inside the trusted workspace'
+      'Tool path must stay inside the workspace'
     );
   });
 
@@ -960,6 +979,157 @@ describe('AgentRuntimeService', () => {
     );
   });
 
+  it('creates a Vicode skill bundle through the app-owned creator bridge', async () => {
+    const workspace = createWorkspace({});
+    const onInfo = vi.fn();
+    const createSkillBundle = vi.fn(async () => ({
+      scope: 'project' as const,
+      projectId: 'project-1',
+      folderName: 'ci-triage',
+      relativeRootPath: 'skills/project/project-1/ci-triage',
+      filePaths: ['SKILL.md', '.vicode-skill.json'],
+      existed: false,
+      importedId: 'file-backed-ci-triage'
+    }));
+    const service = new AgentRuntimeService();
+    service.setCreators({
+      createSkillBundle,
+      createPluginBundle: vi.fn()
+    });
+
+    const result = await service.executeToolCall(
+      {
+        name: 'create_skill_bundle',
+        arguments: {
+          scope: 'project',
+          project_id: 'project-1',
+          folder_name: 'ci-triage',
+          files: [
+            {
+              path: 'SKILL.md',
+              content: '# CI Triage\n'
+            },
+            {
+              path: '.vicode-skill.json',
+              content: '{}'
+            }
+          ]
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default',
+        onInfo
+      }
+    );
+
+    expect(createSkillBundle).toHaveBeenCalledWith({
+      scope: 'project',
+      projectId: 'project-1',
+      folderName: 'ci-triage',
+      files: [
+        {
+          path: 'SKILL.md',
+          content: '# CI Triage\n'
+        },
+        {
+          path: '.vicode-skill.json',
+          content: '{}'
+        }
+      ]
+    });
+    expect(result).toEqual({
+      toolName: 'create_skill_bundle',
+      content: [
+        'Created skills/project/project-1/ci-triage',
+        'scope: project',
+        'project_id: project-1',
+        'skill_id: file-backed-ci-triage',
+        'files:',
+        '- SKILL.md',
+        '- .vicode-skill.json'
+      ].join('\n')
+    });
+    expect(onInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activity: expect.objectContaining({
+          kind: 'file_write',
+          path: 'skills/project/project-1/ci-triage',
+          summary: 'Created skills/project/project-1/ci-triage'
+        })
+      })
+    );
+  });
+
+  it('creates a Vicode plugin bundle through the app-owned creator bridge', async () => {
+    const workspace = createWorkspace({});
+    const createPluginBundle = vi.fn(async () => ({
+      scope: 'global' as const,
+      projectId: null,
+      folderName: 'fixture-plugin',
+      relativeRootPath: 'plugins/user/fixture-plugin',
+      filePaths: ['.codex-plugin/plugin.json', '.mcp.json'],
+      existed: true,
+      importedId: 'file-plugin:global:fixture-plugin'
+    }));
+    const service = new AgentRuntimeService();
+    service.setCreators({
+      createSkillBundle: vi.fn(),
+      createPluginBundle
+    });
+
+    const result = await service.executeToolCall(
+      {
+        name: 'create_plugin_bundle',
+        arguments: {
+          scope: 'global',
+          folder_name: 'fixture-plugin',
+          files: [
+            {
+              path: '.codex-plugin/plugin.json',
+              content: '{"name":"Fixture Plugin","description":"Test plugin"}'
+            },
+            {
+              path: '.mcp.json',
+              content: '{"command":"node"}'
+            }
+          ]
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default'
+      }
+    );
+
+    expect(createPluginBundle).toHaveBeenCalledWith({
+      scope: 'global',
+      projectId: null,
+      folderName: 'fixture-plugin',
+      files: [
+        {
+          path: '.codex-plugin/plugin.json',
+          content: '{"name":"Fixture Plugin","description":"Test plugin"}'
+        },
+        {
+          path: '.mcp.json',
+          content: '{"command":"node"}'
+        }
+      ]
+    });
+    expect(result).toEqual({
+      toolName: 'create_plugin_bundle',
+      content: [
+        'Updated plugins/user/fixture-plugin',
+        'scope: global',
+        'server_id: file-plugin:global:fixture-plugin',
+        'files:',
+        '- .codex-plugin/plugin.json',
+        '- .mcp.json'
+      ].join('\n')
+    });
+  });
+
   it('writes a UTF-8 file inside the trusted workspace under the bounded default policy', async () => {
     const workspace = createWorkspace({});
     const onInfo = vi.fn();
@@ -1188,6 +1358,133 @@ describe('AgentRuntimeService', () => {
         })
       })
     );
+  });
+
+  it('normalizes incorrect unified diff hunk counts before applying a patch', async () => {
+    const workspace = createWorkspace({
+      'src/example.ts': 'export const value = 1;\n'
+    });
+    const onInfo = vi.fn();
+    const service = new AgentRuntimeService();
+
+    const result = await service.executeToolCall(
+      {
+        name: 'apply_patch',
+        arguments: {
+          patch: [
+            '--- a/src/example.ts',
+            '+++ b/src/example.ts',
+            '@@ -1,2 +1,3 @@',
+            '-export const value = 1;',
+            '+export const value = 2;',
+            '+export const extra = true;'
+          ].join('\n')
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default',
+        onInfo
+      }
+    );
+
+    expect(result).toEqual({
+      toolName: 'apply_patch',
+      content: 'Patched src/example.ts'
+    });
+    expect(readFileSync(join(workspace, 'src/example.ts'), 'utf8')).toBe(
+      'export const value = 2;\nexport const extra = true;\n'
+    );
+    expect(onInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activity: expect.objectContaining({
+          kind: 'tool_call',
+          toolName: 'apply_patch',
+          text: 'target: src/example.ts'
+        })
+      })
+    );
+  });
+
+  it('applies a patch when surrounding context has drifted slightly', async () => {
+    const workspace = createWorkspace({
+      'src/example.ts': [
+        'export const prefix = true;',
+        'export const value = 1;',
+        'export const inserted = true;',
+        'export const suffix = true;',
+        ''
+      ].join('\n')
+    });
+    const service = new AgentRuntimeService();
+
+    const result = await service.executeToolCall(
+      {
+        name: 'apply_patch',
+        arguments: {
+          patch: [
+            '--- a/src/example.ts',
+            '+++ b/src/example.ts',
+            '@@ -1,3 +1,3 @@',
+            ' export const prefix = true;',
+            '-export const value = 1;',
+            '+export const value = 2;',
+            ' export const suffix = true;'
+          ].join('\n')
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default'
+      }
+    );
+
+    expect(result).toEqual({
+      toolName: 'apply_patch',
+      content: 'Patched src/example.ts'
+    });
+    expect(readFileSync(join(workspace, 'src/example.ts'), 'utf8')).toBe(
+      [
+        'export const prefix = true;',
+        'export const value = 2;',
+        'export const inserted = true;',
+        'export const suffix = true;',
+        ''
+      ].join('\n')
+    );
+  });
+
+  it('returns an actionable tool error for malformed patch bodies', async () => {
+    const workspace = createWorkspace({
+      'src/example.ts': 'export const value = 1;\n'
+    });
+    const service = new AgentRuntimeService();
+
+    const result = await service.executeToolCall(
+      {
+        name: 'apply_patch',
+        arguments: {
+          patch: [
+            '--- a/src/example.ts',
+            '+++ b/src/example.ts',
+            '@@ -1 +1 @@',
+            '?export const value = 2;'
+          ].join('\n')
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default'
+      }
+    );
+
+    expect(result).toEqual({
+      toolName: 'apply_patch',
+      content: expect.stringContaining('Patch is malformed:'),
+      isError: true
+    });
+    expect(result.content).toContain('use write_file');
+    expect(readFileSync(join(workspace, 'src/example.ts'), 'utf8')).toBe('export const value = 1;\n');
   });
 
   maybeWindowsIt(
@@ -1688,7 +1985,7 @@ describe('AgentRuntimeService', () => {
     expect(result).toEqual({
       toolName: 'run_command',
       content:
-        'run_command is blocked by runtime path policy. The command references an absolute path outside the trusted workspace (C:\\Windows\\win.ini).',
+        'run_command is blocked by runtime path policy. The command references an absolute path outside the workspace (C:\\Windows\\win.ini).',
       isError: true
     });
     expect(requestApproval).not.toHaveBeenCalled();
@@ -1720,7 +2017,7 @@ describe('AgentRuntimeService', () => {
     expect(result).toEqual({
       toolName: 'run_command',
       content:
-        'run_command is blocked by runtime path policy. The command references a relative path that resolves outside the trusted workspace (..\\..\\outside.txt).',
+        'run_command is blocked by runtime path policy. The command references a relative path that resolves outside the workspace (..\\..\\outside.txt).',
       isError: true
     });
     expect(requestApproval).not.toHaveBeenCalled();
@@ -1752,7 +2049,7 @@ describe('AgentRuntimeService', () => {
     expect(result).toEqual({
       toolName: 'run_command',
       content:
-        'run_command is blocked by runtime path policy. The command references a relative path that resolves outside the trusted workspace (hello>..\\..\\outside.txt).',
+        'run_command is blocked by runtime path policy. The command references a relative path that resolves outside the workspace (hello>..\\..\\outside.txt).',
       isError: true
     });
     expect(requestApproval).not.toHaveBeenCalled();

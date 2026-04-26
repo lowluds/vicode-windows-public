@@ -78,7 +78,7 @@ describe('theme utilities', () => {
   it('resolves accent color from system and custom preferences', () => {
     expect(resolveAccentColor('system', null, '#1188cc')).toBe('#1188cc');
     expect(resolveAccentColor('custom', '#223344', '#1188cc')).toBe('#223344');
-    expect(resolveAccentColor('custom', 'bad', null)).toBe('#0078d4');
+    expect(resolveAccentColor('custom', 'bad', null)).toBe('#3f3f3f');
   });
 
   it('applies accent tokens to the document root', () => {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { SkillDefinition } from '../../shared/domain';
 import type { RunTranscriptItem } from '../lib/run-activity';
 import { resolveSkillIconByToken } from './skillIcons';
@@ -136,6 +136,27 @@ function terminalToolState(status: Extract<RunTranscriptItem, { kind: 'activity_
   return 'output-available';
 }
 
+function formatElapsedSeconds(totalSeconds: number) {
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (seconds === 0) {
+    return `${minutes}m`;
+  }
+  return `${minutes}m ${seconds}s`;
+}
+
+function formatWorkingForLabel(startedAt: string | null | undefined, elapsedSeconds: number) {
+  if (!startedAt) {
+    return 'Working';
+  }
+
+  return `Working for ${formatElapsedSeconds(elapsedSeconds)}`;
+}
+
 type TranscriptRenderableItem =
   | RunTranscriptItem
   | {
@@ -144,6 +165,37 @@ type TranscriptRenderableItem =
       label: string;
       workedForLabel: string | null;
       items: Extract<RunTranscriptItem, { kind: 'activity_line' }>[];
+    }
+  | {
+      id: string;
+      kind: 'work_summary_group';
+      workedForLabel: string;
+      stepLabel: string;
+      items: RunTranscriptItem[];
+    };
+
+type ActivityLineItem = Extract<RunTranscriptItem, { kind: 'activity_line' }>;
+type AssistantTextItem = Extract<RunTranscriptItem, { kind: 'assistant_text' }>;
+type TerminalActivityLineItem = ActivityLineItem & { activityKind: 'terminal_command' };
+type ActivityGroupDetailItem =
+  | {
+      id: string;
+      kind: 'activity_item';
+      item: ActivityLineItem;
+    }
+  | {
+      id: string;
+      kind: 'command_group';
+      label: string;
+      items: TerminalActivityLineItem[];
+    };
+type WorkSummaryDetailItem =
+  | ActivityGroupDetailItem
+  | {
+      id: string;
+      kind: 'assistant_note';
+      item: AssistantTextItem;
+      text: string;
     };
 
 export function shouldNestAssistantSourcesWithWorkedGroup(
@@ -159,8 +211,8 @@ export function shouldNestAssistantSourcesWithWorkedGroup(
       currentItem.sources &&
       currentItem.sources.length > 0 &&
       previousItem &&
-      previousItem.kind === 'activity_group' &&
-      previousItem.workedForLabel
+      ((previousItem.kind === 'activity_group' && previousItem.workedForLabel) ||
+        previousItem.kind === 'work_summary_group')
   );
 }
 
@@ -182,14 +234,36 @@ function getWorkedGroupSources(
   return null;
 }
 
-function isActivityLineItem(item: RunTranscriptItem): item is Extract<RunTranscriptItem, { kind: 'activity_line' }> {
+function isActivityLineItem(item: RunTranscriptItem): item is ActivityLineItem {
   return item.kind === 'activity_line';
+}
+
+function isAssistantTextItem(item: RunTranscriptItem): item is AssistantTextItem {
+  return item.kind === 'assistant_text';
 }
 
 function isTerminalActivityLineItem(
   item: RunTranscriptItem
-): item is Extract<RunTranscriptItem, { kind: 'activity_line'; activityKind: 'terminal_command' }> {
+): item is TerminalActivityLineItem {
   return item.kind === 'activity_line' && item.activityKind === 'terminal_command';
+}
+
+function getVisibleAssistantNoteText(item: AssistantTextItem) {
+  return sanitizeAssistantContent(item.text || '', Boolean(item.sources?.length)).trim();
+}
+
+function countWorkSummarySteps(items: RunTranscriptItem[]) {
+  return items.filter((item) => {
+    if (isActivityLineItem(item)) {
+      return true;
+    }
+
+    return isAssistantTextItem(item) && getVisibleAssistantNoteText(item).length > 0;
+  }).length;
+}
+
+function formatPreviousStepCount(count: number) {
+  return `${count} previous ${count === 1 ? 'step' : 'steps'}`;
 }
 
 function summarizeActivityGroup(items: Extract<RunTranscriptItem, { kind: 'activity_line' }>[]) {
@@ -295,14 +369,160 @@ function summarizeActivityGroupKinds(items: Extract<RunTranscriptItem, { kind: '
   return parts.slice(0, 3).join(' · ');
 }
 
-export function compactCompletedTranscriptActivityGroups(
-  items: RunTranscriptItem[],
-  runState: 'running' | 'completed' | 'failed' | 'aborted' | null
-): TranscriptRenderableItem[] {
-  if (runState === 'running') {
-    return items;
+function formatCommandGroupLabel(commands: TerminalActivityLineItem[]) {
+  const commandCount = commands.length;
+  const noun = commandCount === 1 ? 'command' : 'commands';
+  if (commands.every((command) => command.status === 'running')) {
+    return `Running ${commandCount} ${noun}`;
+  }
+  if (commands.every((command) => command.status === 'stopped')) {
+    return `Stopped ${commandCount} ${noun}`;
+  }
+  return `Ran ${commandCount} ${noun}`;
+}
+
+export function compactActivityGroupDetailItems(items: ActivityLineItem[]): ActivityGroupDetailItem[] {
+  const details: ActivityGroupDetailItem[] = [];
+  let pendingCommands: TerminalActivityLineItem[] = [];
+
+  const flushCommands = () => {
+    if (pendingCommands.length === 0) {
+      return;
+    }
+
+    details.push({
+      id: `command-group:${pendingCommands[0].id}`,
+      kind: 'command_group',
+      label: formatCommandGroupLabel(pendingCommands),
+      items: pendingCommands
+    });
+    pendingCommands = [];
+  };
+
+  for (const item of items) {
+    if (isTerminalActivityLineItem(item)) {
+      pendingCommands.push(item);
+      continue;
+    }
+
+    flushCommands();
+    details.push({
+      id: `activity:${item.id}`,
+      kind: 'activity_item',
+      item
+    });
   }
 
+  flushCommands();
+  return details;
+}
+
+export function compactWorkSummaryDetailItems(items: RunTranscriptItem[]): WorkSummaryDetailItem[] {
+  const details: WorkSummaryDetailItem[] = [];
+  let pendingCommands: TerminalActivityLineItem[] = [];
+
+  const flushCommands = () => {
+    if (pendingCommands.length === 0) {
+      return;
+    }
+
+    details.push({
+      id: `command-group:${pendingCommands[0].id}`,
+      kind: 'command_group',
+      label: formatCommandGroupLabel(pendingCommands),
+      items: pendingCommands
+    });
+    pendingCommands = [];
+  };
+
+  for (const item of items) {
+    if (isTerminalActivityLineItem(item)) {
+      pendingCommands.push(item);
+      continue;
+    }
+
+    flushCommands();
+
+    if (isActivityLineItem(item)) {
+      details.push({
+        id: `activity:${item.id}`,
+        kind: 'activity_item',
+        item
+      });
+      continue;
+    }
+
+    if (isAssistantTextItem(item)) {
+      const text = getVisibleAssistantNoteText(item);
+      if (text) {
+        details.push({
+          id: `assistant-note:${item.id}`,
+          kind: 'assistant_note',
+          item,
+          text
+        });
+      }
+    }
+  }
+
+  flushCommands();
+  return details;
+}
+
+function compactWorkedForSummary(
+  items: RunTranscriptItem[]
+): TranscriptRenderableItem[] | null {
+  const workedForIndex = items.findIndex((item) => item.kind === 'worked_for');
+  if (workedForIndex < 0) {
+    return null;
+  }
+
+  const workedForItem = items[workedForIndex];
+  if (workedForItem?.kind !== 'worked_for') {
+    return null;
+  }
+
+  const beforeWorkedFor = items.slice(0, workedForIndex);
+  const afterWorkedFor = items.slice(workedForIndex + 1);
+  const hasTrailingAnswer = afterWorkedFor.some((item) =>
+    item.kind === 'assistant_text' || item.kind === 'resolution_summary'
+  );
+  const summaryItems: RunTranscriptItem[] = [];
+  const visibleItems: RunTranscriptItem[] = [];
+
+  for (const item of beforeWorkedFor) {
+    if (isActivityLineItem(item)) {
+      summaryItems.push(item);
+      continue;
+    }
+
+    if (hasTrailingAnswer && isAssistantTextItem(item) && getVisibleAssistantNoteText(item)) {
+      summaryItems.push(item);
+      continue;
+    }
+
+    visibleItems.push(item);
+  }
+
+  if (summaryItems.length === 0) {
+    return null;
+  }
+
+  return [
+    {
+      id: `work-summary:${workedForItem.id}`,
+      kind: 'work_summary_group',
+      workedForLabel: workedForItem.label,
+      stepLabel: formatPreviousStepCount(countWorkSummarySteps(summaryItems)),
+      items: summaryItems
+    },
+    ...compactCompletedActivityRows([...visibleItems, ...afterWorkedFor])
+  ];
+}
+
+function compactCompletedActivityRows(
+  items: RunTranscriptItem[],
+): TranscriptRenderableItem[] {
   const grouped: TranscriptRenderableItem[] = [];
   let pendingActivityItems: Extract<RunTranscriptItem, { kind: 'activity_line' }>[] = [];
 
@@ -373,34 +593,171 @@ export function compactCompletedTranscriptActivityGroups(
   return grouped;
 }
 
+export function compactCompletedTranscriptActivityGroups(
+  items: RunTranscriptItem[],
+  runState: 'running' | 'completed' | 'failed' | 'aborted' | null,
+  _runningWorkedForLabel: string | null = null
+): TranscriptRenderableItem[] {
+  if (runState === 'running') {
+    return items;
+  }
+
+  return compactWorkedForSummary(items) ?? compactCompletedActivityRows(items);
+}
+
 export function RunTranscriptTimeline({
   items,
   skills,
   runState = null,
+  activityStartedAt = null,
   compactActivity = true
 }: {
   items: RunTranscriptItem[];
   skills: SkillDefinition[];
   runState?: 'running' | 'completed' | 'failed' | 'aborted' | null;
+  activityStartedAt?: string | null;
   compactActivity?: boolean;
 }) {
   const [expandedTerminalId, setExpandedTerminalId] = useState<string | null>(null);
   const [expandedThinkingId, setExpandedThinkingId] = useState<string | null>(null);
   const [expandedActivityGroupId, setExpandedActivityGroupId] = useState<string | null>(null);
+  const [expandedCommandGroupId, setExpandedCommandGroupId] = useState<string | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const transcriptLineClassName =
     'rounded-[18px] border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-surface-2)] px-4 py-3';
   const plainTranscriptLineClassName = 'px-1 py-0.5';
   const thinkingLineClassName = 'px-1 py-1';
   const metaClassName = 'text-[11px] font-medium text-[color:var(--ui-text-subtle)]';
-  const renderableItems = compactActivity ? compactCompletedTranscriptActivityGroups(items, runState) : items;
+  const workingForLabel = runState === 'running' ? formatWorkingForLabel(activityStartedAt, elapsedSeconds) : null;
+  const renderableItems = compactActivity ? compactCompletedTranscriptActivityGroups(items, runState, workingForLabel) : items;
+
+  useEffect(() => {
+    if (runState !== 'running' || !activityStartedAt) {
+      setElapsedSeconds(0);
+      return;
+    }
+
+    const startedAtMs = new Date(activityStartedAt).getTime();
+    if (!Number.isFinite(startedAtMs)) {
+      setElapsedSeconds(0);
+      return;
+    }
+
+    const update = () => {
+      setElapsedSeconds(Math.max(1, Math.floor((Date.now() - startedAtMs) / 1000)));
+    };
+
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [activityStartedAt, runState]);
 
   return (
     <div className="run-transcript-timeline flex flex-col gap-4">
       {renderableItems.map((item, index) => {
+        if (item.kind === 'work_summary_group') {
+          const expanded = expandedActivityGroupId === item.id;
+          const workedGroupSources = getWorkedGroupSources(renderableItems, index);
+          const detailItems = compactWorkSummaryDetailItems(item.items);
+          return (
+            <div
+              key={item.id}
+              className={cx(
+                'run-transcript-activity-group',
+                expanded && 'is-expanded',
+                'is-worked-for-summary'
+              )}
+            >
+              <DisclosureButton
+                className="run-transcript-activity-group-trigger run-transcript-detail-trigger"
+                align="start"
+                trailingIcon={expanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
+                onClick={() => setExpandedActivityGroupId((current) => (current === item.id ? null : item.id))}
+              >
+                <span className="run-transcript-activity-group-summary">
+                  <span className="run-transcript-activity-group-label">{item.workedForLabel}</span>
+                  <span className="run-transcript-activity-group-detail">{item.stepLabel}</span>
+                </span>
+              </DisclosureButton>
+              {expanded ? (
+                <div className="run-transcript-activity-group-body mt-3 flex flex-col gap-3">
+                  {detailItems.map((detailItem) => {
+                    if (detailItem.kind === 'assistant_note') {
+                      return (
+                        <div key={detailItem.id} className="run-transcript-activity-thought">
+                          {detailItem.text}
+                        </div>
+                      );
+                    }
+
+                    if (detailItem.kind === 'command_group') {
+                      const commandsExpanded = expandedCommandGroupId === detailItem.id;
+                      return (
+                        <div key={detailItem.id} className="run-transcript-command-group">
+                          <DisclosureButton
+                            className="run-transcript-command-group-trigger run-transcript-detail-trigger"
+                            align="start"
+                            trailingIcon={commandsExpanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
+                            onClick={() => setExpandedCommandGroupId((current) => (current === detailItem.id ? null : detailItem.id))}
+                          >
+                            <span className="run-transcript-command-group-label">{detailItem.label}</span>
+                          </DisclosureButton>
+                          {commandsExpanded ? (
+                            <div className="run-transcript-command-group-body">
+                              {detailItem.items.map((commandItem) => (
+                                <div key={commandItem.id} className="run-transcript-command-group-entry">
+                                  <RunTranscriptTimeline items={[commandItem]} skills={skills} runState={runState} compactActivity={false} />
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    }
+
+                    if (detailItem.item.activityKind === 'thinking' || detailItem.item.activityKind === 'guidance') {
+                      const detailText = detailItem.item.text || detailItem.item.label;
+                      return (
+                        <div key={detailItem.id} className="run-transcript-activity-thought">
+                          {detailText}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div key={detailItem.id} className="run-transcript-activity-group-entry">
+                        <RunTranscriptTimeline items={[detailItem.item]} skills={skills} runState={runState} compactActivity={false} />
+                      </div>
+                    );
+                  })}
+                  {workedGroupSources && workedGroupSources.length > 0 ? (
+                    <Sources className="run-transcript-worked-sources">
+                      <SourcesTrigger className="run-transcript-worked-sources-trigger" count={workedGroupSources.length} />
+                      <SourcesContent className="run-transcript-worked-sources-content">
+                        {workedGroupSources.map((source) => (
+                          <Source
+                            key={`${item.id}:${source.url}`}
+                            className="run-transcript-worked-source"
+                            excerpt={source.excerpt}
+                            href={source.url}
+                            snippet={source.snippet}
+                            title={source.title}
+                          />
+                        ))}
+                      </SourcesContent>
+                    </Sources>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          );
+        }
+
         if (item.kind === 'activity_group') {
           const expanded = expandedActivityGroupId === item.id;
           const detailLabel = item.workedForLabel ? null : summarizeActivityGroupKinds(item.items);
           const workedGroupSources = item.workedForLabel ? getWorkedGroupSources(renderableItems, index) : null;
+          const detailItems = compactActivityGroupDetailItems(item.items);
           return (
             <div
               key={item.id}
@@ -423,11 +780,47 @@ export function RunTranscriptTimeline({
               </DisclosureButton>
               {expanded ? (
                 <div className="run-transcript-activity-group-body mt-3 flex flex-col gap-3">
-                  {item.items.map((activityItem) => (
-                    <div key={activityItem.id} className="run-transcript-activity-group-entry">
-                      <RunTranscriptTimeline items={[activityItem]} skills={skills} runState="running" compactActivity={false} />
-                    </div>
-                  ))}
+                  {detailItems.map((detailItem) => {
+                    if (detailItem.kind === 'command_group') {
+                      const commandsExpanded = expandedCommandGroupId === detailItem.id;
+                      return (
+                        <div key={detailItem.id} className="run-transcript-command-group">
+                          <DisclosureButton
+                            className="run-transcript-command-group-trigger run-transcript-detail-trigger"
+                            align="start"
+                            trailingIcon={commandsExpanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
+                            onClick={() => setExpandedCommandGroupId((current) => (current === detailItem.id ? null : detailItem.id))}
+                          >
+                            <span className="run-transcript-command-group-label">{detailItem.label}</span>
+                          </DisclosureButton>
+                          {commandsExpanded ? (
+                            <div className="run-transcript-command-group-body">
+                              {detailItem.items.map((commandItem) => (
+                                <div key={commandItem.id} className="run-transcript-command-group-entry">
+                                  <RunTranscriptTimeline items={[commandItem]} skills={skills} runState={runState} compactActivity={false} />
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    }
+
+                    if (detailItem.item.activityKind === 'thinking') {
+                      const detailText = detailItem.item.text || detailItem.item.label;
+                      return (
+                        <div key={detailItem.id} className="run-transcript-activity-thought">
+                          {detailText}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div key={detailItem.id} className="run-transcript-activity-group-entry">
+                        <RunTranscriptTimeline items={[detailItem.item]} skills={skills} runState={runState} compactActivity={false} />
+                      </div>
+                    );
+                  })}
                   {workedGroupSources && workedGroupSources.length > 0 ? (
                     <Sources className="run-transcript-worked-sources">
                       <SourcesTrigger className="run-transcript-worked-sources-trigger" count={workedGroupSources.length} />
@@ -472,6 +865,7 @@ export function RunTranscriptTimeline({
           }
 
           const sourcesNestedWithWorkedGroup = shouldNestAssistantSourcesWithWorkedGroup(renderableItems, index);
+          const streamAssistantAsPlainText = runState === 'running';
 
           return (
             <article key={item.id} className="turn turn-assistant run-transcript-message run-transcript-message-agent flex flex-col gap-3">
@@ -493,7 +887,11 @@ export function RunTranscriptTimeline({
               ) : null}
               <Message from="assistant" className="max-w-full">
                 <MessageContent className="turn-content turn-content-assistant w-full max-w-full text-[15px] leading-7 text-[color:var(--ui-text-title)]">
-                  <MessageResponse normalizeSource>{sanitizedAssistantText}</MessageResponse>
+                  {streamAssistantAsPlainText ? (
+                    <div className="whitespace-pre-wrap break-words">{sanitizedAssistantText}</div>
+                  ) : (
+                    <MessageResponse normalizeSource>{sanitizedAssistantText}</MessageResponse>
+                  )}
                 </MessageContent>
               </Message>
             </article>
@@ -502,65 +900,62 @@ export function RunTranscriptTimeline({
 
         if (item.kind === 'resolution_summary') {
           return (
-              <article
+            <article
               key={item.id}
-              className="run-transcript-resolution-summary rounded-[22px] border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-surface-2)] px-5 py-4"
+              className="run-transcript-resolution-summary"
             >
-              <div className="mb-4 text-[11px] font-medium uppercase tracking-[0.08em] text-[color:var(--ui-text-subtle)]">
-                Resolved
-              </div>
-              <div className="flex flex-col gap-4">
-                <div>
-                  <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-[color:var(--ui-text-subtle)]">Outcome</div>
-                  <div className="text-[14px] leading-6 text-[color:var(--ui-text-title)]">{item.outcome}</div>
+              <div className="run-transcript-resolution-label">Summary</div>
+              <div className="run-transcript-resolution-outcome">{item.outcome}</div>
+
+              {item.filesChanged.length > 0 || item.toolsUsed.length > 0 || item.verificationCommands.length > 0 || item.remainingRisk ? (
+                <div className="run-transcript-resolution-details">
+                  {item.filesChanged.length > 0 ? (
+                    <div className="run-transcript-resolution-section">
+                      <div className="run-transcript-resolution-section-label">Changed</div>
+                      <div className="run-transcript-resolution-list">
+                        {item.filesChanged.map((path) => (
+                          <div key={`${item.id}:${path}`} className="run-transcript-resolution-code-line">
+                            {path}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {item.verificationCommands.length > 0 ? (
+                    <div className="run-transcript-resolution-section">
+                      <div className="run-transcript-resolution-section-label">Verified</div>
+                      <div className="run-transcript-resolution-list">
+                        {item.verificationCommands.map((command) => (
+                          <div key={`${item.id}:${command}`} className="run-transcript-resolution-code-line">
+                            {command}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {item.toolsUsed.length > 0 ? (
+                    <div className="run-transcript-resolution-section">
+                      <div className="run-transcript-resolution-section-label">Used</div>
+                      <div className="run-transcript-resolution-list">
+                        {item.toolsUsed.map((tool) => (
+                          <div key={`${item.id}:${tool}`} className="run-transcript-resolution-code-line">
+                            {tool}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {item.remainingRisk ? (
+                    <div className="run-transcript-resolution-section">
+                      <div className="run-transcript-resolution-section-label">Next step</div>
+                      <div className="run-transcript-resolution-note">{item.remainingRisk}</div>
+                    </div>
+                  ) : null}
                 </div>
-
-                {item.filesChanged.length > 0 ? (
-                  <div>
-                    <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.08em] text-[color:var(--ui-text-subtle)]">Files changed</div>
-                    <div className="flex flex-col gap-1.5">
-                      {item.filesChanged.map((path) => (
-                        <div key={`${item.id}:${path}`} className="font-mono text-[12px] leading-6 text-[color:var(--ui-text)]">
-                          {path}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {item.toolsUsed.length > 0 ? (
-                  <div>
-                    <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.08em] text-[color:var(--ui-text-subtle)]">Tools used</div>
-                    <div className="flex flex-col gap-1.5">
-                      {item.toolsUsed.map((tool) => (
-                        <div key={`${item.id}:${tool}`} className="font-mono text-[12px] leading-6 text-[color:var(--ui-text)]">
-                          {tool}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {item.verificationCommands.length > 0 ? (
-                  <div>
-                    <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.08em] text-[color:var(--ui-text-subtle)]">Verification</div>
-                    <div className="flex flex-col gap-1.5">
-                      {item.verificationCommands.map((command) => (
-                        <div key={`${item.id}:${command}`} className="font-mono text-[12px] leading-6 text-[color:var(--ui-text)]">
-                          {command}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {item.remainingRisk ? (
-                  <div>
-                    <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-[color:var(--ui-text-subtle)]">Remaining risk</div>
-                    <div className="text-[13px] leading-6 text-[color:var(--ui-text)]">{item.remainingRisk}</div>
-                  </div>
-                ) : null}
-              </div>
+              ) : null}
             </article>
           );
         }

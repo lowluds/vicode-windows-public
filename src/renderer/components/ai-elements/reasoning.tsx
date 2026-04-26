@@ -1,10 +1,8 @@
 "use client";
 
-import { useControllableState } from '@radix-ui/react-use-controllable-state';
 import { cjk } from '@streamdown/cjk';
 import { code } from '@streamdown/code';
 import { math } from '@streamdown/math';
-import { mermaid } from '@streamdown/mermaid';
 import type { ComponentProps, ReactNode } from 'react';
 import {
   createContext,
@@ -18,7 +16,7 @@ import {
 } from 'react';
 import { Streamdown } from 'streamdown';
 import { ChevronDownIcon, CpuIcon } from '../icons';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger, useControllableState } from '../ui';
 import { cx } from '../ui/utils';
 import { Shimmer } from './shimmer';
 
@@ -178,7 +176,7 @@ export const ReasoningTrigger = memo(function ReasoningTrigger({
   );
 });
 
-const streamdownPlugins = { cjk, code, math, mermaid };
+const streamdownPlugins = { cjk, code, math };
 
 export interface ReasoningContentProps extends ComponentProps<typeof CollapsibleContent> {
   children: string;

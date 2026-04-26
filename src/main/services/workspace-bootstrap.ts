@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Project } from '../../shared/domain';
 import type { RepoInspectionResult } from './repo-inspection';
@@ -23,9 +23,21 @@ export interface WorkspaceBootstrapStatus {
   folderPath: string | null;
   existingFiles: string[];
   missingFiles: string[];
+  contractFiles?: WorkspaceContractFileStatus[];
   needsBootstrap: boolean;
   dismissed: boolean;
   suggestionEligible: boolean;
+}
+
+export interface WorkspaceContractFileStatus {
+  kind: WorkspaceBootstrapFileKind;
+  label: string;
+  fileName: string;
+  relativePath: string;
+  purpose: string;
+  exists: boolean;
+  required: boolean;
+  loadMode: 'direct_prompt' | 'memory_retrieval' | 'draft_only';
 }
 
 export interface WorkspaceBootstrapDraftBundle {
@@ -36,6 +48,56 @@ export interface WorkspaceBootstrapDraftBundle {
 
 const REQUIRED_CONTRACT_FILES = ['AGENTS.md'] as const;
 const OPTIONAL_CONTRACT_FILES = ['SOUL.md'] as const;
+
+const WORKSPACE_PROFILE_FILES: Array<{
+  kind: WorkspaceBootstrapFileKind;
+  label: string;
+  relativePath: string;
+  purpose: string;
+  required: boolean;
+  loadMode: WorkspaceContractFileStatus['loadMode'];
+}> = [
+  {
+    kind: 'agents',
+    label: 'Operating guide',
+    relativePath: 'AGENTS.md',
+    purpose: 'Stable repo rules and working standards.',
+    required: true,
+    loadMode: 'direct_prompt'
+  },
+  {
+    kind: 'soul',
+    label: 'Agent identity',
+    relativePath: 'SOUL.md',
+    purpose: 'Optional workspace tone and collaborator posture.',
+    required: false,
+    loadMode: 'direct_prompt'
+  },
+  {
+    kind: 'user',
+    label: 'User preferences',
+    relativePath: 'USER.md',
+    purpose: 'Durable communication and approval preferences.',
+    required: false,
+    loadMode: 'direct_prompt'
+  },
+  {
+    kind: 'memory',
+    label: 'Long-term memory',
+    relativePath: 'MEMORY.md',
+    purpose: 'Curated facts and decisions that survive threads.',
+    required: false,
+    loadMode: 'memory_retrieval'
+  },
+  {
+    kind: 'daily_note',
+    label: 'Recent notes',
+    relativePath: 'memory/YYYY-MM-DD.md',
+    purpose: 'Rolling workspace notes promoted through review.',
+    required: false,
+    loadMode: 'memory_retrieval'
+  }
+];
 
 function draftKindToFileName(kind: WorkspaceBootstrapFileKind, date: Date) {
   switch (kind) {
@@ -107,6 +169,7 @@ export class WorkspaceBootstrapService {
         folderPath: null,
         existingFiles: [],
         missingFiles: [...REQUIRED_CONTRACT_FILES],
+        contractFiles: this.getContractFiles(null),
         needsBootstrap: false,
         dismissed: false,
         suggestionEligible: false
@@ -120,6 +183,7 @@ export class WorkspaceBootstrapService {
         folderPath: project.folderPath,
         existingFiles: [],
         missingFiles: [...REQUIRED_CONTRACT_FILES],
+        contractFiles: this.getContractFiles(project.folderPath),
         needsBootstrap: false,
         dismissed: false,
         suggestionEligible: false
@@ -141,6 +205,7 @@ export class WorkspaceBootstrapService {
       folderPath: project.folderPath,
       existingFiles,
       missingFiles,
+      contractFiles: this.getContractFiles(project.folderPath),
       needsBootstrap,
       dismissed,
       suggestionEligible: needsBootstrap && !dismissed
@@ -238,5 +303,44 @@ export class WorkspaceBootstrapService {
 
   dismissSuggestion(project: Pick<Project, 'id'>) {
     this.options.dismiss?.(project.id);
+  }
+
+  private getContractFiles(folderPath: string | null): WorkspaceContractFileStatus[] {
+    const latestDailyNote = folderPath ? this.findLatestDailyNote(folderPath) : null;
+
+    return WORKSPACE_PROFILE_FILES.map((entry) => {
+      const relativePath = entry.kind === 'daily_note'
+        ? latestDailyNote ?? entry.relativePath
+        : entry.relativePath;
+      const exists =
+        folderPath !== null &&
+        (entry.kind === 'daily_note'
+          ? latestDailyNote !== null
+          : existsSync(join(folderPath, entry.relativePath)));
+
+      return {
+        ...entry,
+        fileName: relativePath,
+        relativePath,
+        exists
+      };
+    });
+  }
+
+  private findLatestDailyNote(folderPath: string) {
+    const memoryDir = join(folderPath, 'memory');
+    if (!existsSync(memoryDir)) {
+      return null;
+    }
+
+    try {
+      const latest = readdirSync(memoryDir)
+        .filter((fileName) => /^\d{4}-\d{2}-\d{2}\.md$/u.test(fileName))
+        .sort()
+        .at(-1);
+      return latest ? `memory/${latest}` : null;
+    } catch {
+      return null;
+    }
   }
 }

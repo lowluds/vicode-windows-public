@@ -1,4 +1,16 @@
 import type { RunActivityInfo, RunChangeArtifact, RunEvent, RunProgressState, ThreadDetail, ThreadSource, ThreadTurn } from '../../shared/domain';
+import {
+  compactAssistantDetailAfterResolutionSummary,
+  compactAssistantFollowUps,
+  compactOperationalAssistantNarration,
+  deriveResolutionSummaryItem
+} from './run-activity-resolution';
+import {
+  compactConcreteFollowupToolResults,
+  compactRedundantToolCalls,
+  deriveFriendlyToolCallDisplay,
+  deriveToolResultDisplay
+} from './run-activity-tool-display';
 
 export interface TerminalCommandViewModel {
   id: string;
@@ -19,7 +31,7 @@ export interface ThinkingLineViewModel {
   text: string;
   url: string | null;
   path: string | null;
-  kind: 'thinking' | 'skill' | 'memory_recall' | 'memory_checkpoint' | 'web_search' | 'delegation' | 'tool_call' | 'tool_result' | 'file_edit' | 'file_write' | 'mkdir' | 'file_open' | 'file_read' | 'file_search';
+  kind: 'thinking' | 'guidance' | 'skill' | 'memory_recall' | 'memory_checkpoint' | 'web_search' | 'delegation' | 'tool_call' | 'tool_result' | 'file_edit' | 'file_write' | 'mkdir' | 'file_open' | 'file_read' | 'file_search';
 }
 
 export interface RunActivityTimelineThinkingItem {
@@ -46,7 +58,7 @@ export interface RunTranscriptAssistantItem {
 export interface RunTranscriptActivityItem {
   id: string;
   kind: 'activity_line';
-  activityKind: 'thinking' | 'skill' | 'memory_recall' | 'memory_checkpoint' | 'web_search' | 'delegation' | 'tool_call' | 'tool_result' | 'file_edit' | 'file_write' | 'mkdir' | 'terminal_command' | 'file_open' | 'file_read' | 'file_search' | 'inspection_group' | 'write_group';
+  activityKind: 'thinking' | 'guidance' | 'skill' | 'memory_recall' | 'memory_checkpoint' | 'web_search' | 'delegation' | 'tool_call' | 'tool_result' | 'file_edit' | 'file_write' | 'mkdir' | 'terminal_command' | 'file_open' | 'file_read' | 'file_search' | 'inspection_group' | 'write_group';
   toolName: string | null;
   label: string;
   text: string;
@@ -236,7 +248,7 @@ function readActivityInfo(value: unknown): RunActivityInfo | null {
   }
 
   const candidate = value as Partial<RunActivityInfo>;
-  if ((candidate.kind === 'thinking' || candidate.kind === 'skill' || candidate.kind === 'memory_recall' || candidate.kind === 'memory_checkpoint' || candidate.kind === 'web_search' || candidate.kind === 'delegation' || candidate.kind === 'tool_call' || candidate.kind === 'tool_result' || candidate.kind === 'file_edit' || candidate.kind === 'file_write' || candidate.kind === 'mkdir' || candidate.kind === 'terminal_command' || candidate.kind === 'terminal_output' || candidate.kind === 'file_open' || candidate.kind === 'file_read' || candidate.kind === 'file_search' || candidate.kind === 'change_summary') && typeof candidate.summary === 'string') {
+  if ((candidate.kind === 'thinking' || candidate.kind === 'guidance' || candidate.kind === 'skill' || candidate.kind === 'memory_recall' || candidate.kind === 'memory_checkpoint' || candidate.kind === 'web_search' || candidate.kind === 'delegation' || candidate.kind === 'tool_call' || candidate.kind === 'tool_result' || candidate.kind === 'file_edit' || candidate.kind === 'file_write' || candidate.kind === 'mkdir' || candidate.kind === 'terminal_command' || candidate.kind === 'terminal_output' || candidate.kind === 'file_open' || candidate.kind === 'file_read' || candidate.kind === 'file_search' || candidate.kind === 'change_summary') && typeof candidate.summary === 'string') {
     return {
       kind: candidate.kind,
       summary: clean(candidate.summary),
@@ -315,107 +327,6 @@ function compactTerminalOutput(command: string | null, values: string[]) {
   return stripLeadingTerminalCommandEcho(command, values);
 }
 
-function formatYesNo(value: boolean) {
-  return value ? 'Yes' : 'No';
-}
-
-function normalizeFriendlyToolDetailLine(toolName: string | null, line: string) {
-  const trimmed = line.trim();
-  if (!trimmed || !toolName) {
-    return trimmed;
-  }
-
-  switch (toolName) {
-    case 'web_search':
-      return trimmed
-        .replace(/^query:\s*/iu, 'Search query: ')
-        .replace(/^max results:\s*/iu, 'Results limit: ');
-    case 'extract_web_page':
-      return trimmed
-        .replace(/^url:\s*/iu, 'Page URL: ')
-        .replace(/^query:\s*/iu, 'Focus: ');
-    case 'research_topic':
-      return trimmed
-        .replace(/^query:\s*/iu, 'Research topic: ')
-        .replace(/^max results:\s*/iu, 'Results limit: ')
-        .replace(/^max pages:\s*/iu, 'Page limit: ');
-    case 'crawl_site':
-    case 'map_site':
-      return trimmed
-        .replace(/^url:\s*/iu, 'Start URL: ')
-        .replace(/^max pages:\s*/iu, 'Page limit: ')
-        .replace(/^same origin only:\s*(true|false)$/iu, (_, value: string) => `Stay on one site: ${formatYesNo(value.toLowerCase() === 'true')}`);
-    case 'mkdir':
-    case 'create_directory':
-      return trimmed.replace(/^path:\s*/iu, 'Folder: ');
-    default:
-      return trimmed;
-  }
-}
-
-function normalizeFriendlyToolDetailText(toolName: string | null, text: string | null | undefined) {
-  if (!text) {
-    return text ?? null;
-  }
-
-  const normalized = text
-    .split(/\r?\n/u)
-    .map((line) => normalizeFriendlyToolDetailLine(toolName, line))
-    .join('\n')
-    .trim();
-
-  return normalized || null;
-}
-
-function formatFriendlyToolCallLabel(toolName: string | null, fallback: string) {
-  switch (toolName) {
-    case 'mkdir':
-    case 'create_directory':
-      return 'Creating folder';
-    case 'web_search':
-      return 'Searching the web';
-    case 'extract_web_page':
-      return 'Reading a web page';
-    case 'research_topic':
-      return 'Researching a topic';
-    case 'crawl_site':
-      return 'Crawling a site';
-    case 'map_site':
-      return 'Mapping a site';
-    default:
-      return fallback;
-  }
-}
-
-function formatFriendlyToolResultLabel(toolName: string | null, status: string | null, fallback: string) {
-  const isError = status?.toLowerCase() === 'error' || status?.toLowerCase() === 'failed' || status?.toLowerCase() === 'stopped';
-
-  switch (toolName) {
-    case 'mkdir':
-    case 'create_directory':
-      return isError ? 'Could not create folder' : 'Created folder';
-    case 'web_search':
-      return isError ? 'Web search failed' : 'Searched the web';
-    case 'extract_web_page':
-      return isError ? 'Could not read the web page' : 'Read the web page';
-    case 'research_topic':
-      return isError ? 'Research failed' : 'Finished research';
-    case 'crawl_site':
-      return isError ? 'Site crawl failed' : 'Crawled the site';
-    case 'map_site':
-      return isError ? 'Site map failed' : 'Mapped the site';
-    default:
-      return fallback;
-  }
-}
-
-function deriveFriendlyToolCallDisplay(activity: Extract<RunActivityInfo, { kind: 'tool_call' }>) {
-  return {
-    label: formatFriendlyToolCallLabel(activity.toolName ?? null, activity.summary),
-    text: normalizeFriendlyToolDetailText(activity.toolName ?? null, activity.text ?? activity.summary) ?? activity.summary
-  };
-}
-
 function appendThinkingLine(target: ThinkingLineViewModel[], entry: Omit<ThinkingLineViewModel, 'id'>, seed: string) {
   const label = clean(entry.label);
   const text = cleanMultiline(entry.text);
@@ -436,97 +347,6 @@ function appendThinkingLine(target: ThinkingLineViewModel[], entry: Omit<Thinkin
     path: entry.path ?? null,
     kind: entry.kind
   });
-}
-
-function deriveToolResultDisplay(activity: RunActivityInfo) {
-  if (activity.kind === 'tool_result' && activity.toolName !== 'run_command') {
-    return {
-      label: formatFriendlyToolResultLabel(activity.toolName ?? null, activity.status ?? null, activity.summary),
-      text: normalizeFriendlyToolDetailText(activity.toolName ?? null, activity.text ?? activity.summary) ?? activity.summary
-    };
-  }
-
-  if (
-    activity.kind !== 'tool_result'
-    || activity.toolName !== 'run_command'
-    || activity.status !== 'error'
-  ) {
-    return {
-      label: activity.summary,
-      text: activity.text ?? activity.summary
-    };
-  }
-
-  const detail = activity.text ?? activity.summary;
-  const command = clean(activity.command ?? '');
-  const isVerificationCommand = /^(?:npm|pnpm|yarn|bun|npx|vite|vitest|playwright|pytest|cargo|go|dotnet|python\b.*-m\s+pytest\b)/iu.test(command)
-    && /\b(?:build|test|check|verify|preview|lint|typecheck|pytest|vitest|playwright)\b/iu.test(command);
-  const blockedPrefix = isVerificationCommand ? 'Blocked verification command' : 'Blocked command';
-  if (detail.startsWith('run_command requires Full access.')) {
-    return {
-      label: `${blockedPrefix}: Full access required`,
-      text: detail
-    };
-  }
-  if (detail.startsWith('run_command is disabled for this workspace.')) {
-    return {
-      label: `${blockedPrefix}: workspace commands disabled`,
-      text: detail
-    };
-  }
-  if (detail.startsWith('run_command is blocked by this workspace network policy.')) {
-    return {
-      label: `${blockedPrefix}: workspace network blocked`,
-      text: detail
-    };
-  }
-  if (detail.startsWith('run_command is blocked by runtime launcher policy. Nested shell launchers')) {
-    return {
-      label: `${blockedPrefix}: nested shell launcher`,
-      text: detail
-    };
-  }
-  if (detail.startsWith('run_command is blocked by runtime launcher policy. Inline interpreter commands')) {
-    return {
-      label: `${blockedPrefix}: inline interpreter`,
-      text: detail
-    };
-  }
-  if (detail.startsWith('run_command is blocked by runtime launcher policy. Remote shell commands')) {
-    return {
-      label: `${blockedPrefix}: remote shell launcher`,
-      text: detail
-    };
-  }
-  if (detail.startsWith('run_command is blocked by runtime path policy. The command references an absolute path outside the trusted workspace')) {
-    return {
-      label: `${blockedPrefix}: outside workspace path`,
-      text: detail
-    };
-  }
-  if (detail.startsWith('run_command is blocked by runtime path policy. The command references a relative path that resolves outside the trusted workspace')) {
-    return {
-      label: `${blockedPrefix}: path escape`,
-      text: detail
-    };
-  }
-  if (detail.startsWith('run_command was not approved by the user.')) {
-    return {
-      label: isVerificationCommand ? 'Verification command denied' : 'Command denied',
-      text: detail
-    };
-  }
-  if (detail.startsWith('run_command requires a runtime approval handler')) {
-    return {
-      label: `${blockedPrefix}: approval unavailable`,
-      text: detail
-    };
-  }
-
-  return {
-    label: activity.summary,
-    text: detail
-  };
 }
 
 function shouldSuppressTranscriptToolResult(activity: RunActivityInfo) {
@@ -589,109 +409,6 @@ function isWriteActivityItem(item: RunTranscriptItem): item is RunTranscriptActi
 
 function isToolCallActivityItem(item: RunTranscriptItem): item is RunTranscriptActivityItem {
   return item.kind === 'activity_line' && item.activityKind === 'tool_call';
-}
-
-function shouldSuppressToolCallBeforeConcreteAction(toolCallItem: RunTranscriptActivityItem, nextItem: RunTranscriptItem | undefined) {
-  if (!nextItem || nextItem.kind !== 'activity_line') {
-    return false;
-  }
-
-  switch (toolCallItem.toolName) {
-    case 'list_directory':
-    case 'read_file':
-    case 'open_file':
-    case 'search_files':
-    case 'grep_search':
-    case 'glob_search':
-      return nextItem.activityKind === 'file_open'
-        || nextItem.activityKind === 'file_read'
-        || nextItem.activityKind === 'file_search'
-        || nextItem.activityKind === 'inspection_group';
-    case 'write_file':
-    case 'mkdir':
-    case 'create_directory':
-      return nextItem.activityKind === 'file_write'
-        || nextItem.activityKind === 'mkdir'
-        || nextItem.activityKind === 'write_group';
-    case 'run_command':
-    case 'exec_command':
-      return nextItem.activityKind === 'terminal_command';
-    case 'web_search':
-    case 'research_topic':
-    case 'extract_web_page':
-    case 'crawl_site':
-    case 'map_site':
-      return nextItem.activityKind === 'web_search';
-    default:
-      break;
-  }
-
-  return false;
-}
-
-function compactRedundantToolCalls(items: RunTranscriptItem[]) {
-  const results: RunTranscriptItem[] = [];
-
-  for (let index = 0; index < items.length; index += 1) {
-    const item = items[index];
-    if (isToolCallActivityItem(item) && shouldSuppressToolCallBeforeConcreteAction(item, items[index + 1])) {
-      continue;
-    }
-
-    results.push(item);
-  }
-
-  return results;
-}
-
-function shouldSuppressToolResultAfterConcreteAction(
-  previousItem: RunTranscriptItem | undefined,
-  item: RunTranscriptItem
-) {
-  if (item.kind !== 'activity_line' || item.activityKind !== 'tool_result') {
-    return false;
-  }
-
-  if (!previousItem || previousItem.kind !== 'activity_line') {
-    return false;
-  }
-
-  if (
-    /^Failed (?:run_command|exec_command)\b/i.test(item.label)
-    || /^Blocked command\b/i.test(item.label)
-    || /^Blocked verification command\b/i.test(item.label)
-  ) {
-    return previousItem.activityKind === 'terminal_command';
-  }
-
-  if (/^Opened /i.test(item.label) || /^Read /i.test(item.label) || /^Searched /i.test(item.label)) {
-    return previousItem.activityKind === 'inspection_group'
-      || previousItem.activityKind === 'file_open'
-      || previousItem.activityKind === 'file_read'
-      || previousItem.activityKind === 'file_search';
-  }
-
-  if (/^(?:Created|Updated|Wrote) /i.test(item.label)) {
-    return previousItem.activityKind === 'write_group'
-      || previousItem.activityKind === 'file_write'
-      || previousItem.activityKind === 'mkdir';
-  }
-
-  return false;
-}
-
-function compactConcreteFollowupToolResults(items: RunTranscriptItem[]) {
-  const results: RunTranscriptItem[] = [];
-
-  for (const item of items) {
-    const previousItem = results[results.length - 1];
-    if (shouldSuppressToolResultAfterConcreteAction(previousItem, item)) {
-      continue;
-    }
-    results.push(item);
-  }
-
-  return results;
 }
 
 function formatInspectionGroupLabel(items: RunTranscriptActivityItem[]) {
@@ -826,402 +543,6 @@ function compactTranscriptActivityItems(items: RunTranscriptItem[]) {
   return results;
 }
 
-function shouldCompactAssistantPreamble(item: RunTranscriptAssistantItem) {
-  const text = item.text.trim();
-  if (!text || text.length > 180) {
-    return false;
-  }
-
-  if (!/[.!?…]\s*$/u.test(text)) {
-    return false;
-  }
-
-  return /^(?:I(?:'|’)?m going to|I will|I(?:'|’)?ll|Let me|Next, I will|Next, I(?:'|’)?ll|First, I will|First, I(?:'|’)?ll)\b/u.test(text);
-}
-
-function isOperationalAssistantParagraph(text: string) {
-  return /^(?:I(?:'|’)?m going to|I am going to|I will|I(?:'|’)?ll|I will now|I will start by|I(?:'|’)?ll start by|Let me|Next, I will|Next, I(?:'|’)?ll|First, I will|First, I(?:'|’)?ll)\b/u.test(text.trim());
-}
-
-function isCompletionStyleAssistantParagraph(text: string) {
-  const normalized = text.trim();
-  if (!normalized || isOperationalAssistantParagraph(normalized)) {
-    return false;
-  }
-
-  return /\b(?:complete|completed|done|repaired|updated|added|implemented|fixed|built|ready)\b/i.test(normalized);
-}
-
-function isGenericResolutionOutcome(text: string) {
-  const normalized = text.trim();
-  if (!normalized || normalized.length > 120 || normalized.includes('\n')) {
-    return false;
-  }
-
-  const wordCount = normalized
-    .replace(/[.?!]+$/u, '')
-    .split(/\s+/u)
-    .filter(Boolean).length;
-
-  if (wordCount > 5) {
-    return false;
-  }
-
-  return /^(?:Feature slice complete\.|Feature slice implemented\.|Refinement complete\.|Repair complete\.|Build complete\.|Implementation complete\.|Update complete\.|Completed\.)$/iu.test(normalized)
-    || /^(?:Built|Implemented|Updated|Fixed|Repaired|Completed) [^.?!]{0,36}[.?!]$/iu.test(normalized);
-}
-
-function isConciseResolutionOutcome(text: string) {
-  const normalized = text.trim();
-  if (!normalized || normalized.length > 140 || normalized.includes('\n')) {
-    return false;
-  }
-
-  if (isOperationalAssistantParagraph(normalized)) {
-    return false;
-  }
-
-  if (/^[#*-]\s/u.test(normalized)) {
-    return false;
-  }
-
-  return /\b(?:complete|completed|done|repaired|updated|added|implemented|fixed|built|created|wired|verified|scaffolded|shipped|resolved|finished)\b/i.test(normalized);
-}
-
-function shouldPromoteResolutionOutcome(text: string) {
-  return isGenericResolutionOutcome(text) || isConciseResolutionOutcome(text);
-}
-
-function collectResolutionFiles(
-  items: RunTranscriptItem[],
-  changeArtifacts: RunTranscriptChangeArtifactItem[]
-) {
-  const files: string[] = [];
-
-  for (const artifact of changeArtifacts) {
-    for (const file of artifact.artifact.files) {
-      appendIfMissing(files, clean(file.path));
-    }
-  }
-
-  for (const item of items) {
-    if (item.kind !== 'activity_line') {
-      continue;
-    }
-
-    if (item.activityKind === 'file_write' || item.activityKind === 'mkdir' || item.activityKind === 'file_edit') {
-      appendIfMissing(files, item.path ?? item.text);
-      continue;
-    }
-
-    if (item.activityKind === 'write_group') {
-      for (const value of item.text.split('\n')) {
-        appendIfMissing(files, clean(value));
-      }
-    }
-  }
-
-  return files.filter(Boolean);
-}
-
-function collectResolutionVerificationCommands(items: RunTranscriptItem[]) {
-  const commands: string[] = [];
-
-  for (const item of items) {
-    if (item.kind !== 'activity_line' || item.activityKind !== 'terminal_command' || item.status !== 'completed') {
-      continue;
-    }
-
-    appendIfMissing(commands, item.command ? clean(item.command) : null);
-  }
-
-  return commands.filter(Boolean);
-}
-
-function collectResolutionToolsUsed(items: RunTranscriptItem[]) {
-  const tools: string[] = [];
-
-  for (const item of items) {
-    if (item.kind !== 'activity_line' || (item.activityKind !== 'tool_call' && item.activityKind !== 'tool_result')) {
-      continue;
-    }
-
-    const mcpToolMatch = /^(?:Calling|Completed)\s+MCP tool\s+(.+)$/iu.exec(item.label.trim());
-    if (!mcpToolMatch) {
-      continue;
-    }
-
-    appendIfMissing(tools, clean(mcpToolMatch[1] ?? ''));
-  }
-
-  return tools.filter(Boolean);
-}
-
-function matchesRemainingRiskPattern(text: string) {
-  const riskPatterns = [
-    /^Remaining risk:[\s\S]*$/iu,
-    /^No verification commands were run[\s\S]*$/iu,
-    /^I did not run[\s\S]*$/iu,
-    /^I didn't run[\s\S]*$/iu,
-    /^I have not run[\s\S]*$/iu,
-    /^I have not verified[\s\S]*$/iu,
-    /^I haven't verified[\s\S]*$/iu,
-    /^I was not able to run[\s\S]*$/iu,
-    /^I wasn't able to run[\s\S]*$/iu,
-    /^Verification was not run[\s\S]*$/iu,
-    /^(?:Tests|Checks|Verification|Build) (?:were|was) not run[\s\S]*$/iu,
-    /^Not (?:yet )?verified[\s\S]*$/iu,
-    /^Manual verification[\s\S]*$/iu,
-    /^Needs manual verification[\s\S]*$/iu,
-    /^This still needs[\s\S]*$/iu,
-    /^Still needs[\s\S]*$/iu,
-    /^I wasn't able to verify[\s\S]*$/iu,
-    /^You(?:'ll| will) (?:still )?(?:want|need) to[\s\S]*$/iu,
-    /^You may still want to[\s\S]*$/iu,
-    /^Next step:[\s\S]*$/iu,
-    /^The only thing left[\s\S]*$/iu,
-    /^Pending verification[\s\S]*$/iu
-  ];
-
-  return riskPatterns.some((pattern) => pattern.test(text.trim()));
-}
-
-function deriveRemainingRisk(outcome: string) {
-  const normalized = outcome.trim();
-  if (!normalized) {
-    return null;
-  }
-
-  const paragraphs = splitAssistantParagraphs(normalized);
-  const riskParagraph = paragraphs.find((paragraph) => matchesRemainingRiskPattern(paragraph));
-  if (riskParagraph) {
-    return riskParagraph.trim();
-  }
-
-  const candidateSentences = paragraphs.flatMap((paragraph) =>
-    paragraph
-      .split(/(?<=[.?!])\s+/u)
-      .map((sentence) => sentence.trim())
-      .filter(Boolean)
-  );
-
-  for (const candidate of candidateSentences) {
-    if (matchesRemainingRiskPattern(candidate)) {
-      return candidate.trim();
-    }
-  }
-
-  return null;
-}
-
-function splitAssistantParagraphs(text: string) {
-  return text
-    .split(/\n\s*\n/u)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean);
-}
-
-function isSubstantiveResolutionDetailParagraph(text: string) {
-  const normalized = text.trim();
-  if (!normalized || normalized.length < 24) {
-    return false;
-  }
-
-  return !isGenericResolutionOutcome(normalized) && !isOperationalAssistantParagraph(normalized);
-}
-
-function shouldKeepResolutionDetailParagraph(
-  text: string,
-  resolutionSummary: RunTranscriptResolutionSummaryItem
-) {
-  const normalized = text.trim();
-  if (!isSubstantiveResolutionDetailParagraph(normalized)) {
-    return false;
-  }
-
-  const normalizedOutcome = resolutionSummary.outcome.trim();
-  if (normalized === normalizedOutcome) {
-    return false;
-  }
-
-  const normalizedRisk = resolutionSummary.remainingRisk?.trim() ?? null;
-  if (!normalizedRisk) {
-    return true;
-  }
-
-  const trimmedWithoutRisk = normalized.replace(normalizedRisk, '').replace(/\s{2,}/gu, ' ').trim();
-  return Boolean(trimmedWithoutRisk) && isSubstantiveResolutionDetailParagraph(trimmedWithoutRisk);
-}
-
-function deriveResolutionSummaryItem(
-  items: RunTranscriptItem[],
-  changeArtifacts: RunTranscriptChangeArtifactItem[],
-  runState: 'completed' | 'failed' | 'aborted' | null
-) {
-  if (runState !== 'completed') {
-    return null;
-  }
-
-  const assistantItems = items.filter((item): item is RunTranscriptAssistantItem => item.kind === 'assistant_text');
-  const finalAssistant = assistantItems.at(-1)?.text.trim() ?? '';
-  const assistantParagraphs = splitAssistantParagraphs(finalAssistant);
-  const outcome = assistantParagraphs[0] ?? finalAssistant;
-  if (!shouldPromoteResolutionOutcome(outcome)) {
-    return null;
-  }
-
-  const filesChanged = collectResolutionFiles(items, changeArtifacts);
-  const toolsUsed = collectResolutionToolsUsed(items);
-  const verificationCommands = collectResolutionVerificationCommands(items);
-  const remainingRisk = deriveRemainingRisk(finalAssistant);
-
-  if (filesChanged.length === 0 && toolsUsed.length === 0 && verificationCommands.length === 0 && !remainingRisk) {
-    return null;
-  }
-
-  return {
-    id: `resolution-summary:${items.length}`,
-    kind: 'resolution_summary' as const,
-    outcome,
-    filesChanged,
-    toolsUsed,
-    verificationCommands,
-    remainingRisk
-  };
-}
-
-function compactAssistantDetailAfterResolutionSummary(items: RunTranscriptItem[]) {
-  const resolutionSummary = items.find((item): item is RunTranscriptResolutionSummaryItem => item.kind === 'resolution_summary');
-  if (!resolutionSummary) {
-    return items;
-  }
-
-  const results = [...items];
-  for (let index = results.length - 1; index >= 0; index -= 1) {
-    const item = results[index];
-    if (!item || item.kind !== 'assistant_text') {
-      continue;
-    }
-
-    const paragraphs = splitAssistantParagraphs(item.text);
-    if (paragraphs.length === 0 || !shouldPromoteResolutionOutcome(paragraphs[0] ?? '')) {
-      break;
-    }
-
-    const detailParagraphs = paragraphs
-      .slice(1)
-      .map((paragraph) => {
-        const normalizedRisk = resolutionSummary.remainingRisk?.trim() ?? null;
-        if (!normalizedRisk) {
-          return paragraph.trim();
-        }
-        return paragraph.replace(normalizedRisk, '').replace(/\s{2,}/gu, ' ').trim();
-      })
-      .filter((paragraph) => shouldKeepResolutionDetailParagraph(paragraph, resolutionSummary));
-    if (detailParagraphs.length === 0) {
-      results.splice(index, 1);
-      break;
-    }
-
-    results[index] = {
-      ...item,
-      text: detailParagraphs.join('\n\n')
-    };
-    break;
-  }
-
-  return results;
-}
-
-function compactOperationalAssistantNarration(items: RunTranscriptItem[]) {
-  return items.map((item, index) => {
-    if (item.kind !== 'assistant_text') {
-      return item;
-    }
-
-    const paragraphs = item.text
-      .split(/\n\s*\n/u)
-      .map((paragraph) => paragraph.trim())
-      .filter(Boolean);
-
-    if (paragraphs.length < 2) {
-      return item;
-    }
-
-    const completionParagraph = paragraphs.at(-1) ?? '';
-    const operationalParagraphs = paragraphs.slice(0, -1);
-    if (
-      operationalParagraphs.length === 0
-      || !isCompletionStyleAssistantParagraph(completionParagraph)
-      || !operationalParagraphs.every(isOperationalAssistantParagraph)
-    ) {
-      return item;
-    }
-
-    const hasConcreteWorkBefore = items
-      .slice(0, index)
-      .some(
-        (candidate) =>
-          candidate.kind === 'activity_line'
-          && candidate.activityKind !== 'thinking'
-          && candidate.activityKind !== 'skill'
-      );
-
-    if (!hasConcreteWorkBefore) {
-      return item;
-    }
-
-    return {
-      ...item,
-      text: completionParagraph
-    };
-  });
-}
-
-function compactAssistantFollowUps(items: RunTranscriptItem[]) {
-  const results = [...items];
-
-  for (let index = 0; index < results.length; index += 1) {
-    const item = results[index];
-    if (!item || item.kind !== 'assistant_text' || !shouldCompactAssistantPreamble(item)) {
-      continue;
-    }
-
-    let sawWork = false;
-    let foundLaterAssistant = false;
-
-    for (let nextIndex = index + 1; nextIndex < results.length; nextIndex += 1) {
-      const nextItem = results[nextIndex];
-      if (!nextItem) {
-        continue;
-      }
-
-      if (nextItem.kind === 'assistant_text') {
-        foundLaterAssistant = true;
-        break;
-      }
-
-      if (nextItem.kind === 'change_artifact') {
-        continue;
-      }
-
-      if (nextItem.kind === 'worked_for' || nextItem.kind === 'activity_line') {
-        sawWork = true;
-        continue;
-      }
-
-      break;
-    }
-
-    if (sawWork && foundLaterAssistant) {
-      results.splice(index, 1);
-      index -= 1;
-    }
-  }
-
-  return results;
-}
-
 function compactGenericThinkingRows(items: RunTranscriptItem[]) {
   return items;
 }
@@ -1348,7 +669,7 @@ function deriveActiveHeading(thinkingLines: ThinkingLineViewModel[], terminalCom
     return 'Working' as const;
   }
 
-  if (thinkingLines.some((line) => line.kind === 'file_edit' || line.kind === 'file_write' || line.kind === 'mkdir' || line.kind === 'tool_call' || line.kind === 'tool_result' || line.kind === 'web_search' || line.kind === 'file_open' || line.kind === 'file_read' || line.kind === 'file_search')) {
+  if (thinkingLines.some((line) => line.kind === 'guidance' || line.kind === 'file_edit' || line.kind === 'file_write' || line.kind === 'mkdir' || line.kind === 'tool_call' || line.kind === 'tool_result' || line.kind === 'web_search' || line.kind === 'file_open' || line.kind === 'file_read' || line.kind === 'file_search')) {
     return 'Working' as const;
   }
 
@@ -1437,7 +758,7 @@ function deriveRunActivity(runId: string, events: RunEvent[]): RunActivityViewMo
       continue;
     }
 
-    if (activity?.kind === 'thinking' || activity?.kind === 'skill' || activity?.kind === 'memory_checkpoint' || activity?.kind === 'web_search' || activity?.kind === 'delegation' || activity?.kind === 'tool_call' || activity?.kind === 'tool_result' || activity?.kind === 'file_edit' || activity?.kind === 'file_write' || activity?.kind === 'mkdir' || activity?.kind === 'file_open' || activity?.kind === 'file_read' || activity?.kind === 'file_search') {
+    if (activity?.kind === 'thinking' || activity?.kind === 'guidance' || activity?.kind === 'skill' || activity?.kind === 'memory_checkpoint' || activity?.kind === 'web_search' || activity?.kind === 'delegation' || activity?.kind === 'tool_call' || activity?.kind === 'tool_result' || activity?.kind === 'file_edit' || activity?.kind === 'file_write' || activity?.kind === 'mkdir' || activity?.kind === 'file_open' || activity?.kind === 'file_read' || activity?.kind === 'file_search') {
       const toolCallDisplay = activity.kind === 'tool_call'
         ? deriveFriendlyToolCallDisplay(activity)
         : null;
@@ -1642,7 +963,7 @@ function deriveRunTranscriptItems(events: RunEvent[], assistantTurn: ThreadTurn 
     if (activity?.kind === 'memory_recall') {
       continue;
     }
-    const activityKind = activity?.kind === 'thinking' || activity?.kind === 'skill' || activity?.kind === 'memory_checkpoint' || activity?.kind === 'web_search' || activity?.kind === 'delegation' || activity?.kind === 'tool_call' || activity?.kind === 'file_edit' || activity?.kind === 'file_write' || activity?.kind === 'mkdir' || activity?.kind === 'file_open' || activity?.kind === 'file_read' || activity?.kind === 'file_search' ? activity.kind : null;
+    const activityKind = activity?.kind === 'thinking' || activity?.kind === 'guidance' || activity?.kind === 'skill' || activity?.kind === 'memory_checkpoint' || activity?.kind === 'web_search' || activity?.kind === 'delegation' || activity?.kind === 'tool_call' || activity?.kind === 'file_edit' || activity?.kind === 'file_write' || activity?.kind === 'mkdir' || activity?.kind === 'file_open' || activity?.kind === 'file_read' || activity?.kind === 'file_search' ? activity.kind : null;
     const toolResultDisplay = activity?.kind === 'tool_result'
       ? deriveToolResultDisplay(activity)
       : null;
@@ -1887,6 +1208,7 @@ export function deriveRunReviewEvidence(
     ? []
     : activity.thinkingLines.filter((line) =>
         line.kind === 'thinking' ||
+        line.kind === 'guidance' ||
         line.kind === 'skill' ||
         line.kind === 'memory_recall' ||
         line.kind === 'memory_checkpoint' ||

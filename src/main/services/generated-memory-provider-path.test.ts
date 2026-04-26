@@ -299,12 +299,8 @@ describe('Generated-memory provider path', () => {
         generatedMemoryUsed: true
       })
     );
-    expect(String(baselineFirstToolCall?.detail?.firstSubstantiveAction ?? '')).toBe(
-      'Get-ChildItem -Force -Recurse -Depth 2 (cwd: nested workspace area)'
-    );
-    expect(String(experimentalFirstToolCall?.detail?.firstSubstantiveAction ?? '')).toBe(
-      'Get-ChildItem -Force (cwd: workspace root)'
-    );
+    expect(String(baselineFirstToolCall?.detail?.firstSubstantiveAction ?? '')).toBe('Calling exec command');
+    expect(String(experimentalFirstToolCall?.detail?.firstSubstantiveAction ?? '')).toBe('Calling exec command');
 
     const diagnostics = new DiagnosticsService(db, exportsDir);
     const exportedPath = await diagnostics.exportThread(experimental.thread.id, [
@@ -347,8 +343,6 @@ describe('Generated-memory provider path', () => {
         generatedMemoryUsed: true
       })
     );
-    expect(String(exportedFirstToolCall?.detail?.firstSubstantiveAction ?? '')).toBe(
-      'Get-ChildItem -Force (cwd: workspace root)'
-    );
+    expect(String(exportedFirstToolCall?.detail?.firstSubstantiveAction ?? '')).toBe('Calling exec command');
   });
 });

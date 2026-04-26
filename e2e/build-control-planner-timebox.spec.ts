@@ -38,7 +38,7 @@ test.afterAll(async () => {
   await rm(workspaceRoot, { recursive: true, force: true });
 });
 
-test('stops a stale planner pass through the live Build Control watchdog', async () => {
+test('stops a stale planner pass through the live Build Control watchdog @live-provider', async () => {
   const { app, window: launchedWindow } = await launchApp({
     bridgePaths: ['vicode.app', 'vicode.projects', 'vicode.threads', 'vicode.settings', 'vicode.vicodeBuild'],
     timeoutMs: 60_000

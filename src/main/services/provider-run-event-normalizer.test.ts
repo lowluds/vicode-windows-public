@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  normalizeProviderVisibleText,
   normalizeProviderInfoEvent,
   preferProviderVisibleText
 } from './provider-run-event-normalizer';
@@ -127,5 +128,14 @@ describe('provider-run-event-normalizer', () => {
         'The site uses Tailwind CSS keyframes for mimicking the look.'
       )
     ).toBe('The site uses Tailwind CSS keyframes for mimicking the look.');
+  });
+
+  it('uses the shared provider text policy when normalizing ollama-visible text', () => {
+    expect(
+      normalizeProviderVisibleText(
+        'ollama',
+        '<function_calls></function_calls>\nThinking: hidden\nFinal answer'
+      )
+    ).toBe('Final answer');
   });
 });

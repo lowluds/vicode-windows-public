@@ -30,9 +30,13 @@ async function seedProjectAndThread(window: Page, projectName: string, projectPa
   return await window.evaluate(
     async ({ projectName, projectPath, threadTitle }) => {
       const bootstrap = await window.vicode.app.getBootstrap();
-      const provider = bootstrap.providers[0];
+      const provider =
+        bootstrap.providers.find((entry) => entry.id === 'openai') ??
+        bootstrap.providers.find((entry) => entry.id === 'gemini') ??
+        bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+        null;
       if (!provider) {
-        throw new Error('Expected at least one provider for E2E setup.');
+        throw new Error('Expected a release-facing provider for E2E setup.');
       }
 
       const project = await window.vicode.projects.create({
@@ -47,6 +51,11 @@ async function seedProjectAndThread(window: Page, projectName: string, projectPa
         providerId: provider.id,
         modelId: provider.models[0]?.id ?? 'gpt-5',
         executionPermission: 'default'
+      });
+
+      await window.vicode.settings.save({
+        selectedProjectId: project.id,
+        lastOpenedThreadId: thread.id
       });
 
       return {
@@ -184,7 +193,7 @@ test('completed threads render AI Elements sources from structured assistant tur
   }
 });
 
-test('pending review alerts render as a single inline notice instead of a floating toast', async () => {
+test('pending review alerts render as an overlay notice instead of shifting page content', async () => {
   const initial = await launchApp({
     bridgePaths: ['vicode.app', 'vicode.projects', 'vicode.threads']
   });
@@ -262,7 +271,19 @@ test('pending review alerts render as a single inline notice instead of a floati
       await expect(notice).toContainText('1 pending review waiting.');
       await expect(relaunched.window.locator('.toast')).toHaveCount(0);
       const noticePosition = await notice.evaluate((node) => window.getComputedStyle(node).position);
-      expect(noticePosition).toBe('static');
+      expect(noticePosition).toBe('fixed');
+      await expect(notice).toHaveAttribute('data-level', 'warning');
+      const border = await notice.evaluate((node) => {
+        const style = window.getComputedStyle(node);
+        return {
+          color: style.borderTopColor,
+          style: style.borderTopStyle,
+          width: style.borderTopWidth
+        };
+      });
+      expect(border.style).toBe('solid');
+      expect(border.width).toBe('1px');
+      expect(border.color).not.toBe('rgba(0, 0, 0, 0)');
       const actionBackground = await notice
         .getByRole('button', { name: 'View queue' })
         .evaluate((node) => window.getComputedStyle(node).backgroundColor);

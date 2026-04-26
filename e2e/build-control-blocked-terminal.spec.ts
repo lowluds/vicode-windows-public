@@ -38,7 +38,7 @@ test.afterAll(async () => {
   await rm(workspaceRoot, { recursive: true, force: true });
 });
 
-test('keeps blocked finisher outcomes in attention without waking planner again', async () => {
+test('keeps blocked finisher outcomes in attention without waking planner again @live-provider', async () => {
   const { app, window: launchedWindow } = await launchApp({
     bridgePaths: ['vicode.app', 'vicode.projects', 'vicode.settings', 'vicode.vicodeBuild']
   });

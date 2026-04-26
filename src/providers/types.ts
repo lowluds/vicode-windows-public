@@ -87,6 +87,7 @@ export interface ProviderRunContext {
     kind: SkillKind;
     path: string;
   }>;
+  skipFinalAnswerRewrite?: boolean;
 }
 
 export interface ProviderPlannerAnswerContext {

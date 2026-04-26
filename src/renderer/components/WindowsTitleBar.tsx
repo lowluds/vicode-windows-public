@@ -1,7 +1,8 @@
-import { IconButton, Menu, MenuContent, MenuItem, MenuItemLabel, MenuLabel, MenuSeparator, MenuTrigger, Tooltip, TooltipContent, TooltipTrigger } from './ui';
+import type { ReactNode } from 'react';
+import { ActionButton, IconButton, Menu, MenuContent, MenuItem, MenuItemLabel, MenuLabel, MenuSeparator, MenuTrigger, Tooltip, TooltipContent, TooltipTrigger } from './ui';
 import type { AppUpdateState, CollabBootstrap, SettingsSection } from '../../shared/domain';
 import { normalizeDisplayText } from '../../shared/display-text';
-import { AccountIcon, SettingsIcon, SkillsIcon } from './icons';
+import { AccountIcon, AutomationIcon, SettingsIcon, SkillsIcon } from './icons';
 import { TitleBarUpdateAction } from './TitleBarUpdateAction';
 import { cx } from './ui/utils';
 import appIcon from '../assets/app-icon.png';
@@ -13,12 +14,19 @@ interface WindowsTitleBarProps {
   route: Route;
   selectedProjectName: string | null;
   activeThreadTitle: string | null;
+  workspaceAction: {
+    label: string;
+    tooltip: string;
+    icon: ReactNode;
+    onClick: () => void;
+    testId?: string;
+    tone: 'default' | 'warning';
+  } | null;
   isAgentWorking: boolean;
   collaboration: CollabBootstrap;
   appUpdateState: AppUpdateState | null;
-  hasActiveRun: boolean;
-  queuedUpdateInstallKey: string | null;
   openSettings: (section?: SettingsSection) => void;
+  openAutomations: () => void;
   openSkills: () => void;
   pressUpdateAction: () => void;
 }
@@ -80,12 +88,44 @@ export function WindowsTitleBar(props: WindowsTitleBarProps) {
       </div>
 
       <div className="windows-titlebar-actions" style={{ WebkitAppRegion: 'no-drag' }}>
+        {props.workspaceAction ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <ActionButton
+                size="compact"
+                tone="quiet"
+                data-testid={props.workspaceAction.testId}
+                className={cx('windows-titlebar-workspace-action', props.workspaceAction.tone === 'warning' && 'is-warning')}
+                leadingIcon={props.workspaceAction.icon}
+                onClick={props.workspaceAction.onClick}
+              >
+                {props.workspaceAction.label}
+              </ActionButton>
+            </TooltipTrigger>
+            <TooltipContent className="windows-titlebar-tooltip windows-titlebar-workspace-tooltip">
+              {props.workspaceAction.tooltip}
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
+
         <TitleBarUpdateAction
           appUpdateState={props.appUpdateState}
-          hasActiveRun={props.hasActiveRun}
-          queuedUpdateInstallKey={props.queuedUpdateInstallKey}
           onPress={props.pressUpdateAction}
         />
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <IconButton
+              data-testid="nav-automations"
+              className={cx('windows-titlebar-action', props.route === 'automations' && 'is-active')}
+              label="Automations"
+              onClick={props.openAutomations}
+            >
+              <AutomationIcon />
+            </IconButton>
+          </TooltipTrigger>
+          <TooltipContent className="windows-titlebar-tooltip">Automations</TooltipContent>
+        </Tooltip>
 
         <Tooltip>
           <TooltipTrigger asChild>
@@ -134,12 +174,16 @@ export function WindowsTitleBar(props: WindowsTitleBarProps) {
             </div>
             <MenuSeparator />
             <MenuItem onSelect={() => props.openSettings('personalization')}>
-              <MenuItemLabel>Profile settings</MenuItemLabel>
+              <MenuItemLabel>Instructions</MenuItemLabel>
               <AccountIcon />
             </MenuItem>
             <MenuItem onSelect={props.openSkills}>
               <MenuItemLabel>Plugins</MenuItemLabel>
               <SkillsIcon />
+            </MenuItem>
+            <MenuItem onSelect={props.openAutomations}>
+              <MenuItemLabel>Automations</MenuItemLabel>
+              <AutomationIcon />
             </MenuItem>
           </MenuContent>
         </Menu>

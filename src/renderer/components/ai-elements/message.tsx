@@ -3,7 +3,6 @@
 import { cjk } from '@streamdown/cjk';
 import { createCodePlugin } from '@streamdown/code';
 import { math } from '@streamdown/math';
-import { mermaid } from '@streamdown/mermaid';
 import type { ComponentProps, HTMLAttributes } from 'react';
 import { memo } from 'react';
 import { Streamdown } from 'streamdown';
@@ -48,8 +47,7 @@ const defaultMessageShikiTheme = ['github-light', 'github-dark'] as const;
 const streamdownPlugins = {
   cjk,
   code: createCodePlugin({ themes: defaultMessageShikiTheme }),
-  math,
-  mermaid
+  math
 };
 const defaultMessageControls = {
   code: {

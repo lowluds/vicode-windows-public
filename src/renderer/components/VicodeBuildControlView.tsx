@@ -5,6 +5,7 @@ import type {
   VicodeBuildSnapshot,
   VicodeBuildVerificationResult
 } from '../../shared/domain';
+import { BUILD_CONTROL_ORCHESTRATION_ENABLED } from '../../shared/product-flags';
 import { ActionButton, PrimaryButton, StatusPill, SurfaceCard } from './ui';
 import { CheckIcon, CloseIcon, LoadingIcon, PlayIcon, RefreshIcon, TaskIcon } from './icons';
 
@@ -247,7 +248,12 @@ export function VicodeBuildControlView(props: VicodeBuildControlViewProps) {
             <div className="vicode-build-copy">
               <div className="vicode-build-eyebrow">Vicode Builds Vicode</div>
             <h3>Plans</h3>
-            <p>Prompt-driven planner, builder, and finisher lanes. Runs execute in native Vicode threads so you can inspect the work directly here.</p>
+            <p>
+              Visible planner, builder, and finisher threads live here.
+              {BUILD_CONTROL_ORCHESTRATION_ENABLED
+                ? ' Runs execute in native Vicode threads so you can inspect the work directly here.'
+                : ' Automatic handoffs and queue-driven orchestration are currently parked.'}
+            </p>
           </div>
           <div className="vicode-build-toolbar">
             <ActionButton size="compact" tone="quiet" leadingIcon={<RefreshIcon />} onClick={props.onRefresh}>
@@ -278,7 +284,7 @@ export function VicodeBuildControlView(props: VicodeBuildControlViewProps) {
             <article key={team.teamId} className="vicode-build-team-card">
               {(() => {
                 const activity = deriveTeamActivity(team);
-                const terminalBlockedSummary = deriveTerminalBlockedSummary(team);
+                const terminalBlockedSummary = BUILD_CONTROL_ORCHESTRATION_ENABLED ? deriveTerminalBlockedSummary(team) : null;
                 const expanded = expandedTeamId === team.teamId;
                 return (
                   <>
@@ -305,15 +311,15 @@ export function VicodeBuildControlView(props: VicodeBuildControlViewProps) {
                         <strong>Blocked:</strong> {terminalBlockedSummary}
                       </p>
                     ) : null}
-                    {team.activeTicketTitle ? (
+                    {BUILD_CONTROL_ORCHESTRATION_ENABLED && team.activeTicketTitle ? (
                       <p className="vicode-build-lane-summary">
                         <strong>Current ticket:</strong> {team.activeTicketTitle}
                       </p>
-                    ) : team.ownedSliceSummary ? (
+                    ) : BUILD_CONTROL_ORCHESTRATION_ENABLED && team.ownedSliceSummary ? (
                       <p className="vicode-build-lane-summary">
                         <strong>Owned slice:</strong> {team.ownedSliceSummary}
                       </p>
-                    ) : team.ticketSummary ? (
+                    ) : BUILD_CONTROL_ORCHESTRATION_ENABLED && team.ticketSummary ? (
                       <p className="vicode-build-lane-summary">
                         <strong>Open tickets:</strong> {team.ticketSummary}
                       </p>
@@ -388,19 +394,19 @@ export function VicodeBuildControlView(props: VicodeBuildControlViewProps) {
                   <strong>Checklist:</strong> {summarizeChecklist(team.heartbeatOpenItems)}
                 </p>
               ) : null}
-              {team.ticketQueuePath ? (
+              {BUILD_CONTROL_ORCHESTRATION_ENABLED && team.ticketQueuePath ? (
                 <p className="vicode-build-lane-summary">
                   <strong>Tickets:</strong> {team.openTicketCount} open
                   {team.blockedTicketCount ? ` • ${team.blockedTicketCount} blocked` : ''}
                   {` • ${compactPath(team.ticketQueuePath) ?? team.ticketQueuePath}`}
                 </p>
               ) : null}
-              {team.ownedSliceSummary ? (
+              {BUILD_CONTROL_ORCHESTRATION_ENABLED && team.ownedSliceSummary ? (
                 <p className="vicode-build-lane-summary">
                   <strong>Owned slice:</strong> {team.ownedSliceSummary}
                 </p>
               ) : null}
-              {team.tickets.length ? (
+              {BUILD_CONTROL_ORCHESTRATION_ENABLED && team.tickets.length ? (
                 <div className="vicode-build-event-list">
                   {team.tickets.map((ticket) => (
                     <div key={ticket.id} className="vicode-build-event-row">
@@ -438,7 +444,7 @@ export function VicodeBuildControlView(props: VicodeBuildControlViewProps) {
                         <StatusPill tone={toneForStatus(lane.status)}>{lane.status}</StatusPill>
                       </div>
                       <div className="vicode-build-lane-meta">
-                        <span>{lane.paused ? 'Paused for orchestration' : 'Ready for orchestration'}</span>
+                        <span>{BUILD_CONTROL_ORCHESTRATION_ENABLED ? (lane.paused ? 'Paused for orchestration' : 'Ready for orchestration') : (lane.paused ? 'Paused' : 'Available')}</span>
                         <span>{`Last ${formatTime(lane.lastRunAt)}`}</span>
                         {lane.skillNames.length ? <span>{`Skills: ${lane.skillNames.join(', ')}`}</span> : null}
                         {lane.threadTitle ? <span>{lane.threadTitle}</span> : null}

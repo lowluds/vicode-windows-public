@@ -234,6 +234,41 @@ body.is-sidebar-resizing * {
   justify-content: flex-end;
 }
 
+.windows-titlebar-workspace-action.ui-control-action {
+  min-height: 28px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border-color: var(--ui-border-soft);
+  background: var(--ui-alpha-05);
+  color: var(--ui-text-title);
+  white-space: nowrap;
+}
+
+.windows-titlebar-workspace-action.ui-control-action:hover,
+.windows-titlebar-workspace-action.ui-control-action:focus-visible {
+  border-color: var(--ui-border);
+  background: var(--ui-alpha-08);
+  color: var(--ui-text-title);
+}
+
+.windows-titlebar-workspace-action.ui-control-action.is-warning {
+  border-color: var(--ui-warning-border);
+  background: var(--ui-warning-soft);
+  color: var(--ui-warning-text-strong);
+}
+
+.windows-titlebar-workspace-action.ui-control-action.is-warning:hover,
+.windows-titlebar-workspace-action.ui-control-action.is-warning:focus-visible {
+  border-color: var(--ui-warning-border);
+  background: var(--ui-warning-soft-strong);
+  color: var(--ui-warning-text-strong);
+}
+
+.windows-titlebar-workspace-tooltip {
+  max-width: 260px;
+}
+
 .windows-titlebar-action,
 .windows-profile-trigger {
   width: 28px;
@@ -937,7 +972,7 @@ body.is-sidebar-resizing * {
 }
 
 .thread-tree-group {
-  --project-tree-actions-width: 40px;
+  --project-tree-actions-width: 72px;
   --project-thread-end-gutter: 26px;
   display: flex;
   flex-direction: column;
@@ -1216,7 +1251,6 @@ body.is-sidebar-resizing * {
   transform: none;
 }
 
-.project-row-action-button:focus-visible,
 .project-row-action-button:active {
   border-color: var(--ui-border-soft);
   background: var(--ui-alpha-06);
@@ -1225,8 +1259,19 @@ body.is-sidebar-resizing * {
   transform: none;
 }
 
+.project-row-action-button:focus-visible {
+  border-color: var(--ui-border-soft);
+  background: var(--ui-alpha-06);
+  box-shadow: var(--ui-focus);
+  filter: none;
+  transform: none;
+}
+
 .project-thread-list {
   --project-thread-indent: 18px;
+  --project-thread-rail-color: color-mix(in srgb, var(--ui-border-soft) 82%, transparent);
+  --project-thread-rail-left: var(--project-thread-indent);
+  --project-thread-row-offset: 10px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -1248,12 +1293,13 @@ body.is-sidebar-resizing * {
 .project-thread-list::before {
   content: '';
   position: absolute;
-  left: var(--project-thread-indent);
-  top: 2px;
-  bottom: 4px;
+  left: var(--project-thread-rail-left);
+  top: 0;
+  bottom: 10px;
   width: 1px;
-  background: var(--ui-border-soft);
+  background: var(--project-thread-rail-color);
   pointer-events: none;
+  opacity: 0.86;
 }
 
 .project-thread-region {
@@ -1294,18 +1340,20 @@ body.is-sidebar-resizing * {
   overflow: visible;
 }
 
-.sidebar-thread-shell.is-active-thread::before {
+.sidebar-thread-shell::before {
   content: '';
   position: absolute;
-  left: -11px;
-  top: -10px;
-  width: 12px;
-  height: calc(50% + 9px);
-  border-left: 1px solid color-mix(in srgb, var(--ui-border-strong) 65%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--ui-border-strong) 65%, transparent);
-  border-bottom-left-radius: 12px;
+  left: calc(-1 * var(--project-thread-row-offset));
+  top: 50%;
+  width: 13px;
+  height: 11px;
+  border-left: 1px solid var(--project-thread-rail-color);
+  border-bottom: 1px solid var(--project-thread-rail-color);
+  border-bottom-left-radius: 10px;
   pointer-events: none;
   z-index: 0;
+  transform: translateY(-100%);
+  opacity: 0.9;
 }
 
 .sidebar-thread-row {
@@ -1417,11 +1465,17 @@ body.is-sidebar-resizing * {
   will-change: opacity;
 }
 
-.sidebar-thread-archive-button:hover,
-.sidebar-thread-archive-button:focus-visible {
+.sidebar-thread-archive-button:hover {
   color: var(--ui-text-title);
   border-color: transparent;
   background: var(--ui-hover);
+}
+
+.sidebar-thread-archive-button:focus-visible {
+  color: var(--ui-text-title);
+  border-color: var(--ui-border-soft);
+  background: var(--ui-hover);
+  box-shadow: var(--ui-focus);
 }
 
 .sidebar-thread-shell:hover .sidebar-thread-time,
@@ -1435,6 +1489,7 @@ body.is-sidebar-resizing * {
   }
 
   .project-thread-list {
+    --project-thread-row-offset: 8px;
     padding-left: calc(var(--project-thread-indent) + 8px);
   }
 
@@ -1778,6 +1833,7 @@ body.is-sidebar-resizing * {
 
   .project-thread-list {
     --project-thread-indent: 14px;
+    --project-thread-row-offset: 8px;
     padding-left: calc(var(--project-thread-indent) + 8px);
   }
 }

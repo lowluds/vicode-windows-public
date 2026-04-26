@@ -1,13 +1,15 @@
 import { useMemo } from 'react';
-import { ActionButton, PrimaryButton, SurfaceCard, TextArea } from '../ui';
+import { ActionButton, PrimaryButton, SelectField, SurfaceCard, TextArea } from '../ui';
 import { ArchiveIcon, RefreshIcon, SaveIcon } from '../icons';
 import { StatusPill } from '../ui';
 import type { PersonalizationSettings } from '../../../shared/domain';
 import type { SettingsViewProps } from './types';
-import { providerDisplayName, formatTime } from './support';
+import { providerDisplayName, formatStorageAmount, formatTime } from './support';
 import {
   SETTINGS_INLINE_ACTIONS_CLASS,
   SETTINGS_SECTION_CLASS,
+  SettingsPanel,
+  SettingsRow,
   SettingsSectionHeader
 } from './shared';
 
@@ -29,8 +31,8 @@ export function PersonalizationSettingsSection({
   return (
     <div className={SETTINGS_SECTION_CLASS}>
       <SettingsSectionHeader
-        title="Personalization"
-        description="Layer global and provider-specific instructions on top of the built-in app rules for new runs."
+        title="Instructions"
+        description="Set the short instructions Vicode adds before project files and skills."
       />
       <div className="settings-detail-block settings-personalization-block flex flex-col gap-4 rounded-[24px] border border-transparent bg-transparent p-5">
         <label className="settings-field flex flex-col gap-2">
@@ -39,7 +41,7 @@ export function PersonalizationSettingsSection({
             className="settings-personalization-area"
             value={personalizationDraft.globalInstructions}
             onChange={(event) => setDraftField('globalInstructions', event.target.value)}
-            placeholder="Instructions applied to both providers before project instructions and skills."
+            placeholder="Applies to every provider before project instructions and skills."
           />
         </label>
         {settings.providers.map((provider) => (
@@ -52,7 +54,7 @@ export function PersonalizationSettingsSection({
               className="settings-personalization-area"
               value={personalizationDraft.providerInstructions[provider.id]}
               onChange={(event) => setDraftProviderField(provider.id, event.target.value)}
-              placeholder={`Additional instructions for ${providerDisplayName(provider.id)} runs.`}
+              placeholder={`Only applies to ${providerDisplayName(provider.id)} runs.`}
             />
           </label>
         ))}
@@ -63,8 +65,7 @@ export function PersonalizationSettingsSection({
             onChange={(event) => setDraftField('useWorkspaceInstructions', event.target.checked)}
           />
           <span>
-            Use trusted workspace instruction files when present (`AGENTS.md`, `codex.md`,
-            `gemini.md`, `ollama.md`, `qwen.md`, `kimi.md`).
+            Use trusted workspace instruction files when present.
           </span>
         </label>
         <div className={SETTINGS_INLINE_ACTIONS_CLASS}>
@@ -72,7 +73,7 @@ export function PersonalizationSettingsSection({
             onClick={() => void settings.savePersonalization(personalizationDraft)}
             leadingIcon={<SaveIcon />}
           >
-            Save personalization
+            Save changes
           </PrimaryButton>
           <ActionButton onClick={onReset} leadingIcon={<RefreshIcon />}>
             Reset to saved
@@ -83,49 +84,138 @@ export function PersonalizationSettingsSection({
   );
 }
 
-export function DiagnosticsSettingsSection({ settings }: { settings: SettingsViewProps }) {
+export function AdvancedSettingsSection({
+  settings,
+  onOpenCompactRunEvents,
+  onOpenVacuumStorage
+}: {
+  settings: SettingsViewProps;
+  onOpenCompactRunEvents: () => void;
+  onOpenVacuumStorage: () => void;
+}) {
   return (
     <div className={SETTINGS_SECTION_CLASS}>
       <SettingsSectionHeader
-        title="Diagnostics"
-        description="Export local app state and logs when a provider or startup flow needs inspection."
+        title="Advanced"
+        description="Diagnostics, storage maintenance, and experimental memory controls."
       />
-      <div className="settings-card-grid grid grid-cols-1 gap-4">
-        <SurfaceCard>
-          <h3>Diagnostics export</h3>
-          <p>Create a redacted local export of threads, providers, and app state.</p>
-          <PrimaryButton onClick={() => void settings.exportDiagnostics()}>Export diagnostics</PrimaryButton>
-        </SurfaceCard>
-        <SurfaceCard>
-          <h3>State path</h3>
-          <p>{settings.appMeta?.statePath ?? 'Unavailable'}</p>
-        </SurfaceCard>
-      </div>
-    </div>
-  );
-}
 
-export function StorageSettingsSection({ settings }: { settings: SettingsViewProps }) {
-  return (
-    <div className={SETTINGS_SECTION_CLASS}>
-      <SettingsSectionHeader
-        title="Local storage"
-        description="Threads, remembered selections, and diagnostics remain on this machine unless you export them."
-      />
-      <div className="settings-card-grid grid grid-cols-1 gap-4">
-        <SurfaceCard>
-          <h3>App data path</h3>
-          <p>{settings.appMeta?.userDataPath ?? 'Unavailable'}</p>
-        </SurfaceCard>
-        <SurfaceCard>
-          <h3>Exports path</h3>
-          <p>{settings.appMeta?.exportsPath ?? 'Unavailable'}</p>
-        </SurfaceCard>
-        <SurfaceCard>
-          <h3>Active project</h3>
-          <p>{settings.selectedProject?.folderPath ?? 'No folder attached yet'}</p>
-        </SurfaceCard>
-      </div>
+      <SettingsPanel title="Diagnostics" description="Export a redacted local package when support needs it.">
+        <SettingsRow
+          label="Export package"
+          description="Includes app state, provider status, and logs for inspection."
+        >
+          <PrimaryButton size="compact" onClick={() => void settings.exportDiagnostics()}>
+            Export
+          </PrimaryButton>
+        </SettingsRow>
+        <SettingsRow
+          label="State path"
+          description="Local folder used for app state."
+          className="is-path-row"
+        >
+          <span className="settings-row-value">{settings.appMeta?.statePath ?? 'Unavailable'}</span>
+        </SettingsRow>
+      </SettingsPanel>
+
+      <SettingsPanel title="Local storage" description="Local database size, cleanup, and app-owned paths.">
+        <SettingsRow
+          label="Thread storage"
+          description="Refresh local storage size and counts."
+        >
+          <div className="settings-row-actions">
+            <span className="settings-row-value">
+              {formatStorageAmount(settings.storageDiagnostics?.totalStorageBytes)}
+            </span>
+            <ActionButton
+              size="compact"
+              tone="quiet"
+              onClick={() => void settings.refreshStorageDiagnostics()}
+              leadingIcon={<RefreshIcon />}
+            >
+              Refresh
+            </ActionButton>
+          </div>
+        </SettingsRow>
+        <div className="settings-stat-grid">
+          <span>Database: {formatStorageAmount(settings.storageDiagnostics?.databaseSizeBytes)}</span>
+          <span>WAL: {formatStorageAmount(settings.storageDiagnostics?.walSizeBytes)}</span>
+          <span>Projects: {settings.storageDiagnostics?.projectCount ?? 'Unavailable'}</span>
+          <span>Threads: {settings.storageDiagnostics?.threadCount ?? 'Unavailable'}</span>
+          <span>Archived: {settings.storageDiagnostics?.archivedThreadCount ?? 'Unavailable'}</span>
+          <span>Run events: {settings.storageDiagnostics?.runEventCount ?? 'Unavailable'}</span>
+        </div>
+        <div className="settings-inline-note">
+          Archived terminal runs older than {settings.storageDiagnostics?.compactionCutoffDays ?? 30} days
+          can be compacted. Checkpointing reclaims write-ahead storage. Deep cleanup runs VACUUM.
+        </div>
+        <div className={SETTINGS_INLINE_ACTIONS_CLASS}>
+          <ActionButton
+            size="compact"
+            tone="quiet"
+            onClick={onOpenCompactRunEvents}
+            disabled={!settings.storageDiagnostics?.compactableDeltaEventCount}
+          >
+            Compact + checkpoint
+          </ActionButton>
+          <ActionButton
+            size="compact"
+            tone="quiet"
+            onClick={onOpenVacuumStorage}
+            disabled={!settings.storageDiagnostics}
+          >
+            Deep cleanup
+          </ActionButton>
+        </div>
+        <SettingsRow label="App data" description="Vicode state and local database." className="is-path-row">
+          <span className="settings-row-value">{settings.appMeta?.userDataPath ?? 'Unavailable'}</span>
+        </SettingsRow>
+        <SettingsRow label="Exports" description="Diagnostics and exported files." className="is-path-row">
+          <span className="settings-row-value">{settings.appMeta?.exportsPath ?? 'Unavailable'}</span>
+        </SettingsRow>
+        <SettingsRow label="Active project" description="Workspace folder for current runs." className="is-path-row">
+          <span className="settings-row-value">{settings.selectedProject?.folderPath ?? 'No folder attached yet'}</span>
+        </SettingsRow>
+      </SettingsPanel>
+
+      <SettingsPanel title="Experimental memory" description="Derived summaries stay separate from project files.">
+        <SettingsRow
+          label="Use generated recall"
+          description="Use summaries from prior trusted threads when they match the task."
+        >
+          <SelectField
+            className="settings-row-select"
+            menuClassName="settings-general-select-menu"
+            value={settings.preferences?.generatedMemoryUseEnabled ? 'enabled' : 'disabled'}
+            onChange={(event) =>
+              void settings.savePreferences({
+                generatedMemoryUseEnabled: event.target.value === 'enabled'
+              })
+            }
+          >
+            <option value="disabled">Disabled</option>
+            <option value="enabled">Enabled</option>
+          </SelectField>
+        </SettingsRow>
+        <SettingsRow
+          label="Generate derived memory"
+          description="Create summaries after trusted threads complete."
+        >
+          <SelectField
+            className="settings-row-select"
+            menuClassName="settings-general-select-menu"
+            value={settings.preferences?.generatedMemoryGenerationEnabled === false ? 'disabled' : 'enabled'}
+            onChange={(event) =>
+              void settings.savePreferences({
+                generatedMemoryGenerationEnabled: event.target.value === 'enabled'
+              })
+            }
+          >
+            <option value="enabled">Enabled</option>
+            <option value="disabled">Disabled</option>
+          </SelectField>
+        </SettingsRow>
+      </SettingsPanel>
     </div>
   );
 }
@@ -146,15 +236,14 @@ export function ArchivedThreadsSection({
     <div className={SETTINGS_SECTION_CLASS}>
       <SettingsSectionHeader
         title="Archived threads"
-        description="Archive hides threads from active lists but keeps their local history. Restore them here when you want them back in the working set."
+        description="Restore archived threads, or delete them permanently."
       />
       <div className="settings-archived-list flex flex-1 flex-col gap-4 min-h-0">
         {settings.archivedThreads.length === 0 ? (
           <SurfaceCard>
             <h3>No archived threads</h3>
             <p>
-              Archived threads will appear here when you archive them from the main thread surface
-              instead of deleting them permanently.
+              Archived threads appear here after you remove them from active project lists.
             </p>
           </SurfaceCard>
         ) : (

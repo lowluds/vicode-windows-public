@@ -56,6 +56,8 @@ interface CodexModelListResult {
     displayName?: string;
     description?: string;
     inputModalities?: string[];
+    additionalSpeedTiers?: string[];
+    isDefault?: boolean;
   }>;
   nextCursor?: string | null;
 }
@@ -231,6 +233,28 @@ function splitLines(value: string | null, limit = 8) {
     .map((line) => cleanJsonText(line))
     .filter(Boolean)
     .slice(0, limit);
+}
+
+function isCodexCliOperationalDiagnostic(line: string) {
+  const normalized = line
+    .replace(/\u001b\[[0-9;]*m/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+
+  return (
+    /\b(?:WARN|INFO|DEBUG|TRACE)\b\s+(?:codex_[a-z0-9_:.-]+|rmcp::[a-z0-9_:.-]+)\b/iu.test(normalized) ||
+    /\bcodex_core_plugins::\s*manifest:/iu.test(normalized) ||
+    /\bcodex_analytics::\s*client:/iu.test(normalized) ||
+    /\bERROR\s+codex_core::session:\s+failed to load skill\b/iu.test(normalized)
+  );
+}
+
+function startsCodexCliDiagnosticBody(line: string) {
+  return /\b(?:status\s+403\s+Forbidden|<html\b|Enable JavaScript and cookies to continue)\b/iu.test(line);
+}
+
+function endsCodexCliDiagnosticBody(line: string) {
+  return /<\/html>/iu.test(line);
 }
 
 function normalizeCodexTodoStatus(value: unknown): ProviderTodoItem['status'] | null {
@@ -1175,7 +1199,10 @@ export class OpenAIAdapter implements ProviderAdapter {
             id: modelId,
             label: model.displayName?.trim() || modelId,
             description: model.description?.trim() || '',
-            supportsVision: Array.isArray(model.inputModalities) ? model.inputModalities.includes('image') : false
+            supportsVision: Array.isArray(model.inputModalities) ? model.inputModalities.includes('image') : false,
+            recommendation: Array.isArray(model.additionalSpeedTiers) && model.additionalSpeedTiers.includes('fast')
+              ? 'fast'
+              : undefined
           });
         }
 
@@ -1290,14 +1317,7 @@ export class OpenAIAdapter implements ProviderAdapter {
     return discovered.filter((value): value is NonNullable<(typeof discovered)[number]> => Boolean(value));
   }
 
-  validateProjectContext(folderPath: string | null, trusted: boolean) {
-    if (folderPath && !trusted) {
-      return {
-        valid: false,
-        message: 'Trust the project before running Codex against this workspace.'
-      };
-    }
-
+  validateProjectContext(_folderPath: string | null, _trusted: boolean) {
     return { valid: true };
   }
 
@@ -1355,8 +1375,11 @@ export class OpenAIAdapter implements ProviderAdapter {
 
       let stdoutBuffer = '';
       let stderrBuffer = '';
+      let stderrFailureOutput = '';
       let assistantText = '';
       let closed = false;
+      let suppressStdoutDiagnosticBody = false;
+      let suppressStderrDiagnosticBody = false;
       const seenDiagnosticSignatures = new Set<string>();
       let idleFailureTimer: NodeJS.Timeout | null = null;
 
@@ -1393,7 +1416,15 @@ export class OpenAIAdapter implements ProviderAdapter {
           return;
         }
         if (!trimmed.startsWith('{')) {
-          callbacks.onInfo(trimmed);
+          if (suppressStdoutDiagnosticBody) {
+            suppressStdoutDiagnosticBody = !endsCodexCliDiagnosticBody(trimmed);
+            return;
+          }
+          if (isCodexCliOperationalDiagnostic(trimmed)) {
+            suppressStdoutDiagnosticBody = startsCodexCliDiagnosticBody(trimmed) && !endsCodexCliDiagnosticBody(trimmed);
+          } else {
+            callbacks.onInfo(trimmed);
+          }
           return;
         }
 
@@ -1422,7 +1453,15 @@ export class OpenAIAdapter implements ProviderAdapter {
             });
           }
         } catch {
-          callbacks.onInfo(trimmed);
+          if (suppressStdoutDiagnosticBody) {
+            suppressStdoutDiagnosticBody = !endsCodexCliDiagnosticBody(trimmed);
+            return;
+          }
+          if (isCodexCliOperationalDiagnostic(trimmed)) {
+            suppressStdoutDiagnosticBody = startsCodexCliDiagnosticBody(trimmed) && !endsCodexCliDiagnosticBody(trimmed);
+          } else {
+            callbacks.onInfo(trimmed);
+          }
         }
       };
 
@@ -1439,12 +1478,26 @@ export class OpenAIAdapter implements ProviderAdapter {
 
       child.stderr.on('data', (chunk) => {
         clearIdleFailureTimer();
-        stderrBuffer += String(chunk);
+        const text = String(chunk);
+        stderrBuffer += text;
         const lines = stderrBuffer.split(/\r?\n/);
         stderrBuffer = lines.pop() ?? '';
         for (const line of lines) {
-          if (line.trim()) {
-            callbacks.onInfo(line.trim());
+          const trimmed = line.trim();
+          if (!trimmed) {
+            continue;
+          }
+          if (suppressStderrDiagnosticBody) {
+            suppressStderrDiagnosticBody = !endsCodexCliDiagnosticBody(trimmed);
+            continue;
+          }
+          if (isCodexCliOperationalDiagnostic(trimmed)) {
+            suppressStderrDiagnosticBody = startsCodexCliDiagnosticBody(trimmed) && !endsCodexCliDiagnosticBody(trimmed);
+            continue;
+          }
+          if (trimmed) {
+            stderrFailureOutput += `${trimmed}\n`;
+            callbacks.onInfo(trimmed);
           }
         }
         scheduleIdleFailureTimer();
@@ -1480,8 +1533,13 @@ export class OpenAIAdapter implements ProviderAdapter {
           callbacks.onError('Codex CLI exited successfully without producing assistant output.');
           return;
         }
-        if (stderrBuffer.trim()) {
-          callbacks.onError(stderrBuffer.trim());
+        const leftoverStderr = stderrBuffer.trim();
+        if (leftoverStderr && !suppressStderrDiagnosticBody && !isCodexCliOperationalDiagnostic(leftoverStderr)) {
+          stderrFailureOutput += `${leftoverStderr}\n`;
+        }
+        const finalStderr = stderrFailureOutput.trim();
+        if (finalStderr) {
+          callbacks.onError(finalStderr);
           return;
         }
         if (finalAssistantText) {

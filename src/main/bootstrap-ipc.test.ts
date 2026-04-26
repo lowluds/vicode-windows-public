@@ -30,11 +30,6 @@ describe('app:getBootstrap IPC', () => {
     const bootstrap = {
       projects: [],
       threadsByProject: {},
-      skills: [],
-      automations: [],
-      jobs: [],
-      reviewItems: [],
-      providers: [],
       preferences: {
         selectedProjectId: null,
         defaultProviderId: 'openai' as const,

@@ -88,10 +88,14 @@ test('thread transcript scrollbar does not nudge transcript content at minimum s
 
     const seeded = await launched.window.evaluate(async () => {
       const bootstrap = await window.vicode.app.getBootstrap();
-      const provider = bootstrap.providers.find((entry) => entry.installed) ?? bootstrap.providers[0] ?? null;
+      const provider =
+        bootstrap.providers.find((entry) => entry.id === 'openai') ??
+        bootstrap.providers.find((entry) => entry.id === 'gemini') ??
+        bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+        null;
 
       if (!provider) {
-        throw new Error('Expected at least one provider for transcript scrollbar coverage.');
+        throw new Error('Expected a release-facing provider for transcript scrollbar coverage.');
       }
 
       const project = await window.vicode.projects.create({

@@ -59,19 +59,18 @@ test('collaboration shell stays parked out of the current app chrome', async () 
     await expect(window.getByTestId('composer-input')).toBeVisible();
     await expect(window.getByLabel('Rooms')).toHaveCount(0);
 
-    const threadActions = window.getByRole('button', { name: 'Thread actions' });
-    await expect(threadActions).toBeVisible();
-    await threadActions.focus();
+    const projectActions = window.getByRole('button', { name: 'Project and thread actions' });
+    await expect(projectActions).toBeVisible();
+    await projectActions.focus();
     await window.keyboard.press('5');
 
     await expect(window.getByTestId('composer-input')).toBeVisible();
     await expect(window.getByTestId('chat-utility-pane-layout')).toHaveCount(0);
 
-    await threadActions.click();
-    await expect(window.getByRole('menuitem', { name: 'Open folder location' })).toBeVisible();
+    await projectActions.focus();
+    await window.keyboard.press('Enter');
+    await expect(window.getByRole('menuitem', { name: 'Open in Explorer' })).toBeVisible();
     await expect(window.getByRole('menuitem', { name: 'Rename thread' })).toBeVisible();
-    await expect(window.getByRole('menuitem', { name: 'Duplicate thread' })).toBeVisible();
-    await expect(window.getByRole('menuitem', { name: 'Retry last prompt' })).toBeVisible();
     await expect(window.getByRole('menuitem', { name: 'Archive thread' })).toBeVisible();
     await expect(window.getByRole('menuitem', { name: 'Delete permanently' })).toBeVisible();
     await expect(window.getByRole('menuitem', { name: 'Capture daily note' })).toHaveCount(0);

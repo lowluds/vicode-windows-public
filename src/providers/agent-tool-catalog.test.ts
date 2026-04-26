@@ -142,6 +142,40 @@ describe('buildAgentRuntimeToolCatalog', () => {
     );
   });
 
+  it('describes creator bundle tools as bounded app-owned write tools', () => {
+    const catalog = buildAgentRuntimeToolCatalog({
+      executionPermission: 'workspace_write',
+      nativeWebResearchEnabled: false,
+      creatorToolsEnabled: true,
+      mcpTools: []
+    });
+
+    expect(
+      catalog.nativeTools.find((tool) => tool.callName === 'create_skill_bundle')
+    ).toEqual(
+      expect.objectContaining({
+        visibilityGroup: 'workspace_write',
+        concurrencySafe: false,
+        renderHint: 'workspace',
+        reviewHint: 'workspace_mutation',
+        orchestrationHint: 'modify',
+        mutatesWorkspace: false,
+        readsWorkspace: false,
+        usesNetwork: false,
+        requiresApproval: false
+      })
+    );
+    expect(
+      catalog.nativeTools.find((tool) => tool.callName === 'create_plugin_bundle')
+    ).toEqual(
+      expect.objectContaining({
+        visibilityGroup: 'workspace_write',
+        mutatesWorkspace: false,
+        readsWorkspace: false
+      })
+    );
+  });
+
   it('builds provider tool definitions from the canonical catalog without a second native registry', () => {
     const catalog = buildAgentRuntimeToolCatalog({
       executionPermission: 'workspace_write',
@@ -166,7 +200,7 @@ describe('buildAgentRuntimeToolCatalog', () => {
       expect.objectContaining({
         function: expect.objectContaining({
           name: 'read_file',
-          description: 'Read one text file inside the trusted workspace.',
+          description: 'Read one text file inside the workspace.',
           parameters: expect.objectContaining({
             type: 'object'
           })
@@ -210,12 +244,14 @@ describe('buildAgentRuntimeToolCatalog', () => {
     expect(catalog.tools.some((tool) => tool.callName === 'write_file')).toBe(false);
     expect(catalog.tools.some((tool) => tool.callName === 'run_command')).toBe(false);
     expect(catalog.tools.some((tool) => tool.callName === 'spawn_subagents')).toBe(false);
+    expect(catalog.tools.some((tool) => tool.callName === 'create_skill_bundle')).toBe(false);
   });
 
   it('allows build-control planner lanes to reach control-friendly command and write tools', () => {
     const catalog = buildAgentRuntimeToolCatalog({
       executionPermission: 'full_access',
       delegationEnabled: true,
+      creatorToolsEnabled: true,
       executionConstraints: {
         permissionMode: 'plan',
         toolPolicy: {
@@ -240,13 +276,15 @@ describe('buildAgentRuntimeToolCatalog', () => {
     expect(catalog.tools.some((tool) => tool.callName === 'web_search')).toBe(true);
     expect(catalog.tools.some((tool) => tool.callName === 'run_command')).toBe(true);
     expect(catalog.tools.some((tool) => tool.callName === 'write_file')).toBe(true);
+    expect(catalog.tools.some((tool) => tool.callName === 'create_skill_bundle')).toBe(true);
     expect(catalog.tools.some((tool) => tool.callName === 'apply_patch')).toBe(false);
     expect(catalog.tools.some((tool) => tool.callName === 'spawn_subagents')).toBe(true);
   });
 
-  it('keeps the delegation tool out of delegated helper presets', () => {
+  it('keeps the delegation tool out of the explicit subagent preset', () => {
     const catalog = buildAgentRuntimeToolCatalog({
       executionPermission: 'full_access',
+      creatorToolsEnabled: true,
       executionConstraints: {
         permissionMode: 'default',
         toolPolicy: {
@@ -270,6 +308,38 @@ describe('buildAgentRuntimeToolCatalog', () => {
     expect(catalog.tools.some((tool) => tool.callName === 'spawn_subagents')).toBe(false);
     expect(catalog.tools.some((tool) => tool.callName === 'read_file')).toBe(true);
     expect(catalog.tools.some((tool) => tool.callName === 'write_file')).toBe(false);
+    expect(catalog.tools.some((tool) => tool.callName === 'create_skill_bundle')).toBe(false);
+  });
+
+  it('supports normal helper tools when delegation is explicitly denied on the default preset', () => {
+    const catalog = buildAgentRuntimeToolCatalog({
+      executionPermission: 'full_access',
+      creatorToolsEnabled: true,
+      executionConstraints: {
+        permissionMode: 'default',
+        toolPolicy: {
+          preset: 'default',
+          allowedToolCallNames: [],
+          disallowedToolCallNames: ['spawn_subagents']
+        },
+        maxTurns: 12,
+        maxReasoningTokens: null,
+        taskBudgetTokens: null,
+        costBudgetUsd: null,
+        maxDelegationDepth: 0,
+        maxAutomaticRetries: 0,
+        maxUnchangedHandoffs: 1,
+        maxSiblingDelegates: 0
+      },
+      nativeWebResearchEnabled: true,
+      mcpTools: []
+    });
+
+    expect(catalog.tools.some((tool) => tool.callName === 'spawn_subagents')).toBe(false);
+    expect(catalog.tools.some((tool) => tool.callName === 'read_file')).toBe(true);
+    expect(catalog.tools.some((tool) => tool.callName === 'write_file')).toBe(true);
+    expect(catalog.tools.some((tool) => tool.callName === 'create_skill_bundle')).toBe(true);
+    expect(catalog.tools.some((tool) => tool.callName === 'run_command')).toBe(true);
   });
 
   it('honors explicit allow and deny rules on top of the selected tool preset', () => {

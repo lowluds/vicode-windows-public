@@ -275,14 +275,7 @@ export class QwenAdapter implements ProviderAdapter {
     return [];
   }
 
-  validateProjectContext(folderPath: string | null, trusted: boolean) {
-    if (folderPath && !trusted) {
-      return {
-        valid: false,
-        message: 'Project folder must be trusted before Qwen provider runs.'
-      };
-    }
-
+  validateProjectContext(_folderPath: string | null, _trusted: boolean) {
     return { valid: true };
   }
 

@@ -49,6 +49,12 @@ function formatOllamaResponseTimeoutError(timeoutMs: number, isCloud: boolean) {
 function formatOllamaTransportError(error: unknown, isCloud: boolean, timeoutMs?: number) {
   if (error instanceof Error) {
     const normalized = error.message.trim().toLowerCase();
+    if (normalized === 'fetch failed' || normalized === 'failed to fetch' || normalized.includes('fetch failed')) {
+      return isCloud
+        ? 'Failed to reach Ollama cloud. Check your network connection, then retry.'
+        : 'Failed to reach the local Ollama runtime. Start Ollama or check that it is reachable, then retry.';
+    }
+
     if (normalized === 'terminated' || normalized.includes('terminated')) {
       return isCloud
         ? 'Ollama cloud terminated the response stream before a final answer was returned.'
@@ -399,7 +405,7 @@ function buildAgentPrompt(
         ].join('\n')
       : null;
   return [
-    `Trusted workspace root: ${workspaceRoot}`,
+    `Workspace root: ${workspaceRoot}`,
     'Use the available tools instead of guessing file contents or edits.',
     hasWorkspaceInspectionTools ? 'Use list_directory and search_text to inspect the workspace before guessing paths.' : null,
     'Format informational answers for readability: use short paragraphs, and when listing facts, options, or steps, use bullets instead of one dense block of text.',
@@ -986,7 +992,7 @@ export class OllamaAdapter implements ProviderAdapter {
     ))
       .filter((value): value is ProviderModel => Boolean(value));
 
-    return discovered.length > 0 ? sanitizeDiscoveredModels('ollama', discovered) : [];
+    return discovered.length > 0 ? sanitizeDiscoveredModels('ollama', discovered, { preserveInputOrder: true }) : [];
   }
 
   async discoverRuntimeModels(_input: {
@@ -1059,20 +1065,13 @@ export class OllamaAdapter implements ProviderAdapter {
     return [];
   }
 
-  validateProjectContext(folderPath: string | null, trusted: boolean) {
-    if (folderPath && !trusted) {
-      return {
-        valid: false,
-        message: 'Project folder must be trusted before Ollama provider runs.'
-      };
-    }
-
+  validateProjectContext(_folderPath: string | null, _trusted: boolean) {
     return { valid: true };
   }
 
   private async finalizeAssistantOutput(context: ProviderRunContext, output: string) {
     const trimmed = output.trim();
-    if (!trimmed || context.apiKey || context.runMode === 'plan') {
+    if (!trimmed || context.apiKey || context.runMode === 'plan' || context.skipFinalAnswerRewrite) {
       return trimmed;
     }
 
@@ -2169,22 +2168,23 @@ export class OllamaAdapter implements ProviderAdapter {
           });
         }
 
+        const initialPrompt = buildAgentPrompt(
+          context.prompt,
+          context.folderPath as string,
+          context.runMode,
+          context.executionPermission,
+          context.runtimeCommandPolicy,
+          context.runtimeNetworkPolicy,
+          activeToolCatalog,
+          context.runtimeSkillResources,
+          {
+            webResearchFastPath
+          }
+        );
         const history: OllamaResponsesInputMessage[] = [
           {
             role: 'user',
-            content: buildAgentPrompt(
-              context.prompt,
-              context.folderPath as string,
-              context.runMode,
-              context.executionPermission,
-              context.runtimeCommandPolicy,
-              context.runtimeNetworkPolicy,
-              activeToolCatalog,
-              context.runtimeSkillResources,
-              {
-                webResearchFastPath
-              }
-            )
+            content: buildOllamaResponsesInput(initialPrompt, context.imageAttachments)
           }
         ];
 

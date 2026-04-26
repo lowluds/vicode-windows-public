@@ -1,7 +1,12 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { RunTranscriptItem } from '../lib/run-activity';
 import {
+  compactActivityGroupDetailItems,
   compactCompletedTranscriptActivityGroups,
+  compactWorkSummaryDetailItems,
+  RunTranscriptTimeline,
   shouldNestAssistantSourcesWithWorkedGroup,
   stripRedundantActivityDetailLine
 } from './RunTranscriptTimeline';
@@ -15,6 +20,7 @@ function createActivityItem(
     id,
     kind: 'activity_line',
     activityKind,
+    toolName: overrides.toolName ?? null,
     label: overrides.label ?? id,
     text: overrides.text ?? id,
     url: overrides.url ?? null,
@@ -38,6 +44,22 @@ describe('compactCompletedTranscriptActivityGroups', () => {
     ];
 
     expect(compactCompletedTranscriptActivityGroups(items, 'running')).toEqual(items);
+  });
+
+  it('keeps running activity as a visible trail when a live duration label is available', () => {
+    const command = createActivityItem('command', 'terminal_command', {
+      command: 'npm test',
+      status: 'running'
+    });
+    const thinking = createActivityItem('thinking', 'thinking', {
+      label: 'Checking the transcript display.',
+      text: 'Checking the transcript display.'
+    });
+
+    expect(compactCompletedTranscriptActivityGroups([thinking, command], 'running', 'Working for 12s')).toEqual([
+      thinking,
+      command
+    ]);
   });
 
   it('collapses adjacent completed activity rows into a disclosure group', () => {
@@ -166,10 +188,10 @@ describe('compactCompletedTranscriptActivityGroups', () => {
 
     expect(compactCompletedTranscriptActivityGroups(items, 'completed')).toEqual([
       {
-        id: 'activity-group:command',
-        kind: 'activity_group',
-        label: '2 previous steps',
+        id: 'work-summary:worked-for',
+        kind: 'work_summary_group',
         workedForLabel: 'Worked for 3m 36s',
+        stepLabel: '2 previous steps',
         items: [command, thinking]
       }
     ]);
@@ -197,13 +219,46 @@ describe('compactCompletedTranscriptActivityGroups', () => {
 
     expect(compactCompletedTranscriptActivityGroups([command, thinking, assistant, workedFor], 'completed')).toEqual([
       {
-        id: 'activity-group:command',
-        kind: 'activity_group',
-        label: '2 previous steps',
+        id: 'work-summary:worked-for',
+        kind: 'work_summary_group',
         workedForLabel: 'Worked for 18s',
+        stepLabel: '2 previous steps',
         items: [command, thinking]
       },
       assistant
+    ]);
+  });
+
+  it('keeps progress notes inside the completed worked-for summary when a final answer follows', () => {
+    const usingNote: RunTranscriptItem = {
+      id: 'using-note',
+      kind: 'assistant_text',
+      text: 'Using: Source-Backed Workflow and UX Writing Standards.'
+    };
+    const command = createActivityItem('command', 'terminal_command', {
+      command: 'npm test',
+      status: 'completed'
+    });
+    const workedFor: RunTranscriptItem = {
+      id: 'worked-for',
+      kind: 'worked_for',
+      label: 'Worked for 42s'
+    };
+    const finalAnswer: RunTranscriptItem = {
+      id: 'assistant-final',
+      kind: 'assistant_text',
+      text: 'Implemented the transcript polish.'
+    };
+
+    expect(compactCompletedTranscriptActivityGroups([usingNote, command, workedFor, finalAnswer], 'completed')).toEqual([
+      {
+        id: 'work-summary:worked-for',
+        kind: 'work_summary_group',
+        workedForLabel: 'Worked for 42s',
+        stepLabel: '2 previous steps',
+        items: [usingNote, command]
+      },
+      finalAnswer
     ]);
   });
 
@@ -235,6 +290,70 @@ describe('stripRedundantActivityDetailLine', () => {
     expect(
       stripRedundantActivityDetailLine('Calling extract web page', 'url: https://example.com/article')
     ).toBe('url: https://example.com/article');
+  });
+});
+
+describe('compactActivityGroupDetailItems', () => {
+  it('groups adjacent completed commands behind a command-count disclosure item', () => {
+    const firstCommand = createActivityItem('command-1', 'terminal_command', {
+      command: 'npm run build',
+      status: 'completed'
+    });
+    const secondCommand = createActivityItem('command-2', 'terminal_command', {
+      command: 'npm test',
+      status: 'completed'
+    });
+    const thinking = createActivityItem('thinking', 'thinking', {
+      label: 'Reviewing results',
+      text: 'Reviewing results'
+    });
+
+    expect(compactActivityGroupDetailItems([thinking, firstCommand, secondCommand])).toEqual([
+      {
+        id: 'activity:thinking',
+        kind: 'activity_item',
+        item: thinking
+      },
+      {
+        id: 'command-group:command-1',
+        kind: 'command_group',
+        label: 'Ran 2 commands',
+        items: [firstCommand, secondCommand]
+      }
+    ]);
+  });
+});
+
+describe('compactWorkSummaryDetailItems', () => {
+  it('keeps readable progress notes and groups adjacent commands inside worked summaries', () => {
+    const usingNote: RunTranscriptItem = {
+      id: 'using-note',
+      kind: 'assistant_text',
+      text: 'Using: Source-Backed Workflow and UX Writing Standards.'
+    };
+    const firstCommand = createActivityItem('command-1', 'terminal_command', {
+      command: 'npm run build',
+      status: 'completed'
+    });
+    const secondCommand = createActivityItem('command-2', 'terminal_command', {
+      command: 'npm test',
+      status: 'completed'
+    });
+
+    expect(compactWorkSummaryDetailItems([usingNote, firstCommand, secondCommand])).toEqual([
+      {
+        id: 'assistant-note:using-note',
+        kind: 'assistant_note',
+        item: usingNote,
+        text: 'Using: Source-Backed Workflow and UX Writing Standards.'
+      },
+      {
+        id: 'command-group:command-1',
+        kind: 'command_group',
+        label: 'Ran 2 commands',
+        items: [firstCommand, secondCommand]
+      }
+    ]);
   });
 });
 
@@ -270,5 +389,34 @@ describe('shouldNestAssistantSourcesWithWorkedGroup', () => {
     );
 
     expect(shouldNestAssistantSourcesWithWorkedGroup(items, 1)).toBe(true);
+  });
+});
+
+describe('RunTranscriptTimeline resolution summary rendering', () => {
+  it('renders completed resolution summaries as summary copy instead of a resolved status card', () => {
+    const html = renderToStaticMarkup(
+      createElement(RunTranscriptTimeline, {
+        items: [
+          {
+            id: 'summary',
+            kind: 'resolution_summary',
+            outcome: 'Implemented the sidebar thread connector polish.',
+            filesChanged: ['src/renderer/styles/sidebar.css'],
+            toolsUsed: [],
+            verificationCommands: ['npx playwright test e2e/sidebar-thread-indicator.spec.ts'],
+            remainingRisk: null
+          } satisfies RunTranscriptItem
+        ],
+        skills: [],
+        runState: 'completed'
+      })
+    );
+
+    expect(html).toContain('Summary');
+    expect(html).toContain('Implemented the sidebar thread connector polish.');
+    expect(html).toContain('Changed');
+    expect(html).toContain('Verified');
+    expect(html).not.toContain('Resolved');
+    expect(html).not.toContain('Outcome');
   });
 });

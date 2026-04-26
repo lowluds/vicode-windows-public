@@ -1,0 +1,210 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-04-24T03:37:09.282Z",
+  "source": "<curated-local-guidance-source>/wiki",
+  "entrypoint": "VICODE.md",
+  "vaultRoot": "wiki",
+  "routing": {
+    "kind": "obsidian-wikilinks",
+    "preferred": "obsidianRoute",
+    "fallback": "path",
+    "note": "Use [[Page Title]] routes when Obsidian is available; use packaged markdown paths otherwise."
+  },
+  "files": [
+    "VICODE.md",
+    "wiki/Agent Runtime Patterns.md",
+    "wiki/Capability Routing Standard.md",
+    "wiki/Cleanup And Stale Artifact Discipline.md",
+    "wiki/Code Organization Standard.md",
+    "wiki/Context Packet Standard.md",
+    "wiki/Design Taste Translation.md",
+    "wiki/Docs As Code.md",
+    "wiki/Execution Discipline.md",
+    "wiki/Frontend Quality Gate.md",
+    "wiki/Frontend Standards.md",
+    "wiki/Markdown KB Retrieval Design.md",
+    "wiki/Prompt To Execution Packet.md",
+    "wiki/Reference To Code Workflow.md",
+    "wiki/Search And Retrieval.md",
+    "wiki/Security And Secrets.md",
+    "wiki/Source-Backed Workflow.md",
+    "wiki/Task Routing.md",
+    "wiki/UI Review Rubric.md",
+    "wiki/UX Writing Standards.md",
+    "wiki/Verification Standards.md",
+    "wiki/Writing Anti-Patterns.md"
+  ],
+  "pages": [
+    {
+      "title": "Agent Runtime Patterns",
+      "path": "wiki/Agent Runtime Patterns.md",
+      "obsidianRoute": "[[Agent Runtime Patterns]]",
+      "aliases": [],
+      "aliasRoutes": []
+    },
+    {
+      "title": "Capability Routing Standard",
+      "path": "wiki/Capability Routing Standard.md",
+      "obsidianRoute": "[[Capability Routing Standard]]",
+      "aliases": [],
+      "aliasRoutes": []
+    },
+    {
+      "title": "Cleanup And Stale Artifact Discipline",
+      "path": "wiki/Cleanup And Stale Artifact Discipline.md",
+      "obsidianRoute": "[[Cleanup And Stale Artifact Discipline]]",
+      "aliases": [],
+      "aliasRoutes": []
+    },
+    {
+      "title": "Code Organization Standard",
+      "path": "wiki/Code Organization Standard.md",
+      "obsidianRoute": "[[Code Organization Standard]]",
+      "aliases": [],
+      "aliasRoutes": []
+    },
+    {
+      "title": "Context Packet Standard",
+      "path": "wiki/Context Packet Standard.md",
+      "obsidianRoute": "[[Context Packet Standard]]",
+      "aliases": [],
+      "aliasRoutes": []
+    },
+    {
+      "title": "Design Taste Translation",
+      "path": "wiki/Design Taste Translation.md",
+      "obsidianRoute": "[[Design Taste Translation]]",
+      "aliases": [],
+      "aliasRoutes": []
+    },
+    {
+      "title": "Docs As Code",
+      "path": "wiki/Docs As Code.md",
+      "obsidianRoute": "[[Docs As Code]]",
+      "aliases": [],
+      "aliasRoutes": []
+    },
+    {
+      "title": "Execution Discipline",
+      "path": "wiki/Execution Discipline.md",
+      "obsidianRoute": "[[Execution Discipline]]",
+      "aliases": [],
+      "aliasRoutes": []
+    },
+    {
+      "title": "Frontend Quality Gate",
+      "path": "wiki/Frontend Quality Gate.md",
+      "obsidianRoute": "[[Frontend Quality Gate]]",
+      "aliases": [],
+      "aliasRoutes": []
+    },
+    {
+      "title": "Frontend Standards",
+      "path": "wiki/Frontend Standards.md",
+      "obsidianRoute": "[[Frontend Standards]]",
+      "aliases": [],
+      "aliasRoutes": []
+    },
+    {
+      "title": "Markdown KB Retrieval Design",
+      "path": "wiki/Markdown KB Retrieval Design.md",
+      "obsidianRoute": "[[Markdown KB Retrieval Design]]",
+      "aliases": [
+        "markdown retrieval design",
+        "modular wiki design",
+        "route-card design"
+      ],
+      "aliasRoutes": [
+        "[[markdown retrieval design]]",
+        "[[modular wiki design]]",
+        "[[route-card design]]"
+      ]
+    },
+    {
+      "title": "Prompt To Execution Packet",
+      "path": "wiki/Prompt To Execution Packet.md",
+      "obsidianRoute": "[[Prompt To Execution Packet]]",
+      "aliases": [],
+      "aliasRoutes": []
+    },
+    {
+      "title": "Reference To Code Workflow",
+      "path": "wiki/Reference To Code Workflow.md",
+      "obsidianRoute": "[[Reference To Code Workflow]]",
+      "aliases": [],
+      "aliasRoutes": []
+    },
+    {
+      "title": "Search And Retrieval",
+      "path": "wiki/Search And Retrieval.md",
+      "obsidianRoute": "[[Search And Retrieval]]",
+      "aliases": [
+        "retrieval order",
+        "tiered retrieval",
+        "context budget"
+      ],
+      "aliasRoutes": [
+        "[[retrieval order]]",
+        "[[tiered retrieval]]",
+        "[[context budget]]"
+      ]
+    },
+    {
+      "title": "Security And Secrets",
+      "path": "wiki/Security And Secrets.md",
+      "obsidianRoute": "[[Security And Secrets]]",
+      "aliases": [],
+      "aliasRoutes": []
+    },
+    {
+      "title": "Source-Backed Workflow",
+      "path": "wiki/Source-Backed Workflow.md",
+      "obsidianRoute": "[[Source-Backed Workflow]]",
+      "aliases": [],
+      "aliasRoutes": []
+    },
+    {
+      "title": "Task Routing",
+      "path": "wiki/Task Routing.md",
+      "obsidianRoute": "[[Task Routing]]",
+      "aliases": [
+        "route cards",
+        "read depth",
+        "tiered routing"
+      ],
+      "aliasRoutes": [
+        "[[route cards]]",
+        "[[read depth]]",
+        "[[tiered routing]]"
+      ]
+    },
+    {
+      "title": "UI Review Rubric",
+      "path": "wiki/UI Review Rubric.md",
+      "obsidianRoute": "[[UI Review Rubric]]",
+      "aliases": [],
+      "aliasRoutes": []
+    },
+    {
+      "title": "UX Writing Standards",
+      "path": "wiki/UX Writing Standards.md",
+      "obsidianRoute": "[[UX Writing Standards]]",
+      "aliases": [],
+      "aliasRoutes": []
+    },
+    {
+      "title": "Verification Standards",
+      "path": "wiki/Verification Standards.md",
+      "obsidianRoute": "[[Verification Standards]]",
+      "aliases": [],
+      "aliasRoutes": []
+    },
+    {
+      "title": "Writing Anti-Patterns",
+      "path": "wiki/Writing Anti-Patterns.md",
+      "obsidianRoute": "[[Writing Anti-Patterns]]",
+      "aliases": [],
+      "aliasRoutes": []
+    }
+  ]
+}

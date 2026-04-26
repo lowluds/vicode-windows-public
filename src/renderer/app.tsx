@@ -1,26 +1,12 @@
-import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionButton,
   ConfirmDialog,
-  DangerButton,
-  MenuButton,
-  ModalDialog,
   IconButton,
-  Menu,
-  MenuCheckboxItem,
-  MenuContent,
-  MenuItem,
-  MenuItemLabel,
-  MenuSeparator,
-  MenuSub,
-  MenuSubContent,
-  MenuSubTrigger,
-  MenuTrigger,
+  ModalDialog,
   PrimaryButton,
   SelectField,
-  StatusPill,
   SurfaceCard,
-  TextInput,
   TextArea,
   Tooltip,
   TooltipContent,
@@ -70,7 +56,6 @@ import type {
 import type { AppEvent } from '../shared/events';
 import type {
   MicrophoneAccessStatus,
-  NativeThemeSnapshot,
   OllamaRuntimeSnapshot,
   StorageDiagnostics,
   WorkspaceBootstrapAnswers,
@@ -80,25 +65,54 @@ import type {
 } from '../shared/ipc';
 import {
   deriveRunActivityMap,
-  deriveRunReviewEvidence,
   deriveRunTranscriptItemsMap,
   type RunActivityViewModel,
   type ThinkingLineViewModel
 } from './lib/run-activity';
 import {
-  appendRunEvent,
-  deriveRecentThreads,
   extractThreadSkillIds,
-  extractTurnImageAttachments,
-  extractTurnTextAttachments,
   formatAutomationSchedule,
   formatTime,
   hasAssistantTurnForRun,
   isVisibleTranscriptTurn,
-  mergeBootstrapRecords,
   surfaceProviders,
   upsertRecentThread
 } from './lib/thread-presentation';
+import {
+  applyPendingLiveRunDeltas,
+  applyRawRunEventToThread,
+  applyRunReplaceToThread,
+  applyRunStartedToThread,
+  applyThreadSummaryToActiveThread,
+  clearRunProgressEntry,
+  queuePendingLiveRunDelta as queuePendingLiveRunDeltaEntry
+} from './lib/thread-live-event-reducer';
+import { bootstrapAppShell } from './lib/app-shell-bootstrap';
+import {
+  refreshAppShellBootstrapState,
+  refreshCollaborationBootstrapState
+} from './lib/app-shell-refresh';
+import {
+  openThreadInShell,
+  refreshArchivedThreads as refreshArchivedThreadsInShell,
+  refreshThreads as refreshThreadsInShell,
+  selectProjectInShell,
+  toggleProjectThreadsInShell
+} from './lib/app-shell-thread-selection';
+import { useThreadDraftSync } from './lib/use-thread-draft-sync';
+import { useShellTaskSync } from './lib/use-shell-task-sync';
+import {
+  archiveProjectThreads as archiveProjectThreadsInShell,
+  createProject as createProjectInShell,
+  createThread as createThreadInShell,
+  createThreadForProject as createThreadForProjectInShell,
+  openProjectFromPicker as openProjectFromPickerInShell,
+  removeProject as removeProjectInShell,
+  renameProject as renameProjectInShell,
+  repairWorkspaceProjectPath as repairWorkspaceProjectPathInShell,
+  setProjectTrust as setProjectTrustInShell,
+  trustWorkspaceProject
+} from './lib/app-shell-project-actions';
 import {
   buildPlanReasoningLabel,
   buildPlanSetupPrompt,
@@ -109,45 +123,35 @@ import {
 } from './lib/build-plan';
 import { deriveVisiblePlannerArtifacts } from './lib/planner-visibility';
 import { deriveCurrentRunId, isActiveThreadStatus } from './lib/active-run';
-import { getDownloadedUpdateKey, hasAnyActiveThreadRun, isQueuedUpdateInstall } from './lib/app-update';
-import { isTranscriptNearBottomPosition, shouldAutoFollowTranscript, transcriptAutoFollowThreshold } from './lib/transcript-scroll';
+import { hasAnyActiveThreadRun } from './lib/app-update';
 import { applyOptimisticComposerTurn } from './lib/composer-submit';
 import { deriveLatestProviderContextWindowUsage, estimateContextWindow } from './lib/context-window';
-import { formatUserErrorMessage, parseWorkspaceUnavailableError } from './lib/error-format';
+import { formatRunFailureToastMessage, formatUserErrorMessage, parseWorkspaceUnavailableError } from './lib/error-format';
 import { resolveDefaultProviderId, resolveProviderModelId } from './lib/provider-defaults';
 import {
-  clampSidebarWidth,
-  SIDEBAR_COLLAPSED_STORAGE_KEY,
   SIDEBAR_COLLAPSED_WIDTH,
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MIN_WIDTH,
-  SIDEBAR_WIDTH_STORAGE_KEY,
   resolveTitlebarLeadingWidth,
-  resolveStoredSidebarCollapsed,
-  resolveStoredSidebarWidth,
-  resolveSidebarMaxWidth
+  resolveStoredSidebarCollapsed
 } from './lib/sidebar-layout';
-import { applyAccentColor, applyResolvedAppearance, getSystemPrefersDark, resolveAccentColor, resolveAppearanceMode, subscribeToSystemAppearance } from './lib/theme';
+import { useShellSidebarState } from './lib/use-shell-sidebar-state';
+import { applyResolvedAppearance, getSystemPrefersDark, resolveAppearanceMode } from './lib/theme';
+import { useAppThemeSync } from './lib/use-app-theme-sync';
+import { describeReviewItem } from './lib/review-presentation';
+import { useTranscriptAutoFollow } from './lib/use-transcript-auto-follow';
+import { useVoiceDictation } from './lib/use-voice-dictation';
+import { openCreatorInComposer as openCreatorInComposerFlow } from './lib/composer-creator-flow';
+import { enhanceComposerPrompt as enhanceComposerPromptFlow } from './lib/composer-prompt-enhancement';
+import { executeLeadingNativeSlashCommand as executeLeadingNativeSlashCommandFlow } from './lib/composer-native-command-flow';
 import {
   appendVoiceTranscript,
-  blobToBase64,
-  isVoiceDictationSupported,
-  normalizeVoiceTranscript,
-  resolveVoiceRecorderMimeType,
-  transcodeVoiceBlobToWav,
-  type VoiceState
+  normalizeVoiceTranscript
 } from './lib/voice-dictation';
 import { AppSidebar } from './components/AppSidebar';
 import { ChatUtilityPane } from './components/ChatUtilityPane';
-import { ComposerPanel } from './components/ComposerPanel';
-import { ThreadSubagentActivityCard } from './components/ThreadSubagentActivityCard';
 import { PlannerPlanCard, PlannerPlanStatusRow, PlannerQuestionCard } from './components/PlannerArtifacts';
-import { RunProgressPanel } from './components/RunProgressPanel';
-import { RunReviewPanel } from './components/RunReviewPanel';
 import { ToolApprovalPanel } from './components/ToolApprovalPanel';
-import { RunActivityPanel } from './components/RunActivityPanel';
-import { RunTranscriptTimeline } from './components/RunTranscriptTimeline';
-import { VicodeBuildControlView } from './components/VicodeBuildControlView';
 import type { ComposerActivityItem } from './components/ComposerActivityShelf';
 import { folderLabel } from './lib/folder-label';
 import { LandingPage } from './components/LandingPage';
@@ -155,15 +159,9 @@ import { EmptyThreadHero } from './components/EmptyThreadHero';
 import { LandingBeams } from './components/LandingBeams';
 import { InlineNotice } from './components/InlineNotice';
 import { UiDevSurface } from './components/UiDevSurface';
-import { LiveRunStatus } from './components/LiveRunStatus';
-import {
-  buildNativeComposerCommandPrompt,
-  nativeComposerCommands,
-  parseLeadingNativeComposerCommand,
-  resolveNativePlanCommand,
-  type NativeComposerCommandId
-} from '../shared/nativeCommands';
+import { type NativeComposerCommandId } from '../shared/nativeCommands';
 import { normalizeDisplayText } from '../shared/display-text';
+import { COLLABORATION_ENABLED } from '../shared/product-flags';
 import {
   createProviderRecord,
   providerBlockedRunMessage,
@@ -177,25 +175,28 @@ import {
 } from '../shared/providers';
 import {
   applyRunProgressSnapshotEvent,
-  countCompletedRunProgressItems,
   deriveRunProgressFromPlanner,
   deriveRunProgressSnapshots
 } from '../shared/run-progress';
-import { buildPluginCreatorPrompt, buildSkillCreatorPrompt } from '../shared/creatorImports';
 import { splitPromptMentionedSkills } from '../shared/skills';
-import { SettingsView } from './components/SettingsView';
-import { SkillsView } from './components/SkillsView';
 import { WindowsTitleBar } from './components/WindowsTitleBar';
-import { MessageResponse } from './components/ai-elements/message';
-import { AccessIcon, AccountIcon, ArchiveIcon, ArrowLeftIcon, BookIcon, CheckIcon, ChevronDownIcon, CloseIcon, CopyIcon, EditIcon, FolderIcon, MoreIcon, NoteIcon, PlayIcon, PlusIcon, RefreshIcon, SaveIcon, TaskIcon, TrashIcon } from './components/icons';
+import {
+  AutomationsRouteContainer,
+  BuildControlRouteContainer,
+  SettingsRouteContainer,
+  SkillsRouteContainer,
+  ThreadRouteContainer,
+  type AutomationDraftState,
+  type AutomationTemplate,
+  type BuildPlanLaunchState
+} from './routes';
+import { AccessIcon, ArrowLeftIcon, BookIcon, CheckIcon, CloseIcon, FolderIcon, NoteIcon } from './components/icons';
 import { cx } from './components/ui/utils';
 import wolfLogo from './assets/wolf-logo.png';
 import { createEmptyCollaborationBootstrap, type CollaborationSection } from './lib/collaboration';
 
 type Route = 'thread' | 'collab' | 'skills' | 'build-control' | 'automations' | 'settings' | 'ui-dev';
 type ComposerEffort = 'Low' | 'Medium' | 'High' | 'Extra high';
-
-const COLLABORATION_SHELL_ENABLED = false;
 
 interface ComposerState {
   prompt: string;
@@ -219,99 +220,6 @@ interface Toast {
     onAction: () => void;
   }>;
 }
-
-type AutomationDraftState = {
-  id: string | null;
-  name: string;
-  promptTemplate: string;
-  providerId: ProviderId;
-  modelId: string;
-  skillId: string;
-  scheduleType: 'manual' | 'interval_while_app_open';
-  intervalMinutes: string;
-};
-
-type BuildPlanLaunchState = {
-  goal: string;
-  providerId: ProviderId;
-  modelId: string;
-  reasoningEffort: ProviderReasoningEffort | null;
-};
-
-type AutomationTemplate = {
-  id: string;
-  name: string;
-  summary: string;
-  promptTemplate: string;
-  group: 'Status reports' | 'Release prep' | 'Incidents & triage' | 'Code quality';
-};
-
-const AUTOMATION_TEMPLATES: AutomationTemplate[] = [
-  {
-    id: 'repo-health-check',
-    group: 'Status reports',
-    name: 'Repo health check',
-    summary: 'Summarize the latest repo activity and flag anything that needs attention.',
-    promptTemplate:
-      'Review the recent activity in this project and produce a concise status report. Ground statements in commits, changed files, PRs, and test results when available. Highlight blockers, risky areas, and the most useful next step.'
-  },
-  {
-    id: 'weekly-change-summary',
-    group: 'Status reports',
-    name: 'Weekly change summary',
-    summary: 'Synthesize the latest merged work into a readable weekly update.',
-    promptTemplate:
-      'Summarize the most important changes made in this project recently. Organize by theme, mention notable files or PRs when available, and call out anything that still needs follow-up.'
-  },
-  {
-    id: 'release-notes-draft',
-    group: 'Release prep',
-    name: 'Draft release notes',
-    summary: 'Turn merged work into a release-ready notes draft.',
-    promptTemplate:
-      'Draft release notes for the latest shipped changes in this project. Group items into user-facing improvements, fixes, and internal changes. Keep it concise and readable, and include references to relevant files or PRs when available.'
-  },
-  {
-    id: 'pre-release-check',
-    group: 'Release prep',
-    name: 'Pre-release check',
-    summary: 'Verify changelog, migrations, tests, and risky flags before release.',
-    promptTemplate:
-      'Inspect this project before release and report whether it looks ready to ship. Check for recent test failures, pending migrations, changelog gaps, risky configuration changes, and obvious release blockers. End with a clear go/no-go recommendation.'
-  },
-  {
-    id: 'incident-triage',
-    group: 'Incidents & triage',
-    name: 'Incident triage',
-    summary: 'Group current failures by likely root cause and suggest the smallest useful fix.',
-    promptTemplate:
-      'Review recent failures, incidents, or unstable areas in this project and group them by likely root cause. Suggest the smallest high-leverage fixes first and call out the evidence for each recommendation.'
-  },
-  {
-    id: 'issue-triage',
-    group: 'Incidents & triage',
-    name: 'Issue triage',
-    summary: 'Triage new issues and propose priority, owner, and next action.',
-    promptTemplate:
-      'Review recent open issues or project pain points and triage them. Suggest likely priority, probable owner, and the best next action for each item. Keep the output concise and operational.'
-  },
-  {
-    id: 'dependency-audit',
-    group: 'Code quality',
-    name: 'Dependency audit',
-    summary: 'Look for outdated, risky, or high-noise dependencies and propose cleanup.',
-    promptTemplate:
-      'Audit this project for dependency risk and maintenance issues. Identify outdated, noisy, or risky dependencies, explain the impact, and suggest the most practical cleanup plan.'
-  },
-  {
-    id: 'quality-review',
-    group: 'Code quality',
-    name: 'Quality review',
-    summary: 'Scan for obvious hotspots, flaky areas, and code paths worth tightening.',
-    promptTemplate:
-      'Review this project for code quality risks. Focus on fragile areas, repeated patterns, weak testing coverage, and obvious maintainability issues. Prioritize the findings and suggest the most valuable follow-up work.'
-  }
-];
 
 function createAutomationDraft(providerId: ProviderId, modelId: string): AutomationDraftState {
   return {
@@ -386,6 +294,23 @@ function deriveApprovalBoundaryPrefill(executionPermission: ExecutionPermission 
   return 'risky actions, destructive changes, or large refactors';
 }
 
+function deriveProjectIntentPrefill(project: Project | null) {
+  const name = project?.name.trim();
+  if (!name) {
+    return '';
+  }
+
+  const folderPath = project?.folderPath?.trim();
+  if (folderPath && name.toLowerCase() === folderPath.toLowerCase()) {
+    return '';
+  }
+  if (/^[a-z]:[\\/]/iu.test(name) || name.includes('\\') || name.includes('/')) {
+    return '';
+  }
+
+  return compactBootstrapPrefill(name);
+}
+
 function createWorkspaceBootstrapAnswerDefaults(input: {
   selectedProject: Project | null;
   preferences: Preferences | null;
@@ -400,16 +325,30 @@ function createWorkspaceBootstrapAnswerDefaults(input: {
   const durablePreferences = [
     preferredProviderId ? `Default provider for this workspace: ${preferredProviderId}.` : null,
     preferredModelId && preferredProviderId ? `Preferred ${preferredProviderId} model: ${preferredModelId}.` : null,
-    `Workspace instructions are ${input.personalization.useWorkspaceInstructions ? 'enabled' : 'disabled'} in app settings.`
+    `Trusted project files are ${input.personalization.useWorkspaceInstructions ? 'enabled' : 'disabled'} in app settings.`
   ].filter((value): value is string => Boolean(value));
 
   return {
     ...createEmptyWorkspaceBootstrapAnswers(),
-    projectIntent: compactBootstrapPrefill(input.selectedProject?.name),
+    projectIntent: deriveProjectIntentPrefill(input.selectedProject),
     communicationStyle: compactBootstrapPrefill(input.personalization.globalInstructions),
     approvalBoundary: deriveApprovalBoundaryPrefill(input.preferences?.defaultExecutionPermission),
     durablePreferences
   };
+}
+
+function formatWorkspaceBootstrapMissingFiles(status: WorkspaceBootstrapStatus | null) {
+  const missingFiles = status?.missingFiles ?? [];
+  if (missingFiles.length === 0) {
+    return null;
+  }
+
+  const requiredFiles = missingFiles.filter((fileName) => fileName !== 'SOUL.md');
+  const optionalFiles = missingFiles.filter((fileName) => fileName === 'SOUL.md');
+  return [
+    requiredFiles.length > 0 ? `Missing: ${requiredFiles.join(', ')}` : null,
+    optionalFiles.length > 0 ? `Optional: ${optionalFiles.join(', ')}` : null
+  ].filter(Boolean).join('; ');
 }
 
 function splitDraftList(value: string) {
@@ -421,86 +360,6 @@ function splitDraftList(value: string) {
 
 function isMissingThreadError(error: unknown) {
   return error instanceof Error && /^Thread not found:/u.test(error.message);
-}
-
-type ReviewPresentation = {
-  icon: 'note' | 'memory' | 'user' | 'automation';
-  kindLabel: string;
-  title: string;
-  summary: string;
-  meta: Array<{ label: string; value: string }>;
-  isManualWrite: boolean;
-};
-
-function describeReviewItem(reviewItem: ReviewItem, job: JobDefinition | null): ReviewPresentation {
-  if (reviewItem.details.actionType === 'daily_note_capture') {
-    return {
-      icon: 'note',
-      kindLabel: 'Daily note draft',
-      title: normalizeDisplayText(job?.title ?? 'Review daily note write'),
-      summary: normalizeDisplayText(reviewItem.summary),
-      meta: [
-        { label: 'File', value: String(reviewItem.details.relativePath ?? 'memory') },
-        { label: 'Thread', value: normalizeDisplayText(String(reviewItem.details.threadTitle ?? 'thread capture')) }
-      ],
-      isManualWrite: true
-    };
-  }
-
-  if (reviewItem.details.actionType === 'memory_promotion') {
-    return {
-      icon: 'memory',
-      kindLabel: 'Durable memory update',
-      title: normalizeDisplayText(job?.title ?? 'Review MEMORY.md update'),
-      summary: normalizeDisplayText(reviewItem.summary),
-      meta: [
-        { label: 'File', value: String(reviewItem.details.relativePath ?? 'MEMORY.md') },
-        { label: 'Thread', value: normalizeDisplayText(String(reviewItem.details.threadTitle ?? 'memory promotion')) }
-      ],
-      isManualWrite: true
-    };
-  }
-
-  if (reviewItem.details.actionType === 'user_preference') {
-    return {
-      icon: 'user',
-      kindLabel: 'USER.md suggestion',
-      title: normalizeDisplayText(job?.title ?? 'Review USER.md update'),
-      summary: normalizeDisplayText(reviewItem.summary),
-      meta: [
-        { label: 'File', value: String(reviewItem.details.relativePath ?? 'USER.md') },
-        { label: 'Thread', value: normalizeDisplayText(String(reviewItem.details.threadTitle ?? 'user preference')) }
-      ],
-      isManualWrite: true
-    };
-  }
-
-  return {
-    icon: 'automation',
-    kindLabel: 'Automation approval',
-    title: normalizeDisplayText(job?.title ?? reviewItem.summary),
-    summary: normalizeDisplayText(reviewItem.summary),
-    meta: [
-      { label: 'Trigger', value: String(reviewItem.details.trigger ?? 'manual') },
-      { label: 'Provider', value: String(reviewItem.details.providerId ?? 'unknown') },
-      { label: 'Model', value: String(reviewItem.details.modelId ?? 'unknown') }
-    ],
-    isManualWrite: false
-  };
-}
-
-function renderReviewIcon(icon: ReviewPresentation['icon']) {
-  switch (icon) {
-    case 'note':
-      return <NoteIcon />;
-    case 'memory':
-      return <BookIcon />;
-    case 'user':
-      return <AccountIcon />;
-    case 'automation':
-    default:
-      return <TaskIcon />;
-  }
 }
 
 function formatVoiceElapsed(ms: number) {
@@ -520,14 +379,6 @@ function formatMicrophoneAccessMessage(status: MicrophoneAccessStatus) {
   }
 
   return 'Microphone access is blocked by Windows. Enable microphone access for desktop apps in Windows Settings and try again.';
-}
-
-function isTranscriptNearBottom(element: HTMLElement, threshold = transcriptAutoFollowThreshold) {
-  return isTranscriptNearBottomPosition({
-    scrollHeight: element.scrollHeight,
-    scrollTop: element.scrollTop,
-    clientHeight: element.clientHeight
-  }, threshold);
 }
 
 function resolveComposerReasoningEffort(
@@ -550,10 +401,6 @@ function resolveComposerReasoningEffort(
     default:
       return null;
   }
-}
-
-function requiresSlashCommandBody(commandId: NativeComposerCommandId) {
-  return commandId !== 'plan' && commandId !== 'autonomous-builds';
 }
 
 function mergeComposerSkillIds(attachedSkillIds: string[], mentionedSkillIds: string[]) {
@@ -624,20 +471,6 @@ export function App() {
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
   const [providers, setProviders] = useState<ProviderDescriptor[]>([]);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    if (typeof window === 'undefined') {
-      return false;
-    }
-    return resolveStoredSidebarCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY));
-  });
-  const [sidebarWidth, setSidebarWidth] = useState(() => {
-    if (typeof window === 'undefined') {
-      return SIDEBAR_DEFAULT_WIDTH;
-    }
-    return resolveStoredSidebarWidth(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY), window.innerWidth);
-  });
-  const [sidebarResizing, setSidebarResizing] = useState(false);
-  const [nativeTheme, setNativeTheme] = useState<NativeThemeSnapshot | null>(null);
   const [personalization, setPersonalization] = useState<PersonalizationSettings>({
     globalInstructions: '',
     providerInstructions: createProviderRecord(() => ''),
@@ -645,7 +478,6 @@ export function App() {
   });
   const [appMeta, setAppMeta] = useState<AppMeta | null>(null);
   const [appUpdateState, setAppUpdateState] = useState<AppUpdateState | null>(null);
-  const [queuedUpdateInstallKey, setQueuedUpdateInstallKey] = useState<string | null>(null);
   const [storageDiagnostics, setStorageDiagnostics] = useState<StorageDiagnostics | null>(null);
   const [archivedThreads, setArchivedThreads] = useState<ThreadSummary[]>([]);
   const [removingProjectId, setRemovingProjectId] = useState<string | null>(null);
@@ -655,9 +487,6 @@ export function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
   const [lastContentRoute, setLastContentRoute] = useState<Exclude<Route, 'settings'>>('thread');
   const [composerEffort, setComposerEffort] = useState<ComposerEffort>('High');
-  const [voiceState, setVoiceState] = useState<VoiceState>('idle');
-  const [voiceElapsedMs, setVoiceElapsedMs] = useState(0);
-  const [voiceLevel, setVoiceLevel] = useState(0);
   const [enhancingPrompt, setEnhancingPrompt] = useState(false);
   const [pendingNativeCommandId, setPendingNativeCommandId] = useState<NativeComposerCommandId | null>(null);
   const [composer, setComposer] = useState<ComposerState>({
@@ -701,7 +530,6 @@ export function App() {
   const [workspaceBootstrapBusy, setWorkspaceBootstrapBusy] = useState(false);
   const [reviewDraftEdits, setReviewDraftEdits] = useState<Record<string, string>>({});
   const [reviewDraftSavingId, setReviewDraftSavingId] = useState<string | null>(null);
-  const [microphoneConsentOpen, setMicrophoneConsentOpen] = useState(false);
   const [automationDraft, setAutomationDraft] = useState<AutomationDraftState>(() =>
     createAutomationDraft('openai', getProviderMetadata('openai').defaultModelId)
   );
@@ -716,26 +544,11 @@ export function App() {
   const sidebarShellRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const transcriptRef = useRef<HTMLElement | null>(null);
-  const transcriptAutoFollowRef = useRef(true);
-  const transcriptProgrammaticScrollRef = useRef(false);
-  const transcriptUserScrollIntentRef = useRef(false);
-  const transcriptUserScrollIntentTimeoutRef = useRef<number | null>(null);
-  const transcriptThreadIdRef = useRef<string | null>(null);
   const installPollingRef = useRef<Partial<Record<ProviderId, number>>>({});
-  const sidebarResizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  const liveSidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
-  const sidebarResizeFrameRef = useRef<number | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const voiceChunksRef = useRef<Blob[]>([]);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const analyserFrameRef = useRef<number | null>(null);
-  const voiceTimerRef = useRef<number | null>(null);
-  const voiceRecordingStartedAtRef = useRef<number | null>(null);
   const selectedProjectIdRef = useRef<string | null>(null);
   const activeThreadIdRef = useRef<string | null>(null);
-  const hydratedDraftThreadIdRef = useRef<string | null>(null);
+  const pendingLiveRunDeltasRef = useRef(new Map<string, { threadId: string; runId: string; delta: string }>());
+  const pendingLiveRunDeltaFrameRef = useRef<number | null>(null);
   const pendingReviewSectionRef = useRef<HTMLDivElement | null>(null);
   const pendingReviewToastShownRef = useRef(false);
   const pendingReviewRevealRequestedRef = useRef(false);
@@ -743,15 +556,244 @@ export function App() {
   const reviewItemsRef = useRef<ReviewItem[]>([]);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
-  function markTranscriptUserScrollIntent() {
-    transcriptUserScrollIntentRef.current = true;
-    if (transcriptUserScrollIntentTimeoutRef.current !== null) {
-      window.clearTimeout(transcriptUserScrollIntentTimeoutRef.current);
+  const bootstrapHost = {
+    getExpandedProjectIds: () => expandedProjectIds,
+    getToolApprovalResolvingId: () => toolApprovalResolvingId,
+    getCollaborationSelection: () => ({
+      roomId: selectedCollaborationRoomId,
+      chatId: selectedCollaborationChatId,
+      contactId: selectedCollaborationContactId
+    }),
+    loadBootstrap: () => window.vicode.app.getBootstrap(),
+    loadCollaborationBootstrap: () => window.vicode.collab.getBootstrap(),
+    loadAppMeta: () => window.vicode.app.getMeta(),
+    loadUpdateState: () => window.vicode.updates.getState(),
+    loadArchivedThreads: () => window.vicode.threads.listArchived(null),
+    loadSkills: () => window.vicode.skills.list(),
+    openThread: (threadId: string) => window.vicode.threads.open(threadId),
+    clearLastOpenedThreadPreference: () => window.vicode.settings.save({ lastOpenedThreadId: null }),
+    applyAppearance: (nextPreferences: Preferences) => {
+      applyResolvedAppearance(resolveAppearanceMode(nextPreferences.appearanceMode, getSystemPrefersDark()));
+    },
+    applyOpenedThread,
+    resolveComposerEffort: composerEffortFromPreference,
+    shouldShowStartupWelcome,
+    isMissingThreadError,
+    showToast: (level: 'info' | 'warning' | 'error', message: string) => showToast(level, message),
+    setLoading,
+    setReady,
+    setStartupThreadRestoreState,
+    setProjects,
+    setSkills,
+    setAutomations,
+    setJobs,
+    setReviewItems,
+    setProviders,
+    setPendingRunToolApprovals,
+    setToolApprovalResolvingId,
+    setPreferences,
+    setPersonalization,
+    setSelectedProjectId,
+    setExpandedProjectIds,
+    setThreadsByProject,
+    setRecentThreads,
+    setShowStartupWelcome,
+    setCollaboration,
+    setSelectedCollaborationRoomId,
+    setSelectedCollaborationChatId,
+    setSelectedCollaborationContactId,
+    setComposerEffort,
+    applyBootstrapComposerDefaults: (input: {
+      providerId: ProviderId;
+      modelId: string;
+      thinkingEnabled: boolean;
+      executionPermission: ExecutionPermission;
+    }) => {
+      setComposer((current) => ({
+        ...current,
+        providerId: input.providerId,
+        modelId: input.modelId,
+        thinkingEnabled: input.thinkingEnabled,
+        mode: 'default',
+        executionPermission: input.executionPermission,
+        imageAttachments: [],
+        textAttachments: []
+      }));
+    },
+    clearActiveThreadSelection: () => {
+      setActiveThread(null);
+      setActiveRunId(null);
+    },
+    setAppMeta,
+    setAppUpdateState,
+    setArchivedThreads
+  };
+
+  const threadSelectionHost = {
+    findParentThreadId: (threadId: string) =>
+      findParentThreadIdForSubagentChild(subagentsByThreadId, threadId),
+    openThread: (threadId: string) => window.vicode.threads.open(threadId),
+    listProjectThreads: (projectId: string) => window.vicode.threads.list(projectId),
+    listArchivedThreads: (projectId?: string | null) => window.vicode.threads.listArchived(projectId ?? null),
+    savePreferences: (input: Partial<Preferences>) => window.vicode.settings.save(input),
+    getSelectedProjectId: () => selectedProjectId,
+    getPreferences: () => preferences,
+    isMissingThreadError,
+    applyOpenedThread,
+    showToast: (level: 'info' | 'warning' | 'error', message: string) => showToast(level, message),
+    setPreferences,
+    setSelectedProjectId,
+    setSelectedProjectIdRef: (value: string | null) => {
+      selectedProjectIdRef.current = value;
+    },
+    setExpandedProjectIds,
+    setThreadsByProject,
+    setArchivedThreads,
+    setShowStartupWelcome,
+    setActiveThread,
+    setActiveThreadIdRef: (value: string | null) => {
+      activeThreadIdRef.current = value;
+    },
+    setActiveRunId,
+    setComposer,
+    setRoute
+  };
+
+  const projectActionsHost = {
+    getProjects: () => projects,
+    getSelectedProjectId: () => selectedProjectId,
+    getActiveThread: () => activeThread,
+    getRoute: () => route,
+    getComposerState: () => ({
+      providerId: composer.providerId,
+      modelId: composer.modelId,
+      executionPermission: composer.executionPermission,
+      mode: composer.mode
+    }),
+    getProjectDraft: () => projectDraft,
+    getWorkspaceProject: () => workspaceProject,
+    pickFolder: () => window.vicode.app.pickFolder(),
+    createProject: (input: { name: string; folderPath: string | null; trusted: boolean }) =>
+      window.vicode.projects.create(input),
+    updateProject: (input: { id: string; name?: string; folderPath?: string; trusted?: boolean }) =>
+      window.vicode.projects.update(input),
+    removeProject: (projectId: string) => window.vicode.projects.remove(projectId),
+    createThread: (input: {
+      projectId: string;
+      title: string;
+      providerId: ProviderId;
+      modelId: string;
+      executionPermission: ExecutionPermission;
+    }) => window.vicode.threads.create(input),
+    setPlannerMode: (input: { threadId: string; mode: 'plan' }) => window.vicode.planner.setMode(input),
+    archiveThread: (threadId: string) => window.vicode.threads.archive(threadId),
+    getWorkspaceBootstrapStatus: (projectId: string) => window.vicode.workspaceBootstrap.getStatus(projectId),
+    savePreferences: (input: Partial<Preferences>) => window.vicode.settings.save(input),
+    refreshThreads,
+    refreshArchivedThreads,
+    refreshStorageDiagnosticsIfVisible,
+    selectProject,
+    applyOpenedThread,
+    showToast: (level: 'info' | 'warning' | 'error', message: string) => showToast(level, message),
+    setProjects,
+    setThreadsByProject,
+    listProjectThreads: (projectId: string) => window.vicode.threads.list(projectId),
+    setRecentThreads,
+    setShowStartupWelcome,
+    setMissingWorkspaceProjectId,
+    setExpandedProjectIds,
+    setProjectDraft,
+    setWorkspaceBootstrapStatus,
+    setRemovingProjectId,
+    setArchivedThreads,
+    setPreferences,
+    setSelectedProjectId,
+    setActiveThread,
+    setActiveRunId,
+    setAttachedSkillIds,
+    setWorkspaceBootstrapModalOpen,
+    setWorkspaceBootstrapDraftBundle,
+    setWorkspaceBootstrapSelectedDraftPaths,
+    setWorkspaceBootstrapActiveDraftPath
+  };
+
+  const nativeTheme = useAppThemeSync(preferences);
+
+  useThreadDraftSync({
+    activeThreadId: activeThread?.id ?? null,
+    activeThreadIdRef,
+    prompt: composer.prompt,
+    readLivePrompt: () => composerRef.current?.value ?? composer.prompt,
+    setPrompt: (updater) => {
+      setComposer((current) => ({ ...current, prompt: updater(current.prompt) }));
+    },
+    loadDraft: (threadId) => window.vicode.threads.getDraft(threadId),
+    saveDraft: (threadId, prompt) => window.vicode.threads.saveDraft(threadId, prompt)
+  });
+
+  const {
+    voiceAvailable,
+    voiceState,
+    voiceElapsedMs,
+    voiceLevel,
+    microphoneConsentOpen,
+    setMicrophoneConsentOpen,
+    handleComposerVoice,
+    allowMicrophoneForApp
+  } = useVoiceDictation({
+    preferences,
+    appendTranscript: (transcript) => appendDictationToComposer(transcript),
+    savePreferences: (input) => window.vicode.settings.save(input),
+    setPreferences,
+    showToast: (level, message) => showToast(level, message),
+    formatMicrophoneAccessMessage,
+    isMicrophoneAccessBlocked,
+    formatUserErrorMessage
+  });
+
+  const {
+    sidebarCollapsed,
+    sidebarWidth,
+    sidebarResizing,
+    sidebarResizeMaxWidth,
+    toggleSidebarCollapsed,
+    startSidebarResize
+  } = useShellSidebarState({
+    appShellRef,
+    sidebarShellRef
+  });
+
+  function clearPendingLiveRunDeltaFrame() {
+    if (pendingLiveRunDeltaFrameRef.current === null) {
+      return;
     }
-    transcriptUserScrollIntentTimeoutRef.current = window.setTimeout(() => {
-      transcriptUserScrollIntentRef.current = false;
-      transcriptUserScrollIntentTimeoutRef.current = null;
-    }, 180);
+
+    window.cancelAnimationFrame(pendingLiveRunDeltaFrameRef.current);
+    pendingLiveRunDeltaFrameRef.current = null;
+  }
+
+  function flushPendingLiveRunDeltas() {
+    clearPendingLiveRunDeltaFrame();
+    if (pendingLiveRunDeltasRef.current.size === 0) {
+      return;
+    }
+
+    const pending = Array.from(pendingLiveRunDeltasRef.current.values());
+    pendingLiveRunDeltasRef.current.clear();
+    const createdAt = new Date().toISOString();
+    setActiveThread((current) => applyPendingLiveRunDeltas(current, pending, createdAt));
+  }
+
+  function queuePendingLiveRunDelta(threadId: string, runId: string, delta: string) {
+    queuePendingLiveRunDeltaEntry(pendingLiveRunDeltasRef.current, threadId, runId, delta);
+    if (pendingLiveRunDeltaFrameRef.current !== null) {
+      return;
+    }
+
+    pendingLiveRunDeltaFrameRef.current = window.requestAnimationFrame(() => {
+      pendingLiveRunDeltaFrameRef.current = null;
+      flushPendingLiveRunDeltas();
+    });
   }
 
   useEffect(() => {
@@ -759,123 +801,14 @@ export function App() {
   }, [reviewItems]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
-  }, [sidebarCollapsed]);
+    pendingLiveRunDeltasRef.current.clear();
+    clearPendingLiveRunDeltaFrame();
+  }, [activeThread?.id]);
 
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
-  }, [sidebarWidth]);
-
-  useEffect(() => {
-    liveSidebarWidthRef.current = sidebarWidth;
-  }, [sidebarWidth]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    return () => {
-      if (sidebarResizeFrameRef.current !== null) {
-        window.cancelAnimationFrame(sidebarResizeFrameRef.current);
-      }
-    };
+  useEffect(() => () => {
+    pendingLiveRunDeltasRef.current.clear();
+    clearPendingLiveRunDeltaFrame();
   }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    function syncSidebarWidthToViewport() {
-      setSidebarWidth((current) => clampSidebarWidth(current, window.innerWidth));
-    }
-
-    window.addEventListener('resize', syncSidebarWidthToViewport);
-    return () => window.removeEventListener('resize', syncSidebarWidthToViewport);
-  }, []);
-
-  function paintSidebarWidth(nextWidth: number) {
-    liveSidebarWidthRef.current = nextWidth;
-    if (typeof window === 'undefined') {
-      return;
-    }
-    if (sidebarResizeFrameRef.current !== null) {
-      return;
-    }
-    sidebarResizeFrameRef.current = window.requestAnimationFrame(() => {
-      sidebarResizeFrameRef.current = null;
-      const width = liveSidebarWidthRef.current;
-      const appShell = appShellRef.current;
-      if (appShell) {
-        appShell.style.setProperty('--vicode-sidebar-width', `${width}px`);
-        appShell.style.setProperty('--windows-titlebar-leading-width', `${width}px`);
-      }
-      const sidebarShell = sidebarShellRef.current;
-      if (sidebarShell) {
-        sidebarShell.style.width = `${width}px`;
-        sidebarShell.style.minWidth = `${width}px`;
-        sidebarShell.style.maxWidth = `${width}px`;
-      }
-    });
-  }
-
-  useEffect(() => {
-    if (!sidebarResizing || typeof window === 'undefined') {
-      return;
-    }
-
-    function finishSidebarResize() {
-      const committedWidth = liveSidebarWidthRef.current;
-      sidebarResizeStateRef.current = null;
-      setSidebarResizing(false);
-      setSidebarWidth(committedWidth);
-    }
-
-    function handleSidebarResize(event: PointerEvent) {
-      const currentResize = sidebarResizeStateRef.current;
-      if (!currentResize) {
-        return;
-      }
-      const nextWidth = currentResize.startWidth + (event.clientX - currentResize.startX);
-      paintSidebarWidth(clampSidebarWidth(nextWidth, window.innerWidth));
-    }
-
-    document.body.classList.add('is-sidebar-resizing');
-    window.addEventListener('pointermove', handleSidebarResize);
-    window.addEventListener('pointerup', finishSidebarResize);
-    window.addEventListener('blur', finishSidebarResize);
-
-    return () => {
-      document.body.classList.remove('is-sidebar-resizing');
-      window.removeEventListener('pointermove', handleSidebarResize);
-      window.removeEventListener('pointerup', finishSidebarResize);
-      window.removeEventListener('blur', finishSidebarResize);
-    };
-  }, [sidebarResizing]);
-
-  function toggleSidebarCollapsed() {
-    setSidebarCollapsed((current) => !current);
-  }
-
-  function startSidebarResize(event: ReactPointerEvent<HTMLDivElement>) {
-    if (sidebarCollapsed || typeof window === 'undefined') {
-      return;
-    }
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    liveSidebarWidthRef.current = sidebarWidth;
-    sidebarResizeStateRef.current = {
-      startX: event.clientX,
-      startWidth: sidebarWidth
-    };
-    setSidebarResizing(true);
-  }
 
   const shellReady = ready && !loading;
   const showWelcomeScreen =
@@ -883,17 +816,13 @@ export function App() {
     route === 'thread' &&
     showStartupWelcome &&
     !activeThread;
+  const showPrimarySidebar = shellReady && !showWelcomeScreen && route !== 'settings';
   const effectiveSidebarWidth = shellReady && !showWelcomeScreen
     ? sidebarCollapsed
       ? SIDEBAR_COLLAPSED_WIDTH
       : sidebarWidth
     : 0;
   const titlebarLeadingWidth = resolveTitlebarLeadingWidth(sidebarCollapsed || showWelcomeScreen || !shellReady, sidebarWidth);
-  const sidebarResizeMaxWidth =
-    typeof window === 'undefined'
-      ? SIDEBAR_DEFAULT_WIDTH
-      : resolveSidebarMaxWidth(window.innerWidth);
-
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
     [projects, selectedProjectId]
@@ -942,15 +871,6 @@ export function App() {
   const automationHistoryTarget = automationHistoryId
     ? automations.find((automation) => automation.id === automationHistoryId) ?? null
     : null;
-  const automationTemplateGroups = useMemo(() => {
-    const groups = new Map<AutomationTemplate['group'], AutomationTemplate[]>();
-    for (const template of AUTOMATION_TEMPLATES) {
-      const current = groups.get(template.group) ?? [];
-      current.push(template);
-      groups.set(template.group, current);
-    }
-    return Array.from(groups.entries());
-  }, []);
   const attachedComposerSkills = useMemo(
     () => skills.filter((skill) => attachedSkillIds.includes(skill.id)),
     [attachedSkillIds, skills]
@@ -1089,10 +1009,6 @@ export function App() {
         : null),
     [activeDisplayedRunId, activePlannerPlan, activePlannerTurnState, activeThread, runProgressByRunId]
   );
-  const activeRunReviewEvidence = useMemo(
-    () => deriveRunReviewEvidence(activeRunActivity, activeRunProgress),
-    [activeRunActivity, activeRunProgress]
-  );
   const activeRunToolApproval = useMemo(() => {
     if (!activeThread) {
       return null;
@@ -1209,44 +1125,10 @@ export function App() {
       });
     }
 
-    if (activeRunProgress && activeRunActivity?.state !== 'running') {
-      const completedCount = countCompletedRunProgressItems(activeRunProgress);
-        items.push({
-          id: 'run-progress',
-          title: 'Current run',
-          summary: `${completedCount} of ${activeRunProgress.items.length} tasks completed`,
-          content: <RunProgressPanel progress={activeRunProgress} />
-        });
-      }
-
-    if (activeRunReviewEvidence && activeRunReviewEvidence.state !== 'running') {
-      const changedFileCount = activeRunReviewEvidence.changeArtifact?.summary.filesChanged ?? 0;
-      const thoughtCount = activeRunReviewEvidence.thoughtEvidence.length;
-      const fileEvidenceCount = activeRunReviewEvidence.fileEvidence.length;
-      const commandCount = activeRunReviewEvidence.terminalCommands.length;
-      const summaryParts = [
-        thoughtCount > 0 ? `${thoughtCount} thought${thoughtCount === 1 ? '' : 's'}` : null,
-        commandCount > 0 ? `${commandCount} command${commandCount === 1 ? '' : 's'}` : null,
-        changedFileCount > 0
-          ? `${changedFileCount} file${changedFileCount === 1 ? '' : 's'} changed`
-          : fileEvidenceCount > 0
-            ? `${fileEvidenceCount} file action${fileEvidenceCount === 1 ? '' : 's'}`
-            : null
-      ].filter((value): value is string => Boolean(value));
-      items.push({
-        id: 'run-review',
-        title: activeRunReviewEvidence.workedForLabel ? `Worked for ${activeRunReviewEvidence.workedForLabel}` : 'Run details',
-        summary: summaryParts.join(' · '),
-        content: <RunReviewPanel evidence={activeRunReviewEvidence} />
-      });
-    }
-
     return items;
   }, [
     activePlannerPlan,
     activePlannerQuestions,
-    activeRunProgress,
-    activeRunReviewEvidence,
     activeRunToolApproval,
     activeThread,
     activeThreadProvider?.plannerPolicy,
@@ -1294,6 +1176,53 @@ export function App() {
     [activeRunTranscriptItems]
   );
 
+  const { markTranscriptUserScrollIntent, updateTranscriptAutoFollow } = useTranscriptAutoFollow({
+    transcriptRef,
+    route,
+    activeThreadId: activeThread?.id ?? null,
+    dependencyKey: [
+      transcriptTurns.length,
+      transcriptTurns[transcriptTurns.length - 1]?.id ?? '',
+      transcriptTurns[transcriptTurns.length - 1]?.content ?? '',
+      activeDisplayedRunId ?? '',
+      activeRunTranscriptAutoFollowKey,
+      activeRunActivity?.state ?? '',
+      String(activeRunActivity?.timelineItems.length ?? 0),
+      String(activeRunActivity?.terminalCommands.length ?? 0),
+      activePlannerQuestions?.id ?? '',
+      activePlannerPlan?.id ?? ''
+    ].join('|')
+  });
+
+  useShellTaskSync({
+    route,
+    selectedProjectId,
+    selectedProjectIdRef,
+    activeThread,
+    activeThreadIdRef,
+    activeThreadParentId: activeThread ? findParentThreadIdForSubagentChild(subagentsByThreadId, activeThread.id) : null,
+    startupThreadRestoreState,
+    reviewItemsLength: reviewItems.length,
+    threadSubagentSignature,
+    threadsByProject,
+    pendingReviewRevealRequestedRef,
+    pendingReviewSectionRef,
+    listAutomations: () => window.vicode.automations.list(),
+    listJobs: () => window.vicode.jobs.list(),
+    listPendingReviews: () => window.vicode.jobs.listPendingReviews(),
+    getBuildSnapshot: (projectId) => window.vicode.vicodeBuild.getSnapshot(projectId),
+    listThreadSubagents: (threadId) => window.vicode.subagents.list(threadId),
+    listThreadAutonomousTasks: (threadId) => window.vicode.threads.listAutonomousTasks(threadId),
+    openThread,
+    setAutomations,
+    setJobs,
+    setReviewItems,
+    setVicodeBuildSnapshot,
+    setSubagentsByThreadId,
+    setAutonomousTasksByThreadId,
+    setStartupThreadRestoreState
+  });
+
   useEffect(() => {
     void refreshOllamaRuntimeStatus();
   }, []);
@@ -1313,7 +1242,8 @@ export function App() {
     const nextModelId = resolveProviderModelId(
       visibleProviders,
       nextProviderId,
-      workspaceProject?.defaultModelByProvider[nextProviderId] ?? preferences.defaultModelByProvider[nextProviderId]
+      workspaceProject?.defaultModelByProvider[nextProviderId] ?? preferences.defaultModelByProvider[nextProviderId],
+      { promoteStaleDefault: true }
     );
     const nextThinkingEnabled = preferences.defaultThinkingByProvider[nextProviderId];
 
@@ -1367,72 +1297,17 @@ export function App() {
   }, [route]);
 
   useEffect(() => {
-    if (!COLLABORATION_SHELL_ENABLED && route === 'collab') {
+    if (!COLLABORATION_ENABLED && route === 'collab') {
       setRoute('thread');
     }
   }, [route]);
 
   useEffect(() => {
-    if (route !== 'automations' && route !== 'build-control') {
-      return;
-    }
-
-    let cancelled = false;
-    void Promise.all([
-      window.vicode.automations.list(),
-      window.vicode.jobs.list(),
-      window.vicode.jobs.listPendingReviews()
-    ]).then(([nextAutomations, nextJobs, nextReviewItems]) => {
-      if (cancelled) {
-        return;
-      }
-      setAutomations(nextAutomations);
-      setJobs(nextJobs);
-      setReviewItems(nextReviewItems);
-    });
-
-    void window.vicode.vicodeBuild.getSnapshot(selectedProjectId).then((snapshot) => {
-      if (!cancelled) {
-        setVicodeBuildSnapshot(snapshot);
-      }
-    });
-
-    const refreshTimer = window.setInterval(() => {
-      void window.vicode.vicodeBuild.getSnapshot(selectedProjectIdRef.current).then((snapshot) => {
-        if (!cancelled) {
-          setVicodeBuildSnapshot(snapshot);
-        }
-      });
-    }, 10000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(refreshTimer);
-    };
-  }, [route, selectedProjectId]);
-
-  useEffect(() => {
-    if (!pendingReviewRevealRequestedRef.current || (route !== 'automations' && route !== 'build-control')) {
-      return;
-    }
-
-    if (reviewItems.length === 0) {
-      pendingReviewRevealRequestedRef.current = false;
-      return;
-    }
-
-    const frame = window.requestAnimationFrame(() => {
-      pendingReviewSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      pendingReviewRevealRequestedRef.current = false;
-    });
-
-    return () => window.cancelAnimationFrame(frame);
-  }, [reviewItems.length, route]);
-
-  useEffect(() => {
     setComposer((current) => ({
       ...current,
-      modelId: resolveProviderModelId(visibleProviders, current.providerId, current.modelId)
+      modelId: resolveProviderModelId(visibleProviders, current.providerId, current.modelId, {
+        promoteStaleDefault: true
+      })
     }));
   }, [visibleProviders]);
 
@@ -1443,190 +1318,7 @@ export function App() {
   }, [availableComposerSkills]);
 
   useEffect(() => {
-    selectedProjectIdRef.current = selectedProjectId;
-  }, [selectedProjectId]);
-
-  useEffect(() => {
-    activeThreadIdRef.current = activeThread?.id ?? null;
-  }, [activeThread]);
-
-  useEffect(() => {
-    const threadEntries = Object.values(threadsByProject).flat();
-    if (threadEntries.length === 0) {
-      setAutonomousTasksByThreadId({});
-      setSubagentsByThreadId({});
-      return;
-    }
-
-    let cancelled = false;
-    void Promise.all(
-      threadEntries.map(async (thread) => [thread.id, await window.vicode.subagents.list(thread.id)] as const)
-    ).then((pairs) => {
-      if (cancelled) {
-        return;
-      }
-      const nextByThread = Object.fromEntries(pairs.filter(([, subagents]) => subagents.length > 0));
-      setSubagentsByThreadId(nextByThread);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [threadSubagentSignature, threadsByProject]);
-
-  useEffect(() => {
-    if (!activeThread) {
-      return;
-    }
-
-    const parentThreadId = findParentThreadIdForSubagentChild(subagentsByThreadId, activeThread.id);
-    if (!parentThreadId || parentThreadId === activeThread.id) {
-      return;
-    }
-
-    void openThread(parentThreadId);
-  }, [activeThread, subagentsByThreadId]);
-
-  useEffect(() => {
-    const threadId = activeThread?.id ?? null;
-    if (!threadId) {
-      return;
-    }
-
-    let cancelled = false;
-    void window.vicode.threads.listAutonomousTasks(threadId).then((tasks) => {
-      if (cancelled || activeThreadIdRef.current !== threadId) {
-        return;
-      }
-      setAutonomousTasksByThreadId((current) => ({
-        ...current,
-        [threadId]: tasks
-      }));
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeThread]);
-
-  useEffect(() => {
-    if (startupThreadRestoreState === 'pending' && activeThread) {
-      setStartupThreadRestoreState('resolved');
-    }
-  }, [activeThread, startupThreadRestoreState]);
-
-  useEffect(() => {
-    const threadId = activeThread?.id ?? null;
-    hydratedDraftThreadIdRef.current = null;
-
-    if (!threadId) {
-      return;
-    }
-
-    let cancelled = false;
-    void window.vicode.threads.getDraft(threadId).then((draft) => {
-      if (cancelled || activeThreadIdRef.current !== threadId) {
-        return;
-      }
-
-      hydratedDraftThreadIdRef.current = threadId;
-      setComposer((current) => ({ ...current, prompt: draft }));
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeThread?.id]);
-
-  useEffect(() => {
-    const threadId = activeThread?.id ?? null;
-    if (!threadId || hydratedDraftThreadIdRef.current !== threadId) {
-      return;
-    }
-
-    const timeout = window.setTimeout(() => {
-      void window.vicode.threads.saveDraft(threadId, composer.prompt);
-    }, 280);
-
-    return () => {
-      window.clearTimeout(timeout);
-    };
-  }, [activeThread?.id, composer.prompt]);
-
-  useLayoutEffect(() => {
-    const element = transcriptRef.current;
-    if (!element || route !== 'thread') {
-      return;
-    }
-
-    const threadId = activeThread?.id ?? null;
-    const threadChanged = transcriptThreadIdRef.current !== threadId;
-    transcriptThreadIdRef.current = threadId;
-    const shouldStickToBottom = shouldAutoFollowTranscript({
-      threadChanged,
-      autoFollow: transcriptAutoFollowRef.current
-    });
-
-    if (!shouldStickToBottom) {
-      return;
-    }
-
-    const scrollToBottom = () => {
-      transcriptProgrammaticScrollRef.current = true;
-      element.scrollTop = element.scrollHeight;
-      transcriptAutoFollowRef.current = true;
-    };
-
-    let nestedFrame: number | null = null;
-    let releaseProgrammaticScrollFrame: number | null = null;
-    const frame = window.requestAnimationFrame(() => {
-      if (!shouldAutoFollowTranscript({ threadChanged, autoFollow: transcriptAutoFollowRef.current })) {
-        return;
-      }
-      scrollToBottom();
-      nestedFrame = window.requestAnimationFrame(() => {
-        if (!shouldAutoFollowTranscript({ threadChanged, autoFollow: transcriptAutoFollowRef.current })) {
-          return;
-        }
-        scrollToBottom();
-        releaseProgrammaticScrollFrame = window.requestAnimationFrame(() => {
-          transcriptProgrammaticScrollRef.current = false;
-        });
-      });
-    });
-
-    return () => {
-      transcriptProgrammaticScrollRef.current = false;
-      transcriptUserScrollIntentRef.current = false;
-      if (transcriptUserScrollIntentTimeoutRef.current !== null) {
-        window.clearTimeout(transcriptUserScrollIntentTimeoutRef.current);
-        transcriptUserScrollIntentTimeoutRef.current = null;
-      }
-      window.cancelAnimationFrame(frame);
-      if (nestedFrame !== null) {
-        window.cancelAnimationFrame(nestedFrame);
-      }
-      if (releaseProgrammaticScrollFrame !== null) {
-        window.cancelAnimationFrame(releaseProgrammaticScrollFrame);
-      }
-    };
-  }, [
-    route,
-    activeThread?.id,
-    transcriptTurns.length,
-    transcriptTurns[transcriptTurns.length - 1]?.id,
-    transcriptTurns[transcriptTurns.length - 1]?.content,
-    activeDisplayedRunId,
-    activeRunTranscriptAutoFollowKey,
-    activeRunActivity?.state,
-    activeRunActivity?.timelineItems.length,
-    activeRunActivity?.terminalCommands.length,
-    activePlannerQuestions?.id,
-    activePlannerPlan?.id
-  ]);
-
-  useEffect(() => {
-    void bootstrap();
+    void bootstrapAppShell(bootstrapHost);
     const unsubscribe = window.vicode.events.subscribe((event) => {
       void handleEvent(event);
     });
@@ -1637,56 +1329,8 @@ export function App() {
           window.clearInterval(timer);
         }
       });
-      const recorder = mediaRecorderRef.current;
-      if (recorder) {
-        recorder.ondataavailable = null;
-        recorder.onerror = null;
-        recorder.onstop = null;
-        if (recorder.state !== 'inactive') {
-          try {
-            recorder.stop();
-          } catch {
-            // Ignore teardown failures from the media recorder.
-          }
-        }
-        mediaRecorderRef.current = null;
-      }
-      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-      mediaStreamRef.current = null;
-      voiceChunksRef.current = [];
-      stopVoiceVisualization();
     };
   }, []);
-
-  useEffect(() => {
-    void window.vicode.app.getNativeTheme()
-      .then((value) => {
-        setNativeTheme(value);
-      })
-      .catch(() => {
-        setNativeTheme({
-          platform: 'win32',
-          systemAccentColor: ''
-        });
-      });
-  }, []);
-
-  useEffect(() => {
-    if (!preferences) {
-      return;
-    }
-
-    applyResolvedAppearance(resolveAppearanceMode(preferences.appearanceMode, getSystemPrefersDark()));
-    applyAccentColor(
-      resolveAccentColor(preferences.accentMode, preferences.accentColor, nativeTheme?.systemAccentColor)
-    );
-
-    if (preferences.appearanceMode !== 'system') {
-      return;
-    }
-
-    return subscribeToSystemAppearance((appearance) => applyResolvedAppearance(appearance));
-  }, [nativeTheme?.systemAccentColor, preferences]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1707,7 +1351,7 @@ export function App() {
         event.preventDefault();
         setSettingsSection('general');
         toggleSettingsRoute();
-      } else if (COLLABORATION_SHELL_ENABLED && event.key === '5') {
+      } else if (COLLABORATION_ENABLED && event.key === '5') {
         event.preventDefault();
         setCollaborationSection('chat');
         setRoute('collab');
@@ -1727,145 +1371,10 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  async function bootstrap() {
-    setLoading(true);
-    try {
-      const payload = await window.vicode.app.getBootstrap();
-      applyResolvedAppearance(resolveAppearanceMode(payload.preferences.appearanceMode, getSystemPrefersDark()));
-      applyBootstrap(payload);
-      setReady(true);
-      setLoading(false);
-
-      void window.vicode.app.getMeta()
-        .then((value) => {
-          setAppMeta(value);
-        })
-        .catch(() => {
-          setAppMeta(null);
-          showToast('warning', 'App metadata is unavailable from the current main-process build.');
-        });
-
-      void window.vicode.updates.getState()
-        .then((value) => {
-          setAppUpdateState(value);
-        })
-        .catch(() => {
-          setAppUpdateState(null);
-        });
-
-      void window.vicode.threads.listArchived(null)
-        .then((archived) => {
-          setArchivedThreads(archived);
-        })
-        .catch(() => {});
-
-      void window.vicode.skills.list()
-        .then((nextSkills) => {
-          setSkills(nextSkills);
-        })
-        .catch(() => {});
-
-      if (payload.preferences.lastOpenedThreadId) {
-        setStartupThreadRestoreState('pending');
-        try {
-          const detail = await window.vicode.threads.open(payload.preferences.lastOpenedThreadId);
-          applyOpenedThread(detail);
-          setStartupThreadRestoreState('resolved');
-        } catch (error) {
-          if (isMissingThreadError(error)) {
-            setPreferences(await window.vicode.settings.save({ lastOpenedThreadId: null }));
-          }
-          setStartupThreadRestoreState('failed');
-          setShowStartupWelcome(shouldShowStartupWelcome(payload));
-        }
-      } else {
-        setStartupThreadRestoreState('resolved');
-      }
-    } catch (error) {
-      setStartupThreadRestoreState('failed');
-      setLoading(false);
-      showToast('error', error instanceof Error ? error.message : 'Failed to bootstrap the app.');
-    }
-  }
-
-  function applyBootstrap(payload: BootstrapData) {
-    const surfacedProviders = surfaceProviders(payload.providers);
-    const projectId = payload.preferences.selectedProjectId ?? payload.projects[0]?.id ?? null;
-    const defaultProviderId = resolveDefaultProviderId(surfacedProviders, payload.preferences.defaultProviderId);
-    const defaultModelId = resolveProviderModelId(
-      surfacedProviders,
-      defaultProviderId,
-      payload.preferences.defaultModelByProvider[defaultProviderId]
-    );
-    const defaultComposerEffort = composerEffortFromPreference(
-      defaultProviderId,
-      payload.preferences.defaultReasoningEffortByProvider[defaultProviderId]
-    );
-
-    setProjects(payload.projects);
-    setSkills(payload.skills);
-    setAutomations((current) => mergeBootstrapRecords(current, payload.automations));
-    setJobs((current) => mergeBootstrapRecords(current, payload.jobs));
-    setReviewItems((current) => mergeBootstrapRecords(current, payload.reviewItems));
-    setProviders(surfacedProviders);
-    setPendingRunToolApprovals(payload.pendingRunToolApprovals);
-    setToolApprovalResolvingId((current) =>
-      current && payload.pendingRunToolApprovals.some((approval) => approval.id === current) ? current : null
-    );
-    setPreferences(payload.preferences);
-    setPersonalization(payload.personalization);
-    setSelectedProjectId(projectId);
-    setExpandedProjectIds((current) => {
-      const availableProjectIds = new Set(payload.projects.map((project) => project.id));
-      const nextExpandedProjectIds = current.filter((id) => availableProjectIds.has(id));
-      if (projectId && !nextExpandedProjectIds.includes(projectId)) {
-        nextExpandedProjectIds.push(projectId);
-      }
-      return nextExpandedProjectIds;
-    });
-    setThreadsByProject(payload.threadsByProject);
-    setRecentThreads(deriveRecentThreads(payload.threadsByProject));
-    setShowStartupWelcome(shouldShowStartupWelcome(payload));
-    applyCollaborationBootstrap(payload.collaboration);
-    setComposerEffort(defaultComposerEffort);
-    setComposer((current) => ({
-      ...current,
-      providerId: defaultProviderId,
-      modelId: defaultModelId,
-      thinkingEnabled: payload.preferences.defaultThinkingByProvider[defaultProviderId],
-      mode: 'default',
-      executionPermission: payload.preferences.defaultExecutionPermission,
-      imageAttachments: [],
-      textAttachments: []
-    }));
-    setActiveThread(null);
-    setActiveRunId(null);
-  }
-
-  function applyCollaborationBootstrap(payload: CollabBootstrap) {
-    const projectRooms = payload.rooms.filter((room) => room.type !== 'dm');
-    const directChats = payload.rooms.filter((room) => room.type === 'dm');
-
-    setCollaboration(payload);
-    setSelectedCollaborationRoomId((current) =>
-      projectRooms.some((room) => room.id === current) ? current : projectRooms[0]?.id ?? ''
-    );
-    setSelectedCollaborationChatId((current) =>
-      directChats.some((room) => room.id === current) ? current : directChats[0]?.id ?? ''
-    );
-    setSelectedCollaborationContactId((current) =>
-      payload.contacts.some((contact) => contact.userId === current) ? current : payload.contacts[0]?.userId ?? ''
-    );
-  }
-
-  async function refreshCollaborationBootstrap() {
-    applyCollaborationBootstrap(await window.vicode.collab.getBootstrap());
-  }
-
   async function createCollaborationGuestProfile(input: { displayName: string; handle?: string | null }) {
     try {
       await window.vicode.collab.createGuestProfile(input);
-      await refreshCollaborationBootstrap();
+      await refreshCollaborationBootstrapState(bootstrapHost);
       showToast('info', 'Collaboration identity created.');
     } catch (error) {
       showToast('error', formatUserErrorMessage(error, 'Failed to create collaboration identity.'));
@@ -1875,7 +1384,7 @@ export function App() {
   async function clearCollaborationIdentity() {
     try {
       await window.vicode.collab.clearIdentity();
-      await refreshCollaborationBootstrap();
+      await refreshCollaborationBootstrapState(bootstrapHost);
       showToast('info', 'Collaboration identity reset.');
     } catch (error) {
       showToast('error', formatUserErrorMessage(error, 'Failed to reset collaboration identity.'));
@@ -1891,7 +1400,7 @@ export function App() {
   }) {
     try {
       await window.vicode.collab.updateProfile(input);
-      await refreshCollaborationBootstrap();
+      await refreshCollaborationBootstrapState(bootstrapHost);
       showToast('info', 'Profile updated.');
     } catch (error) {
       showToast('error', formatUserErrorMessage(error, 'Failed to update collaboration profile.'));
@@ -1906,7 +1415,7 @@ export function App() {
         ...(trimmedPassword ? { password: trimmedPassword } : {}),
         topic: input.topic ?? null
       });
-      await refreshCollaborationBootstrap();
+      await refreshCollaborationBootstrapState(bootstrapHost);
       setSelectedCollaborationRoomId(room.id);
       setSelectedCollaborationChatId('');
       setCollaborationSection('rooms');
@@ -1926,7 +1435,7 @@ export function App() {
         joinCode: input.joinCode,
         ...(trimmedPassword ? { password: trimmedPassword } : {})
       });
-      await refreshCollaborationBootstrap();
+      await refreshCollaborationBootstrapState(bootstrapHost);
       setSelectedCollaborationRoomId(room.id);
       setSelectedCollaborationChatId('');
       setCollaborationSection('rooms');
@@ -1942,7 +1451,7 @@ export function App() {
   async function createCollaborationDirectChat(input: { peerUserId: string }) {
     try {
       const room = await window.vicode.collab.createDirectChat(input);
-      await refreshCollaborationBootstrap();
+      await refreshCollaborationBootstrapState(bootstrapHost);
       setSelectedCollaborationRoomId('');
       setSelectedCollaborationChatId(room.id);
       setSelectedCollaborationContactId(input.peerUserId);
@@ -1959,7 +1468,7 @@ export function App() {
   async function setCollaborationFollowing(roomId: string, following: boolean) {
     try {
       await window.vicode.collab.setFollowing({ roomId, following });
-      await refreshCollaborationBootstrap();
+      await refreshCollaborationBootstrapState(bootstrapHost);
       showToast('info', following ? 'Follower mode enabled.' : 'Follower mode cleared.');
     } catch (error) {
       showToast('error', formatUserErrorMessage(error, 'Failed to update follower mode.'));
@@ -1969,7 +1478,7 @@ export function App() {
   async function requestCollaborationRole(roomId: string, requestedRole: 'contributor' | 'driver') {
     try {
       await window.vicode.collab.requestRole({ roomId, requestedRole });
-      await refreshCollaborationBootstrap();
+      await refreshCollaborationBootstrapState(bootstrapHost);
       showToast('info', requestedRole === 'driver' ? 'Driver handoff requested.' : 'Contributor access requested.');
     } catch (error) {
       showToast('error', formatUserErrorMessage(error, 'Failed to submit the role request.'));
@@ -1979,7 +1488,7 @@ export function App() {
   async function resolveCollaborationRoleRequest(roomId: string, requestId: string, status: 'approved' | 'declined') {
     try {
       await window.vicode.collab.resolveRoleRequest({ roomId, requestId, status });
-      await refreshCollaborationBootstrap();
+      await refreshCollaborationBootstrapState(bootstrapHost);
       showToast('info', status === 'approved' ? 'Role request approved.' : 'Role request declined.');
     } catch (error) {
       showToast('error', formatUserErrorMessage(error, 'Failed to update the role request.'));
@@ -1989,7 +1498,7 @@ export function App() {
   async function setCollaborationTerminalMode(roomId: string, mode: 'off' | 'announce_only', note?: string | null) {
     try {
       await window.vicode.collab.setTerminalMode({ roomId, mode, note: note ?? null });
-      await refreshCollaborationBootstrap();
+      await refreshCollaborationBootstrapState(bootstrapHost);
       showToast('info', mode === 'off' ? 'Shared terminal mode disabled.' : 'Shared terminal mode enabled.');
     } catch (error) {
       showToast('error', formatUserErrorMessage(error, 'Failed to update shared terminal mode.'));
@@ -1999,7 +1508,7 @@ export function App() {
   async function sendCollaborationMessage(roomId: string, body: string) {
     try {
       await window.vicode.collab.sendMessage({ roomId, body });
-      await refreshCollaborationBootstrap();
+      await refreshCollaborationBootstrapState(bootstrapHost);
       return true;
     } catch (error) {
       showToast('error', formatUserErrorMessage(error, 'Failed to send the message.'));
@@ -2062,7 +1571,7 @@ export function App() {
         latestAssistantSummary: summary?.latestAssistantSummary ?? lastAssistantTurn?.content.slice(0, 240) ?? null,
         runId: activeDisplayedRunId ?? null
       });
-      await refreshCollaborationBootstrap();
+      await refreshCollaborationBootstrapState(bootstrapHost);
       setSelectedCollaborationRoomId(targetRoomId);
       showToast('info', 'Thread shared to room.');
     } catch (error) {
@@ -2114,7 +1623,7 @@ export function App() {
         resultLabel: activeThread.status,
         completedAt: activeThread.status === 'completed' || activeThread.status === 'failed' ? new Date().toISOString() : null
       });
-      await refreshCollaborationBootstrap();
+      await refreshCollaborationBootstrapState(bootstrapHost);
       showToast('info', 'Run shared to room.');
     } catch (error) {
       showToast('error', formatUserErrorMessage(error, 'Failed to share the run.'));
@@ -2156,7 +1665,7 @@ export function App() {
           latestAssistantTurn?.content.slice(0, 240) ??
           null
       });
-      await refreshCollaborationBootstrap();
+      await refreshCollaborationBootstrapState(bootstrapHost);
       showToast('info', 'Handoff published.');
     } catch (error) {
       showToast('error', formatUserErrorMessage(error, 'Failed to publish the handoff.'));
@@ -2164,15 +1673,11 @@ export function App() {
   }
 
   async function refreshThreads(projectId: string | null) {
-    if (!projectId) {
-      return;
-    }
-    const nextThreads = await window.vicode.threads.list(projectId);
-    setThreadsByProject((current) => ({ ...current, [projectId]: nextThreads }));
+    await refreshThreadsInShell(threadSelectionHost, projectId);
   }
 
   async function refreshArchivedThreads(projectId: string | null = null) {
-    setArchivedThreads(await window.vicode.threads.listArchived(projectId));
+    await refreshArchivedThreadsInShell(threadSelectionHost, projectId);
   }
 
   function syncThreadProjectSelection(projectId: string) {
@@ -2184,7 +1689,17 @@ export function App() {
   }
 
   function applyOpenedThread(detail: ThreadDetail) {
-    syncThreadProjectSelection(detail.projectId);
+    const hasLiveComposerDraft =
+      (composerRef.current?.value ?? composer.prompt).trim().length > 0 ||
+      composer.imageAttachments.length > 0 ||
+      composer.textAttachments.length > 0;
+    const preserveCurrentComposerDraft =
+      activeThreadIdRef.current === detail.id && hasLiveComposerDraft;
+    selectedProjectIdRef.current = detail.projectId;
+    setSelectedProjectId(detail.projectId);
+    setExpandedProjectIds((current) =>
+      current.includes(detail.projectId) ? current : [...current, detail.projectId]
+    );
     activeThreadIdRef.current = detail.id;
     setShowStartupWelcome(false);
     setActiveThread(detail);
@@ -2200,155 +1715,42 @@ export function App() {
     );
     setComposer((current) => ({
       ...current,
-      prompt: '',
+      prompt: preserveCurrentComposerDraft ? current.prompt : '',
       providerId: detail.providerId,
       modelId: resolveProviderModelId(visibleProviders, detail.providerId, detail.modelId),
       thinkingEnabled: preferences?.defaultThinkingByProvider[detail.providerId] ?? current.thinkingEnabled,
       mode: detail.planner.composerMode,
-      imageAttachments: [],
-      textAttachments: []
+      imageAttachments: preserveCurrentComposerDraft ? current.imageAttachments : [],
+      textAttachments: preserveCurrentComposerDraft ? current.textAttachments : []
     }));
   }
 
   async function openThread(threadId: string) {
-    try {
-      const targetThreadId = findParentThreadIdForSubagentChild(subagentsByThreadId, threadId) ?? threadId;
-      const detail = await window.vicode.threads.open(targetThreadId);
-      if (detail.projectId !== selectedProjectId) {
-        setSelectedProjectId(detail.projectId);
-        setExpandedProjectIds((current) =>
-          current.includes(detail.projectId) ? current : [...current, detail.projectId]
-        );
-        const nextThreads = await window.vicode.threads.list(detail.projectId);
-        setThreadsByProject((current) => ({ ...current, [detail.projectId]: nextThreads }));
-        setPreferences(await window.vicode.settings.save({ selectedProjectId: detail.projectId, lastOpenedThreadId: detail.id }));
-      } else {
-        setPreferences(await window.vicode.settings.save({ lastOpenedThreadId: detail.id }));
-      }
-      applyOpenedThread(detail);
-    } catch (error) {
-      if (isMissingThreadError(error) && preferences?.lastOpenedThreadId === threadId) {
-        setPreferences(await window.vicode.settings.save({ lastOpenedThreadId: null }));
-      }
-      showToast('error', error instanceof Error ? error.message : 'Failed to open thread.');
-    }
+    await openThreadInShell(threadSelectionHost, threadId);
   }
 
   async function selectProject(projectId: string, options?: { preserveMainView?: boolean }) {
-    selectedProjectIdRef.current = projectId;
-    setSelectedProjectId(projectId);
-    setPreferences(await window.vicode.settings.save({ selectedProjectId: projectId }));
-    const nextThreads = await window.vicode.threads.list(projectId);
-    setThreadsByProject((current) => ({ ...current, [projectId]: nextThreads }));
-    if (!options?.preserveMainView) {
-      activeThreadIdRef.current = null;
-      setShowStartupWelcome(false);
-      setActiveThread(null);
-      setActiveRunId(null);
-      setComposer((current) => ({ ...current, imageAttachments: [], textAttachments: [] }));
-      setRoute('thread');
-    }
+    await selectProjectInShell(threadSelectionHost, projectId, options);
   }
 
   async function toggleProjectThreads(projectId: string) {
-    if (expandedProjectIds.includes(projectId)) {
-      setExpandedProjectIds((current) => current.filter((id) => id !== projectId));
-      return;
-    }
-
-    setExpandedProjectIds((current) => (current.includes(projectId) ? current : [...current, projectId]));
-    try {
-      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-      await selectProject(projectId, { preserveMainView: true });
-    } catch (error) {
-      setExpandedProjectIds((current) => current.filter((id) => id !== projectId));
-      showToast('error', formatUserErrorMessage(error, 'Could not open project threads.'));
-    }
+    await toggleProjectThreadsInShell(threadSelectionHost, projectId, expandedProjectIds);
   }
 
-  function insertProjectLocally(project: Project) {
-    setProjects((current) => [project, ...current.filter((item) => item.id !== project.id)]);
-    setThreadsByProject((current) => (current[project.id] ? current : { ...current, [project.id]: [] }));
+  function collapseAllProjectThreads() {
+    setExpandedProjectIds([]);
   }
 
   async function openProjectFromPicker() {
-    const folderPath = await window.vicode.app.pickFolder();
-    if (!folderPath) {
-      return;
-    }
-
-    const existingProject = projects.find((project) => project.folderPath === folderPath);
-    if (existingProject) {
-      if (!activeThread && route === 'thread') {
-        await createThreadForProject(existingProject.id);
-      } else {
-        await selectProject(existingProject.id);
-      }
-      setMissingWorkspaceProjectId((current) => (current === existingProject.id ? null : current));
-      showToast('info', `Opened ${existingProject.name}.`);
-      return;
-    }
-
-    const project = await window.vicode.projects.create({
-      name: folderLabel(folderPath),
-      folderPath,
-      trusted: false
-    });
-    insertProjectLocally(project);
-    if (!activeThread && route === 'thread') {
-      await createThreadForProject(project.id);
-    } else {
-      await selectProject(project.id);
-      setExpandedProjectIds((current) => (current.includes(project.id) ? current : [...current, project.id]));
-    }
-    setMissingWorkspaceProjectId((current) => (current === project.id ? null : current));
-    showToast('info', `Opened ${project.name}.`);
+    await openProjectFromPickerInShell(projectActionsHost);
   }
 
   async function repairWorkspaceProjectPath(project: Project | null) {
-    if (!project) {
-      await openProjectFromPicker();
-      return;
-    }
-
-    const folderPath = await window.vicode.app.pickFolder();
-    if (!folderPath) {
-      return;
-    }
-
-    const updatedProject = await window.vicode.projects.update({
-      id: project.id,
-      folderPath
-    });
-
-    setProjects((current) => current.map((item) => (item.id === updatedProject.id ? updatedProject : item)));
-    setMissingWorkspaceProjectId((current) => (current === updatedProject.id ? null : current));
-
-    if (selectedProjectId === updatedProject.id) {
-      try {
-        const status = await window.vicode.workspaceBootstrap.getStatus(updatedProject.id);
-        setWorkspaceBootstrapStatus(status);
-      } catch {
-        setWorkspaceBootstrapStatus(null);
-      }
-    }
-
-    showToast('info', `Repaired workspace path for ${updatedProject.name}.`);
+    await repairWorkspaceProjectPathInShell(projectActionsHost, project);
   }
 
   async function createProject() {
-    if (!projectDraft.name.trim()) {
-      showToast('warning', 'Project name is required.');
-      return;
-    }
-    const project = await window.vicode.projects.create({
-      name: projectDraft.name,
-      folderPath: projectDraft.folderPath || null,
-      trusted: projectDraft.trusted
-    });
-    insertProjectLocally(project);
-    await selectProject(project.id);
-    setProjectDraft({ name: '', folderPath: '', trusted: false });
+    await createProjectInShell(projectActionsHost);
   }
 
   async function attachFolder() {
@@ -2359,173 +1761,32 @@ export function App() {
   }
 
   async function trustProject(trusted: boolean) {
-    if (!workspaceProject) {
-      return;
-    }
-    const project = await window.vicode.projects.update({
-      id: workspaceProject.id,
-      trusted
-    });
-    setProjects((current) => current.map((item) => (item.id === project.id ? project : item)));
-    if (workspaceProject.id === project.id) {
-      try {
-        const status = await window.vicode.workspaceBootstrap.getStatus(project.id);
-        setWorkspaceBootstrapStatus(status);
-      } catch {
-        setWorkspaceBootstrapStatus(null);
-      }
-    }
+    await trustWorkspaceProject(projectActionsHost, trusted);
   }
 
   async function setProjectTrust(projectId: string, trusted: boolean) {
-    const project = await window.vicode.projects.update({
-      id: projectId,
-      trusted
-    });
-    setProjects((current) => current.map((item) => (item.id === project.id ? project : item)));
-    if (selectedProjectId === project.id) {
-      try {
-        const status = await window.vicode.workspaceBootstrap.getStatus(project.id);
-        setWorkspaceBootstrapStatus(status);
-      } catch {
-        setWorkspaceBootstrapStatus(null);
-      }
-    }
-    showToast('info', trusted ? `${project.name} is now trusted.` : `${project.name} is now untrusted.`);
+    await setProjectTrustInShell(projectActionsHost, projectId, trusted);
   }
 
   async function createThread() {
-    if (!selectedProjectId) {
-      showToast('warning', 'Create a project first.');
-      return;
-    }
-    const createdThread = await window.vicode.threads.create({
-      projectId: selectedProjectId,
-      title: 'New thread',
-      providerId: composer.providerId,
-      modelId: composer.modelId,
-      executionPermission: composer.executionPermission
-    });
-    const thread =
-      composer.mode === 'plan'
-        ? await window.vicode.planner.setMode({ threadId: createdThread.id, mode: 'plan' })
-        : createdThread;
-    await refreshThreads(selectedProjectId);
-    setRecentThreads((current) => upsertRecentThread(current, thread));
-    setShowStartupWelcome(false);
-    applyOpenedThread(thread);
-    setActiveRunId(null);
-    setRoute('thread');
+    await createThreadInShell(projectActionsHost);
   }
 
   async function createThreadForProject(projectId: string) {
-    if (!projectId) {
-      return;
-    }
-
-    if (selectedProjectId !== projectId) {
-      setSelectedProjectId(projectId);
-      setPreferences(await window.vicode.settings.save({ selectedProjectId: projectId }));
-    }
-
-    setExpandedProjectIds((current) => (current.includes(projectId) ? current : [...current, projectId]));
-    const createdThread = await window.vicode.threads.create({
-      projectId,
-      title: 'New thread',
-      providerId: composer.providerId,
-      modelId: composer.modelId,
-      executionPermission: composer.executionPermission
-    });
-    const thread =
-      composer.mode === 'plan'
-        ? await window.vicode.planner.setMode({ threadId: createdThread.id, mode: 'plan' })
-        : createdThread;
-    const nextThreads = await window.vicode.threads.list(projectId);
-    setThreadsByProject((current) => ({ ...current, [projectId]: nextThreads }));
-    setRecentThreads((current) => upsertRecentThread(current, thread));
-    setShowStartupWelcome(false);
-    applyOpenedThread(thread);
-    setActiveRunId(null);
-    setRoute('thread');
+    await createThreadForProjectInShell(projectActionsHost, projectId);
   }
 
   async function renameProject(projectId: string) {
-    const project = projects.find((item) => item.id === projectId);
-    if (!project) {
-      return;
-    }
-    const name = window.prompt('Edit project name', project.name)?.trim();
-    if (!name || name === project.name) {
-      return;
-    }
-    await window.vicode.projects.update({ id: projectId, name });
-    applyBootstrap(await window.vicode.app.getBootstrap());
+    await renameProjectInShell(projectActionsHost, projectId);
+    await refreshAppShellBootstrapState(bootstrapHost);
+  }
+
+  async function archiveProjectThreads(projectId: string) {
+    await archiveProjectThreadsInShell(projectActionsHost, projectId);
   }
 
   async function removeProject(projectId: string) {
-    const project = projects.find((item) => item.id === projectId);
-    if (!project) {
-      return;
-    }
-
-    const remainingProjects = projects.filter((item) => item.id !== projectId);
-    const nextSelectedProjectId =
-      selectedProjectId === projectId
-        ? remainingProjects[0]?.id ?? null
-        : selectedProjectId;
-    const deletingSelectedProject = selectedProjectId === projectId;
-    const deletingActiveThreadProject = activeThread?.projectId === projectId;
-
-    setRemovingProjectId(projectId);
-
-    try {
-      await window.vicode.projects.remove(projectId);
-
-      setProjects(remainingProjects);
-      setRecentThreads((current) => current.filter((item) => item.projectId !== projectId));
-      setArchivedThreads((current) => current.filter((item) => item.projectId !== projectId));
-      setPreferences((current) =>
-        current
-          ? {
-              ...current,
-              selectedProjectId: nextSelectedProjectId,
-              lastOpenedThreadId: null
-            }
-          : current
-      );
-      setExpandedProjectIds((current) => current.filter((id) => id !== projectId));
-      setThreadsByProject((current) => {
-        const next = { ...current };
-        delete next[projectId];
-        return next;
-      });
-
-      if (deletingSelectedProject) {
-        setSelectedProjectId(nextSelectedProjectId);
-        setExpandedProjectIds((current) =>
-          nextSelectedProjectId && !current.includes(nextSelectedProjectId) ? [...current, nextSelectedProjectId] : current
-        );
-      }
-
-      if (deletingActiveThreadProject) {
-        setActiveThread(null);
-        setActiveRunId(null);
-        setAttachedSkillIds([]);
-        setWorkspaceBootstrapStatus(null);
-        setWorkspaceBootstrapModalOpen(false);
-        setWorkspaceBootstrapDraftBundle(null);
-        setWorkspaceBootstrapSelectedDraftPaths([]);
-        setWorkspaceBootstrapActiveDraftPath(null);
-      }
-
-      if (deletingSelectedProject && nextSelectedProjectId) {
-        await refreshThreads(nextSelectedProjectId);
-      }
-
-      await refreshStorageDiagnosticsIfVisible();
-    } finally {
-      setRemovingProjectId((current) => (current === projectId ? null : current));
-    }
+    await removeProjectInShell(projectActionsHost, projectId);
   }
 
   function reorderProjects(projectIds: string[]) {
@@ -2552,140 +1813,149 @@ export function App() {
   }
 
   async function executeLeadingNativeSlashCommand(prompt: string) {
-    const explicitParsed = parseLeadingNativeComposerCommand(prompt);
-    const pendingCommand =
-      pendingNativeCommandId === null
-        ? null
-        : nativeComposerCommands.find((command) => command.id === pendingNativeCommandId) ?? null;
-    const parsed = explicitParsed ?? (pendingCommand
-      ? {
-          command: pendingCommand,
-          body: prompt.trim()
-        }
-      : null);
-    if (!parsed) {
-      return false;
-    }
-
-    const { command, body } = parsed;
-    if (requiresSlashCommandBody(command.id) && !body) {
-      showToast('warning', `Add some text after /${command.token} first.`);
-      return true;
-    }
-
-    if (command.id === 'autonomous-builds') {
-      if (body) {
-        await startBuildPlanSetupThread({
-          goal: body,
+    const activeComposerProvider =
+      visibleProviders.find((provider) => provider.id === composer.providerId) ?? null;
+    return executeLeadingNativeSlashCommandFlow(
+      {
+        enhancePromptBody: (body) =>
+          enhanceComposerPromptFlow(
+            {
+              enhancePrompt: (input) => window.vicode.composer.enhancePrompt(input),
+              setEnhancingPrompt,
+              setComposerPrompt: (nextPrompt) =>
+                setComposer((current) => ({
+                  ...current,
+                  prompt: nextPrompt
+                })),
+              clearPendingNativeCommand: () => setPendingNativeCommandId(null),
+              showToast: (level, message) => showToast(level, message),
+              focusComposer: () => requestAnimationFrame(() => composerRef.current?.focus())
+            },
+            {
+              prompt: body,
+              projectId: composerProjectId,
+              providerId: composer.providerId,
+              modelId: composer.modelId,
+              reasoningEffort: resolveComposerReasoningEffort(
+                composer.providerId,
+                composerEffort
+              ),
+              thinkingEnabled: providerCapabilities(composer.providerId)
+                .supportsThinkingToggle
+                ? composer.thinkingEnabled
+                : undefined,
+              availableComposerSkills,
+              emptyPromptMessage: 'Add some prose before enhancing the prompt.'
+            }
+          ),
+        startBuildPlanSetupThread: (input) => startBuildPlanSetupThread(input),
+        createBuildPlanFromActiveThread,
+        setComposerMode,
+        setComposerPrompt: (nextPrompt) =>
+          setComposer((current) => ({
+            ...current,
+            prompt: nextPrompt
+          })),
+        clearPendingNativeCommand: () => setPendingNativeCommandId(null),
+        showToast: (level, message) => showToast(level, message),
+        focusComposer: () => requestAnimationFrame(() => composerRef.current?.focus())
+      },
+      {
+        prompt,
+        pendingNativeCommandId,
+        composer: {
           providerId: composer.providerId,
           modelId: composer.modelId,
-          reasoningEffort: resolveComposerReasoningEffort(composer.providerId, composerEffort),
-          successMessage: 'Autonomous Builds setup thread started from the composer.'
-        });
-      } else {
-        const readiness = getBuildPlanThreadReadiness(activeThread);
-        if (readiness.enabled) {
-          await createBuildPlanFromActiveThread();
-        } else {
-          showToast(
-            'warning',
-            'Add a goal after /autonomous-builds, or run it inside a ready Autonomous Builds setup thread.'
-          );
-        }
-      }
-      setPendingNativeCommandId(null);
-      requestAnimationFrame(() => composerRef.current?.focus());
-      return true;
-    }
-
-    if (command.id === 'enhance') {
-      if (!composerProjectId) {
-        showToast('warning', 'Create or select a project first.');
-        return true;
-      }
-      const { promptWithoutMentions, mentionedTokens } = splitPromptMentionedSkills(body, availableComposerSkills);
-      if (!promptWithoutMentions) {
-        showToast('warning', 'Add some prose before enhancing the prompt.');
-        return true;
-      }
-      setEnhancingPrompt(true);
-      try {
-        const result = await window.vicode.composer.enhancePrompt({
-          prompt: promptWithoutMentions,
-          projectId: composerProjectId,
-          providerId: composer.providerId,
-          modelId: composer.modelId,
-          reasoningEffort: resolveComposerReasoningEffort(composer.providerId, composerEffort)
-          ,
-          thinkingEnabled: providerCapabilities(composer.providerId).supportsThinkingToggle ? composer.thinkingEnabled : undefined
-        });
-        setComposer((current) => ({
-          ...current,
-          prompt: appendMentionedSkillTokens(result.prompt, mentionedTokens)
-        }));
-        setPendingNativeCommandId(null);
-        showToast('info', 'Prompt enhanced.');
-        requestAnimationFrame(() => composerRef.current?.focus());
-      } catch (error) {
-        setPendingNativeCommandId(null);
-        showToast('warning', formatUserErrorMessage(error, 'Unable to enhance prompt.'));
-      } finally {
-        setEnhancingPrompt(false);
-      }
-      return true;
-    }
-
-    if (command.id === 'plan') {
-      const activeComposerProvider = visibleProviders.find((provider) => provider.id === composer.providerId) ?? null;
-      const resolution = resolveNativePlanCommand({
-        body,
+          mode: composer.mode
+        },
+        composerEffort,
+        resolveComposerReasoningEffort,
+        activeThread,
         plannerSupported: Boolean(activeComposerProvider?.plannerPolicy.supported),
-        providerLabel: activeComposerProvider?.label ?? providerDisplayName(composer.providerId)
-      });
-      if (resolution.kind === 'empty') {
-        showToast('warning', resolution.toastMessage);
-        return true;
+        providerLabel: activeComposerProvider?.label ?? null,
+        availableComposerSkills
       }
-      if (resolution.kind === 'unsupported') {
-        setPendingNativeCommandId(null);
-        showToast('warning', resolution.toastMessage);
-        requestAnimationFrame(() => composerRef.current?.focus());
-        return true;
-      }
-
-      const nextMode = await setComposerMode(composer.mode === 'plan' ? 'default' : resolution.nextMode);
-      setComposer((current) => ({
-        ...current,
-        prompt: resolution.prompt
-      }));
-      setPendingNativeCommandId(null);
-      showToast('info', nextMode === 'plan' ? 'Plan mode enabled.' : 'Plan mode disabled.');
-      requestAnimationFrame(() => composerRef.current?.focus());
-      return true;
-    }
-
-    const nextPrompt = buildNativeComposerCommandPrompt(command.id, body);
-    setComposer((current) => ({
-      ...current,
-      prompt: nextPrompt
-    }));
-    setPendingNativeCommandId(null);
-    showToast('info', `${command.title} applied.`);
-    requestAnimationFrame(() => composerRef.current?.focus());
-    return true;
+    );
   }
 
-  async function submitPrompt(promptOverride?: string) {
+  async function submitPrompt(
+    promptOverride?: string,
+    nativeCommandIdOverride?: NativeComposerCommandId | null
+  ) {
+    const activeComposerProvider =
+      visibleProviders.find((provider) => provider.id === composer.providerId) ?? null;
     const effectivePrompt = promptOverride ?? composer.prompt;
     if (!composerProjectId || !effectivePrompt.trim() || composerSubmitting || plannerSubmitting) {
-      return;
+      return false;
     }
     if (editingFollowUpId) {
       await saveQueuedFollowUpEdit(editingFollowUpId);
-      return;
+      return true;
     }
-    if (await executeLeadingNativeSlashCommand(effectivePrompt)) {
-      return;
+    const handledLeadingSlashCommand =
+      await executeLeadingNativeSlashCommandFlow(
+        {
+          enhancePromptBody: (body) =>
+            enhanceComposerPromptFlow(
+              {
+                enhancePrompt: (input) => window.vicode.composer.enhancePrompt(input),
+                setEnhancingPrompt,
+                setComposerPrompt: (nextPrompt) =>
+                  setComposer((current) => ({
+                    ...current,
+                    prompt: nextPrompt
+                  })),
+                clearPendingNativeCommand: () => setPendingNativeCommandId(null),
+                showToast: (level, message) => showToast(level, message),
+                focusComposer: () => requestAnimationFrame(() => composerRef.current?.focus())
+              },
+              {
+                prompt: body,
+                projectId: composerProjectId,
+                providerId: composer.providerId,
+                modelId: composer.modelId,
+                reasoningEffort: resolveComposerReasoningEffort(
+                  composer.providerId,
+                  composerEffort
+                ),
+                thinkingEnabled: providerCapabilities(composer.providerId)
+                  .supportsThinkingToggle
+                  ? composer.thinkingEnabled
+                  : undefined,
+                availableComposerSkills,
+                emptyPromptMessage: 'Add some prose before enhancing the prompt.'
+              }
+            ),
+          startBuildPlanSetupThread: (input) => startBuildPlanSetupThread(input),
+          createBuildPlanFromActiveThread,
+          setComposerMode,
+          setComposerPrompt: (nextPrompt) =>
+            setComposer((current) => ({
+              ...current,
+              prompt: nextPrompt
+            })),
+          clearPendingNativeCommand: () => setPendingNativeCommandId(null),
+          showToast: (level, message) => showToast(level, message),
+          focusComposer: () => requestAnimationFrame(() => composerRef.current?.focus())
+        },
+        {
+          prompt: effectivePrompt,
+          pendingNativeCommandId: nativeCommandIdOverride ?? pendingNativeCommandId,
+          composer: {
+            providerId: composer.providerId,
+            modelId: composer.modelId,
+            mode: composer.mode
+          },
+          composerEffort,
+          resolveComposerReasoningEffort,
+          activeThread,
+          plannerSupported: Boolean(activeComposerProvider?.plannerPolicy.supported),
+          providerLabel: activeComposerProvider?.label ?? null,
+          availableComposerSkills
+        }
+      );
+    if (handledLeadingSlashCommand) {
+      return false;
     }
 
     const activeProvider = visibleProviders.find((provider) => provider.id === composer.providerId);
@@ -2697,26 +1967,26 @@ export function App() {
           ? providerBlockedRunMessage(activeProvider)
           : 'This provider is not ready. Finish setup in Settings > Providers.'
       );
-      return;
+      return false;
     }
     if (activeProvider.authState === 'checking') {
       showToast('info', providerBlockedRunMessage(activeProvider));
-      return;
+      return false;
     }
     if (activeProvider.authState === 'detected') {
       showToast('warning', providerBlockedRunMessage(activeProvider));
-      return;
+      return false;
     }
     if (activeProvider.authState === 'disconnected' || activeProvider.authState === 'missing_cli') {
       showToast('warning', providerBlockedRunMessage(activeProvider));
-      return;
+      return false;
     }
     if (workspaceProject?.folderPath && !workspaceProject.trusted) {
       showToast(
         'warning',
         `This workspace is not trusted yet. Click Enable workspace in the header before running ${providerDisplayName(composer.providerId)}.`
       );
-      return;
+      return false;
     }
     if (
       composer.mode === 'default' &&
@@ -2727,11 +1997,11 @@ export function App() {
         'warning',
         'This setup thread is ready for Autonomous Builds handoff. Use Accept and start Autonomous Builds, or Create build plan from this thread, instead of running normal execution here.'
       );
-      return;
+      return false;
     }
     if (composer.providerId !== 'ollama' && composer.imageAttachments.length > 0 && activeModel?.supportsVision === false) {
       showToast('warning', `${activeModel.label} does not support image input. Choose a vision-capable model first.`);
-      return;
+      return false;
     }
     const input: ComposerSubmitInput = {
       projectId: composerProjectId,
@@ -2803,11 +2073,11 @@ export function App() {
       } catch (error) {
         restoreComposerDraft();
         if (!showWorkspaceRepairToast(error, workspaceProject)) {
-          showToast('error', formatUserErrorMessage(error, 'Failed to start Plan mode.'));
-        }
-        setPlannerSubmitting(false);
-        setComposerSubmitting(false);
-        return;
+        showToast('error', formatUserErrorMessage(error, 'Failed to start Plan mode.'));
+      }
+      setPlannerSubmitting(false);
+      setComposerSubmitting(false);
+      return false;
       }
       setMissingWorkspaceProjectId((current) => (workspaceProject && current === workspaceProject.id ? null : current));
       setShowStartupWelcome(false);
@@ -2827,7 +2097,7 @@ export function App() {
       });
       setPlannerSubmitting(false);
       setComposerSubmitting(false);
-      return;
+      return true;
     }
 
     let result: ComposerSubmitResult;
@@ -2839,7 +2109,7 @@ export function App() {
         showToast('error', formatUserErrorMessage(error, 'Failed to start the run.'));
       }
       setComposerSubmitting(false);
-      return;
+      return false;
     }
     setMissingWorkspaceProjectId((current) => (workspaceProject && current === workspaceProject.id ? null : current));
     setShowStartupWelcome(false);
@@ -2862,6 +2132,7 @@ export function App() {
       showToast('warning', formatUserErrorMessage(error, 'Run started, but the thread list could not refresh.'));
     });
     setComposerSubmitting(false);
+    return true;
   }
 
   function editQueuedFollowUp(followUp: ThreadFollowUp) {
@@ -2912,45 +2183,32 @@ export function App() {
   }
 
   async function enhanceComposerPrompt() {
-    if (!composer.prompt.trim()) {
-      showToast('warning', 'Write something first, then enhance it.');
-      return;
-    }
-    if (!composerProjectId) {
-      showToast('warning', 'Create or select a project first.');
-      return;
-    }
-
-    const { promptWithoutMentions, mentionedTokens } = splitPromptMentionedSkills(composer.prompt, availableComposerSkills);
-    if (!promptWithoutMentions) {
-      showToast('warning', 'Add some prose before enhancing the prompt.');
-      return;
-    }
-
-    setEnhancingPrompt(true);
-    try {
-      const result = await window.vicode.composer.enhancePrompt({
-        prompt: promptWithoutMentions,
+    await enhanceComposerPromptFlow(
+      {
+        enhancePrompt: (input) => window.vicode.composer.enhancePrompt(input),
+        setEnhancingPrompt,
+        setComposerPrompt: (prompt) =>
+          setComposer((current) => ({
+            ...current,
+            prompt
+          })),
+        clearPendingNativeCommand: () => setPendingNativeCommandId(null),
+        showToast: (level, message) => showToast(level, message),
+        focusComposer: () => requestAnimationFrame(() => composerRef.current?.focus())
+      },
+      {
+        prompt: composer.prompt,
         projectId: composerProjectId,
         providerId: composer.providerId,
         modelId: composer.modelId,
-        reasoningEffort: resolveComposerReasoningEffort(composer.providerId, composerEffort)
-        ,
-        thinkingEnabled: providerCapabilities(composer.providerId).supportsThinkingToggle ? composer.thinkingEnabled : undefined
-      });
-      setComposer((current) => ({
-        ...current,
-        prompt: appendMentionedSkillTokens(result.prompt, mentionedTokens)
-      }));
-      setPendingNativeCommandId(null);
-      showToast('info', 'Prompt enhanced.');
-      requestAnimationFrame(() => composerRef.current?.focus());
-    } catch (error) {
-      setPendingNativeCommandId(null);
-      showToast('warning', formatUserErrorMessage(error, 'Unable to enhance prompt.'));
-    } finally {
-      setEnhancingPrompt(false);
-    }
+        reasoningEffort: resolveComposerReasoningEffort(composer.providerId, composerEffort),
+        thinkingEnabled: providerCapabilities(composer.providerId).supportsThinkingToggle
+          ? composer.thinkingEnabled
+          : undefined,
+        availableComposerSkills,
+        emptyPromptMessage: 'Write something first, then enhance it.'
+      }
+    );
   }
 
   async function stopPrompt() {
@@ -2986,7 +2244,7 @@ export function App() {
   }
 
   async function toggleComposerMode() {
-    await setComposerMode(composer.mode === 'plan' ? 'default' : 'plan');
+    return await setComposerMode(composer.mode === 'plan' ? 'default' : 'plan');
   }
 
   async function cancelPlannerSession() {
@@ -3249,207 +2507,6 @@ export function App() {
     return true;
   }
 
-  function stopVoiceVisualization() {
-    if (analyserFrameRef.current !== null) {
-      window.cancelAnimationFrame(analyserFrameRef.current);
-      analyserFrameRef.current = null;
-    }
-    if (voiceTimerRef.current !== null) {
-      window.clearInterval(voiceTimerRef.current);
-      voiceTimerRef.current = null;
-    }
-    analyserRef.current = null;
-    if (audioContextRef.current) {
-      void audioContextRef.current.close().catch(() => {});
-      audioContextRef.current = null;
-    }
-    voiceRecordingStartedAtRef.current = null;
-    setVoiceElapsedMs(0);
-    setVoiceLevel(0);
-  }
-
-  async function startVoiceVisualization(stream: MediaStream) {
-    stopVoiceVisualization();
-
-    const audioContext = new AudioContext();
-    const source = audioContext.createMediaStreamSource(stream);
-    const analyser = audioContext.createAnalyser();
-    analyser.fftSize = 256;
-    analyser.smoothingTimeConstant = 0.82;
-    source.connect(analyser);
-
-    const data = new Uint8Array(analyser.frequencyBinCount);
-    audioContextRef.current = audioContext;
-    analyserRef.current = analyser;
-    voiceRecordingStartedAtRef.current = Date.now();
-    setVoiceElapsedMs(0);
-
-    const updateLevel = () => {
-      const activeAnalyser = analyserRef.current;
-      if (!activeAnalyser) {
-        return;
-      }
-
-      activeAnalyser.getByteTimeDomainData(data);
-      let sum = 0;
-      for (let index = 0; index < data.length; index += 1) {
-        const normalized = (data[index] - 128) / 128;
-        sum += normalized * normalized;
-      }
-      const rms = Math.sqrt(sum / data.length);
-      setVoiceLevel(Math.min(1, rms * 4.5));
-      analyserFrameRef.current = window.requestAnimationFrame(updateLevel);
-    };
-
-    voiceTimerRef.current = window.setInterval(() => {
-      const startedAt = voiceRecordingStartedAtRef.current;
-      if (!startedAt) {
-        return;
-      }
-      setVoiceElapsedMs(Date.now() - startedAt);
-    }, 250);
-
-    analyserFrameRef.current = window.requestAnimationFrame(updateLevel);
-  }
-
-  function startVoiceRecording() {
-    void (async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaStreamRef.current = stream;
-        voiceChunksRef.current = [];
-
-        const preferredMimeType = resolveVoiceRecorderMimeType();
-        const recorder = preferredMimeType
-          ? new MediaRecorder(stream, { mimeType: preferredMimeType })
-          : new MediaRecorder(stream);
-        mediaRecorderRef.current = recorder;
-        await startVoiceVisualization(stream);
-
-        recorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
-            voiceChunksRef.current.push(event.data);
-          }
-        };
-
-        recorder.onerror = () => {
-          mediaRecorderRef.current = null;
-          mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-          mediaStreamRef.current = null;
-          voiceChunksRef.current = [];
-          stopVoiceVisualization();
-          setVoiceState('idle');
-          showToast('error', 'Voice recording failed. Check your microphone and try again.');
-        };
-
-        recorder.onstart = () => {
-          setVoiceState('recording');
-        };
-
-        recorder.onstop = async () => {
-          const chunks = [...voiceChunksRef.current];
-          voiceChunksRef.current = [];
-          mediaRecorderRef.current = null;
-          mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-          mediaStreamRef.current = null;
-          stopVoiceVisualization();
-
-          if (chunks.length === 0) {
-            setVoiceState('idle');
-            showToast('info', 'No speech detected. Try again.');
-            return;
-          }
-
-          try {
-            const mimeType = recorder.mimeType || preferredMimeType || 'audio/webm';
-            const blob = new Blob(chunks, { type: mimeType });
-            const wavBlob = await transcodeVoiceBlobToWav(blob);
-            const audioBase64 = await blobToBase64(wavBlob);
-            const result = await window.vicode.voice.transcribe({
-              audioBase64,
-              mimeType: 'audio/wav',
-              fileName: 'dictation.wav'
-            });
-            setVoiceState('idle');
-            const appended = appendDictationToComposer(normalizeVoiceTranscript(result.text));
-            if (!appended) {
-              showToast('info', 'No speech detected. Try again.');
-            }
-          } catch (error) {
-            setVoiceState('idle');
-            showToast('error', formatUserErrorMessage(error, 'Voice dictation failed. Try again.'));
-          }
-        };
-
-        recorder.start();
-      } catch (error) {
-        mediaRecorderRef.current = null;
-        mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-        mediaStreamRef.current = null;
-        voiceChunksRef.current = [];
-        stopVoiceVisualization();
-        setVoiceState('idle');
-        showToast(
-          'error',
-          formatUserErrorMessage(
-            error,
-            'Voice recording could not start. Check microphone permissions and try again.'
-          )
-        );
-      }
-    })();
-  }
-
-  async function syncMicrophoneConsentPreference() {
-    if (preferences?.microphoneAllowed) {
-      return;
-    }
-
-    try {
-      const nextPreferences = await window.vicode.settings.save({ microphoneAllowed: true });
-      setPreferences(nextPreferences);
-    } catch {
-      // Keep dictation usable even if the local preference write fails.
-    }
-  }
-
-  async function handleComposerVoice() {
-    if (!isVoiceDictationSupported()) {
-      showToast('warning', 'Voice dictation is not available in this app runtime.');
-      return;
-    }
-
-    if (voiceState === 'transcribing') {
-      return;
-    }
-
-    if (voiceState === 'recording') {
-      setVoiceState('transcribing');
-      mediaRecorderRef.current?.stop();
-      return;
-    }
-
-    const microphoneAccessStatus = await window.vicode.voice.getMicrophoneAccessStatus();
-    if (isMicrophoneAccessBlocked(microphoneAccessStatus)) {
-      setMicrophoneConsentOpen(false);
-      showToast('error', formatMicrophoneAccessMessage(microphoneAccessStatus));
-      return;
-    }
-
-    if (!preferences?.microphoneAllowed) {
-      if (microphoneAccessStatus === 'granted') {
-        void syncMicrophoneConsentPreference();
-        startVoiceRecording();
-        return;
-      }
-
-      setMicrophoneConsentOpen(true);
-      return;
-    }
-
-    startVoiceRecording();
-  }
-
   async function addComposerImageFiles(files: File[]) {
     if (files.length === 0) {
       return;
@@ -3688,88 +2745,46 @@ export function App() {
     );
   }
 
-  function resolveCreatorSkillId(
-    availableSkills: SkillDefinition[],
-    kind: 'skill' | 'plugin'
-  ) {
-    const slug = kind === 'skill' ? 'skill-creator' : 'plugin-creator';
-    const fallbackId = kind === 'skill' ? 'built-in-skill-creator' : 'built-in-plugin-creator';
-    return availableSkills.find((skill) => skill.id === fallbackId || skill.metadata.slug === slug)?.id ?? null;
-  }
-
   async function openCreatorInComposer(kind: 'skill' | 'plugin') {
-    const targetProject = workspaceProject;
-    if (!targetProject) {
-      showToast('warning', 'Select a project first.');
-      return;
-    }
-    if (!appMeta?.statePath) {
-      showToast('warning', 'App metadata is unavailable right now. Refresh Vicode and try again.');
-      return;
-    }
-
-    const nextSkills = await window.vicode.skills.list();
-    setSkills(nextSkills);
-
-    const creatorSkillId = resolveCreatorSkillId(nextSkills, kind);
-    if (!creatorSkillId) {
-      showToast(
-        'warning',
-        `${kind === 'skill' ? 'Skill' : 'Plugin'} creator is unavailable. Restart Vicode once if this app was already open before the update.`
-      );
-      return;
-    }
-
-    const prompt =
-      kind === 'skill'
-        ? buildSkillCreatorPrompt({
-            statePath: appMeta.statePath,
-            projectName: targetProject.name,
-            projectId: targetProject.id
-          })
-        : buildPluginCreatorPrompt({
-            statePath: appMeta.statePath,
-            projectName: targetProject.name,
-            projectId: targetProject.id
-          });
-
-    if (selectedProjectId !== targetProject.id) {
-      setSelectedProjectId(targetProject.id);
-      setPreferences(await window.vicode.settings.save({ selectedProjectId: targetProject.id }));
-    }
-    setExpandedProjectIds((current) =>
-      current.includes(targetProject.id) ? current : [...current, targetProject.id]
+    await openCreatorInComposerFlow(
+      {
+        getWorkspaceProject: () => workspaceProject,
+        getSelectedProjectId: () => selectedProjectId,
+        getComposerState: () => ({
+          providerId: composer.providerId,
+          modelId: composer.modelId,
+          executionPermission: composer.executionPermission
+        }),
+        listSkills: () => window.vicode.skills.list(),
+        listThreads: (projectId) => window.vicode.threads.list(projectId),
+        createThread: (input) => window.vicode.threads.create(input),
+        saveDraft: (threadId, prompt) => window.vicode.threads.saveDraft(threadId, prompt),
+        savePreferences: (input) => window.vicode.settings.save(input),
+        applyOpenedThread,
+        showToast,
+        focusComposer: () => requestAnimationFrame(() => composerRef.current?.focus()),
+        setSkills,
+        setThreadsByProject,
+        setRecentThreads,
+        setSelectedProjectId,
+        setPreferences,
+        setExpandedProjectIds,
+        setShowStartupWelcome,
+        setEditingFollowUpId,
+        setPendingNativeCommandId,
+        setAttachedSkillIds,
+        prepareComposerForCreator: (prompt) =>
+          setComposer((current) => ({
+            ...current,
+            prompt,
+            mode: 'default',
+            imageAttachments: [],
+            textAttachments: []
+          })),
+        setRoute
+      },
+      kind
     );
-
-    const createdThread = await window.vicode.threads.create({
-      projectId: targetProject.id,
-      title: kind === 'skill' ? 'Create skill' : 'Create plugin',
-      providerId: composer.providerId,
-      modelId: composer.modelId,
-      executionPermission: composer.executionPermission
-    });
-    const nextThreads = await window.vicode.threads.list(targetProject.id);
-    setThreadsByProject((current) => ({ ...current, [targetProject.id]: nextThreads }));
-    setRecentThreads((current) => upsertRecentThread(current, createdThread));
-    applyOpenedThread(createdThread);
-
-    setShowStartupWelcome(false);
-    setEditingFollowUpId(null);
-    setPendingNativeCommandId(null);
-    setAttachedSkillIds([creatorSkillId]);
-    setComposer((current) => ({
-      ...current,
-      prompt,
-      mode: 'default',
-      imageAttachments: [],
-      textAttachments: []
-    }));
-    setRoute('thread');
-    showToast(
-      'info',
-      kind === 'skill' ? 'Opened a new thread with the skill creator ready.' : 'Opened a new thread with the plugin creator ready.'
-    );
-    requestAnimationFrame(() => composerRef.current?.focus());
   }
 
   async function createAutomation() {
@@ -4273,6 +3288,7 @@ export function App() {
   async function clearProviderAuth(providerId: ProviderId) {
     const provider = await window.vicode.providers.clearAuth(providerId);
     setProviders((current) => current.map((item) => (item.id === provider.id ? provider : item)));
+    setApiKeys((current) => ({ ...current, [providerId]: '' }));
     showToast('info', `${provider.label} disconnected.`);
   }
 
@@ -4283,7 +3299,9 @@ export function App() {
       await refreshOllamaRuntimeStatus();
     }
     const previousModelId = composer.providerId === provider.id ? composer.modelId : null;
-    const nextModelId = previousModelId ? resolveProviderModelId([provider], provider.id, previousModelId) : null;
+    const nextModelId = previousModelId
+      ? resolveProviderModelId([provider], provider.id, previousModelId, { promoteStaleDefault: true })
+      : null;
     setComposer((current) => (nextModelId && current.providerId === provider.id ? { ...current, modelId: nextModelId } : current));
     if (previousModelId && nextModelId && previousModelId !== nextModelId) {
       showToast('info', `${provider.label} switched to ${provider.models.find((model) => model.id === nextModelId)?.label ?? nextModelId}.`);
@@ -4391,17 +3409,19 @@ export function App() {
     setProviders((current) =>
       current.map((item) => clearedProviders.find((provider) => provider.id === item.id) ?? item)
     );
+    setApiKeys(createProviderRecord(() => ''));
     showToast('info', 'Providers disconnected.');
   }
 
   async function saveProviderApiKey(providerId: ProviderId) {
-    if (!apiKeys[providerId].trim()) {
+    const trimmedApiKey = apiKeys[providerId].trim();
+    if (!trimmedApiKey) {
       showToast('warning', 'API key is required.');
       return;
     }
-    const provider = await window.vicode.providers.saveApiKey(providerId, apiKeys[providerId]);
+    const provider = await window.vicode.providers.saveApiKey(providerId, trimmedApiKey);
     setProviders((current) => current.map((item) => (item.id === provider.id ? provider : item)));
-    setApiKeys((current) => ({ ...current, [providerId]: '' }));
+    setApiKeys((current) => ({ ...current, [providerId]: trimmedApiKey }));
     showToast(
       'info',
       providerId === 'ollama'
@@ -4511,24 +3531,6 @@ export function App() {
     );
   }
 
-  async function allowMicrophoneForApp() {
-    const microphoneAccessStatus = await window.vicode.voice.getMicrophoneAccessStatus();
-    if (isMicrophoneAccessBlocked(microphoneAccessStatus)) {
-      setMicrophoneConsentOpen(false);
-      showToast('error', formatMicrophoneAccessMessage(microphoneAccessStatus));
-      return;
-    }
-
-    try {
-      const nextPreferences = await window.vicode.settings.save({ microphoneAllowed: true });
-      setPreferences(nextPreferences);
-      setMicrophoneConsentOpen(false);
-      startVoiceRecording();
-    } catch (error) {
-      showToast('error', formatUserErrorMessage(error, 'Unable to save microphone permission.'));
-    }
-  }
-
   async function exportDiagnostics() {
     showToast('info', `Diagnostics exported to ${await window.vicode.diagnostics.export()}`);
   }
@@ -4556,7 +3558,10 @@ export function App() {
   }
 
   async function refreshStorageDiagnosticsIfVisible() {
-    if ((route === 'settings' && settingsSection === 'general') || storageDiagnostics !== null) {
+    if (
+      (route === 'settings' && (settingsSection === 'diagnostics' || settingsSection === 'storage')) ||
+      storageDiagnostics !== null
+    ) {
       await loadStorageDiagnostics();
     }
   }
@@ -4594,7 +3599,12 @@ export function App() {
   }
 
   useEffect(() => {
-    if (loading || route !== 'settings' || settingsSection !== 'general' || storageDiagnostics !== null) {
+    if (
+      loading ||
+      route !== 'settings' ||
+      (settingsSection !== 'diagnostics' && settingsSection !== 'storage') ||
+      storageDiagnostics !== null
+    ) {
       return;
     }
 
@@ -4606,6 +3616,43 @@ export function App() {
   const showWorkspaceRepairAction = Boolean(workspaceProject?.folderPath && workspaceProject.id === missingWorkspaceProjectId);
   const showWorkspaceTrustAction = Boolean(workspaceProject?.folderPath && !workspaceProject.trusted);
   const showWorkspaceBootstrapAction = Boolean(workspaceProject?.folderPath && workspaceBootstrapStatus?.needsBootstrap);
+  const activeThreadActions =
+    activeThread && workspaceProject
+      ? {
+          projectId: workspaceProject.id,
+          rename: renameThread,
+          duplicate: duplicateThread,
+          retry: retryThread,
+          archive: async () => archiveThread(activeThread.id),
+          remove: () => setDeleteDialogOpen(true)
+        }
+      : null;
+  const titlebarWorkspaceAction = showWorkspaceRepairAction
+    ? {
+        label: 'Repair path',
+        tooltip: 'This thread still points to a missing workspace folder. Pick the current folder for this project before running tools again.',
+        icon: <FolderIcon />,
+        onClick: () => void repairWorkspaceProjectPath(workspaceProject),
+        tone: 'warning' as const
+      }
+    : showWorkspaceTrustAction
+      ? {
+          label: 'Trust workspace',
+          tooltip: 'Allow Vicode to work with files in this project and run coding tasks here. This applies to the whole project, not just this thread.',
+          icon: <AccessIcon />,
+          onClick: () => void trustProject(true),
+          tone: 'default' as const
+        }
+      : showWorkspaceBootstrapAction
+        ? {
+            label: 'Project setup',
+            tooltip: 'Set up project instructions and memory for trusted runs. You review files before saving.',
+            icon: <FolderIcon />,
+            onClick: () => void openWorkspaceBootstrap(),
+            testId: 'workspace-bootstrap-open',
+            tone: 'default' as const
+          }
+        : null;
   const showTranscriptRailCentered = activeThread ? transcriptTurns.length === 0 : startupThreadRestoreState !== 'pending';
   const emptyThreadHero = (
     <EmptyThreadHero
@@ -4864,15 +3911,6 @@ export function App() {
     }
   }
 
-  async function openSelectedProjectFolder() {
-    if (!selectedProject?.folderPath) {
-      showToast('warning', 'This project does not have a folder location yet.');
-      return;
-    }
-
-    await window.vicode.app.revealPath(selectedProject.folderPath);
-  }
-
   async function openProjectFolderLocation(projectId: string) {
     const project = projects.find((entry) => entry.id === projectId);
     if (!project?.folderPath) {
@@ -4919,8 +3957,16 @@ export function App() {
     setRoute('settings');
   }
 
+  function toggleTitlebarSettingsSection(section: SettingsSection = 'general') {
+    if (route === 'settings' && settingsSection === section) {
+      setRoute(lastContentRoute);
+      return;
+    }
+    openSettingsSection(section);
+  }
+
   function openSkillsRoute() {
-    setRoute('skills');
+    setRoute((current) => (current === 'skills' ? 'thread' : 'skills'));
   }
 
   function openBuildControlRoute() {
@@ -4928,11 +3974,11 @@ export function App() {
   }
 
   function openAutomationsRoute() {
-    setRoute('automations');
+    setRoute((current) => (current === 'automations' ? 'thread' : 'automations'));
   }
 
   function openCollaborationSection(section: CollaborationSection) {
-    if (!COLLABORATION_SHELL_ENABLED) {
+    if (!COLLABORATION_ENABLED) {
       return;
     }
     setCollaborationSection(section);
@@ -4987,8 +4033,11 @@ export function App() {
       );
       return;
     }
+    if (!COLLABORATION_ENABLED && event.type.startsWith('collab.')) {
+      return;
+    }
     if (event.type.startsWith('collab.')) {
-      applyCollaborationBootstrap(await window.vicode.collab.getBootstrap());
+      await refreshCollaborationBootstrapState(bootstrapHost);
       return;
     }
     if (event.type === 'provider.updated') {
@@ -5058,21 +4107,12 @@ export function App() {
       }));
       setRecentThreads((current) => upsertRecentThread(current, event.thread));
       if (activeThreadIdRef.current === event.thread.id) {
-        setActiveThread((current) =>
-          current
-            ? {
-                ...current,
-                ...event.thread,
-                turns: current.turns,
-                rawOutput: current.rawOutput,
-                planner: current.planner
-              }
-            : current
-        );
+        setActiveThread((current) => applyThreadSummaryToActiveThread(current, event.thread));
       }
       return;
     }
     if (event.type === 'thread.detail' && activeThreadIdRef.current === event.thread.id) {
+      flushPendingLiveRunDeltas();
       setActiveThread(event.thread);
       setRunProgressByRunId(deriveRunProgressSnapshots(event.thread.rawOutput));
       setActiveRunId((current) => deriveCurrentRunId(event.thread, current));
@@ -5098,20 +4138,7 @@ export function App() {
       if (event.threadId === activeThreadIdRef.current) {
         setActiveRunId(event.runId);
         setActiveThread((current) =>
-          current
-            ? {
-                ...current,
-                status: 'running',
-                rawOutput: appendRunEvent(current.rawOutput, {
-                  id: `${event.runId}:started:${current.rawOutput.length}`,
-                  threadId: event.threadId,
-                  runId: event.runId,
-                  eventType: 'started',
-                  payload: {},
-                  createdAt: new Date().toISOString()
-                })
-              }
-            : current
+          applyRunStartedToThread(current, { threadId: event.threadId, runId: event.runId }, new Date().toISOString())
         );
       }
       return;
@@ -5125,102 +4152,37 @@ export function App() {
       return;
     }
     if (event.type === 'run.delta' && activeThreadIdRef.current === event.threadId) {
-      setActiveThread((current) => {
-        if (!current) {
-          return current;
-        }
-        const turns = [...current.turns];
-        const reverseIndex = [...turns]
-          .reverse()
-          .findIndex((turn) => turn.runId === event.runId && turn.role === 'assistant');
-        const realIndex = reverseIndex >= 0 ? turns.length - 1 - reverseIndex : -1;
-        if (realIndex >= 0) {
-          turns[realIndex] = { ...turns[realIndex], content: turns[realIndex].content + event.delta };
-        } else {
-          turns.push({
-            id: `${event.runId}-assistant`,
-            threadId: event.threadId,
-            runId: event.runId,
-            role: 'assistant',
-            content: event.delta,
-            metadata: null,
-            createdAt: new Date().toISOString()
-          });
-        }
-        return {
-          ...current,
-          turns,
-          rawOutput: appendRunEvent(current.rawOutput, {
-            id: `${event.runId}:delta:${current.rawOutput.length}`,
-            threadId: event.threadId,
-            runId: event.runId,
-            eventType: 'delta',
-            payload: { delta: event.delta },
-            createdAt: new Date().toISOString()
-          })
-        };
-      });
+      queuePendingLiveRunDelta(event.threadId, event.runId, event.delta);
       return;
     }
     if (event.type === 'run.replace' && activeThreadIdRef.current === event.threadId) {
-      setActiveThread((current) => {
-        if (!current) {
-          return current;
-        }
-        const turns = [...current.turns];
-        const reverseIndex = [...turns]
-          .reverse()
-          .findIndex((turn) => turn.runId === event.runId && turn.role === 'assistant');
-        const realIndex = reverseIndex >= 0 ? turns.length - 1 - reverseIndex : -1;
-        if (realIndex >= 0) {
-          turns[realIndex] = { ...turns[realIndex], content: event.text };
-        } else {
-          turns.push({
-            id: `${event.runId}-assistant`,
-            threadId: event.threadId,
-            runId: event.runId,
-            role: 'assistant',
-            content: event.text,
-            metadata: null,
-            createdAt: new Date().toISOString()
-          });
-        }
-        return {
-          ...current,
-          turns
-        };
-      });
+      flushPendingLiveRunDeltas();
+      setActiveThread((current) =>
+        applyRunReplaceToThread(
+          current,
+          { threadId: event.threadId, runId: event.runId, text: event.text },
+          new Date().toISOString()
+        )
+      );
       return;
     }
     if (event.type === 'raw.event' && activeThreadIdRef.current === event.event.threadId) {
+      flushPendingLiveRunDeltas();
       setRunProgressByRunId((current) => applyRunProgressSnapshotEvent(current, event.event));
-      setActiveThread((current) =>
-        current
-          ? {
-              ...current,
-              rawOutput: appendRunEvent(current.rawOutput, event.event)
-            }
-          : current
-      );
+      setActiveThread((current) => applyRawRunEventToThread(current, event.event));
       return;
     }
     if (event.type === 'run.status' && ['completed', 'failed', 'aborted'].includes(event.status)) {
       if (event.threadId === activeThreadIdRef.current) {
+        flushPendingLiveRunDeltas();
         if (event.status === 'failed' && event.message) {
-          showToast('error', event.message);
+          showToast('error', formatRunFailureToastMessage(event.message));
         }
         if (event.status === 'aborted') {
           showToast('warning', event.message ?? 'Run stopped before completion.');
         }
       }
-      setRunProgressByRunId((current) => {
-        if (!(event.runId in current)) {
-          return current;
-        }
-        const next = { ...current };
-        delete next[event.runId];
-        return next;
-      });
+      setRunProgressByRunId((current) => clearRunProgressEntry(current, event.runId));
       setActiveRunId((current) => (current === event.runId ? null : current));
       if (event.threadId === activeThreadIdRef.current) {
         setActiveThread(await window.vicode.threads.open(event.threadId));
@@ -5473,30 +4435,6 @@ export function App() {
       return;
     }
 
-    const downloadedUpdateKey = getDownloadedUpdateKey(appUpdateState);
-    const versionLabel = appUpdateState.availableVersion
-      ? `Version ${appUpdateState.availableVersion}`
-      : 'The downloaded desktop update';
-
-    if (downloadedUpdateKey && isQueuedUpdateInstall(appUpdateState, queuedUpdateInstallKey)) {
-      showToast('warning', `${versionLabel} is already queued and will install when the current run finishes.`, {
-        title: 'Update queued',
-        sticky: true
-      });
-      return;
-    }
-
-    if (hasActiveRun) {
-      if (downloadedUpdateKey) {
-        setQueuedUpdateInstallKey(downloadedUpdateKey);
-      }
-      showToast('warning', `${versionLabel} will install when the current run finishes.`, {
-        title: 'Update queued',
-        sticky: true
-      });
-      return;
-    }
-
     await restartToUpdate();
   }
 
@@ -5509,39 +4447,22 @@ export function App() {
   }
 
   useEffect(() => {
-    if (!queuedUpdateInstallKey) {
+    if (appUpdateState?.status !== 'downloaded') {
       return;
     }
 
-    if (!isQueuedUpdateInstall(appUpdateState, queuedUpdateInstallKey)) {
-      setQueuedUpdateInstallKey(null);
-    }
-  }, [appUpdateState, queuedUpdateInstallKey]);
+    const downloadedVersion =
+      appUpdateState.availableVersion ?? `downloaded:${appUpdateState.currentVersion}`;
 
-  useEffect(() => {
-    if (!queuedUpdateInstallKey || hasActiveRun || !isQueuedUpdateInstall(appUpdateState, queuedUpdateInstallKey)) {
+    if (downloadedUpdateToastVersionRef.current === downloadedVersion) {
       return;
     }
 
-    setQueuedUpdateInstallKey(null);
-    void restartToUpdate();
-  }, [appUpdateState, hasActiveRun, queuedUpdateInstallKey]);
-
-  useEffect(() => {
-    const downloadedUpdateKey = getDownloadedUpdateKey(appUpdateState);
-    if (!downloadedUpdateKey) {
-      return;
-    }
-
-    if (downloadedUpdateToastVersionRef.current === downloadedUpdateKey) {
-      return;
-    }
-
-    downloadedUpdateToastVersionRef.current = downloadedUpdateKey;
+    downloadedUpdateToastVersionRef.current = downloadedVersion;
     const versionLabel = appUpdateState?.availableVersion
       ? `Version ${appUpdateState.availableVersion} is ready to install.`
       : 'The latest desktop update is ready to install.';
-    showToast('warning', `${versionLabel} ${hasActiveRun ? 'Vicode can install it when the current run finishes.' : 'Restart Vicode to finish updating.'}`, {
+    showToast('warning', `${versionLabel} ${hasActiveRun ? 'Restarting now will stop the current run and install it immediately.' : 'Restart Vicode to finish updating.'}`, {
       title: 'Update ready',
       sticky: true,
       actions: [
@@ -5551,7 +4472,7 @@ export function App() {
           onAction: () => dismissToast()
         },
         {
-          label: hasActiveRun ? 'Install when idle' : 'Restart now',
+          label: 'Restart now',
           tone: 'primary',
           onAction: () => {
             dismissToast();
@@ -5566,7 +4487,7 @@ export function App() {
     <TooltipProvider>
     <div
       ref={appShellRef}
-      className={`app-shell h-screen min-h-screen w-full overflow-hidden bg-[color:var(--ui-app-bg)] text-[color:var(--ui-text-title)]${showWelcomeScreen ? ' app-shell-welcome' : ''}${shellReady && !showWelcomeScreen && (route === 'thread' || route === 'collab') ? ' app-shell-thread' : ''}`}
+      className={`app-shell h-screen min-h-screen w-full overflow-hidden bg-[color:var(--ui-app-bg)] text-[color:var(--ui-text-title)]${showWelcomeScreen ? ' app-shell-welcome' : ''}${shellReady && !showWelcomeScreen && route === 'thread' ? ' app-shell-thread' : ''}${shellReady && !showWelcomeScreen && route === 'settings' ? ' app-shell-settings' : ''}`}
       style={{
         ['--vicode-sidebar-width' as string]: `${effectiveSidebarWidth}px`,
         ['--windows-titlebar-leading-width' as string]: `${titlebarLeadingWidth}px`
@@ -5575,21 +4496,21 @@ export function App() {
       {!showWelcomeScreen ? (
         <WindowsTitleBar
           route={route}
-          selectedProjectName={selectedProject?.name ?? null}
+          selectedProjectName={workspaceProject?.name ?? selectedProject?.name ?? null}
           activeThreadTitle={activeThread?.title ?? null}
+          workspaceAction={route === 'thread' ? titlebarWorkspaceAction : null}
           isAgentWorking={Boolean(activeRunId)}
           collaboration={collaboration}
           appUpdateState={appUpdateState}
-          hasActiveRun={hasActiveRun}
-          queuedUpdateInstallKey={queuedUpdateInstallKey}
-          openSettings={openSettingsSection}
+          openSettings={toggleTitlebarSettingsSection}
+          openAutomations={openAutomationsRoute}
           openSkills={openSkillsRoute}
           pressUpdateAction={pressTitlebarUpdateAction}
         />
       ) : null}
 
       <div className="app-workspace-shell">
-        {shellReady && !showWelcomeScreen ? (
+        {showPrimarySidebar ? (
           <div
             ref={sidebarShellRef}
             className={`sidebar-shell flex shrink-0${sidebarCollapsed ? ' is-collapsed' : ''}${sidebarResizing ? ' is-resizing' : ''}`}
@@ -5604,17 +4525,19 @@ export function App() {
               openProjectFromPicker={openProjectFromPicker}
               createThreadForProject={createThreadForProject}
               renameProject={renameProject}
+              archiveProjectThreads={archiveProjectThreads}
               removeProject={removeProject}
               removingProjectId={removingProjectId}
               setProjectTrust={setProjectTrust}
               projects={projects}
-              selectedProjectId={selectedProjectId}
               expandedProjectIds={expandedProjectIds}
               toggleProjectThreads={toggleProjectThreads}
+              collapseAllProjectThreads={collapseAllProjectThreads}
               reorderProjects={reorderProjects}
               threadsByProject={threadsByProject}
               subagentsByThreadId={subagentsByThreadId}
               activeThreadId={activeThread?.id ?? null}
+              activeThreadActions={activeThreadActions}
               openThread={openThread}
               archiveThread={archiveThread}
               openProjectFolderLocation={openProjectFolderLocation}
@@ -5624,7 +4547,7 @@ export function App() {
             />
           </div>
         ) : null}
-        {shellReady && !showWelcomeScreen && !sidebarCollapsed ? (
+        {showPrimarySidebar && !sidebarCollapsed ? (
           <div
             data-testid="sidebar-resize-rail"
             className={cx('sidebar-resize-rail', sidebarResizing && 'is-active')}
@@ -5644,7 +4567,7 @@ export function App() {
         ) : null}
 
         <main
-          className={`main-surface min-w-0 flex-1 overflow-hidden${loading ? ' main-surface-loading' : ''}${showWelcomeScreen ? ' main-surface-welcome' : ''}${shellReady && !showWelcomeScreen && (route === 'thread' || route === 'collab') ? ' main-surface-thread' : ''}${shellReady && !showWelcomeScreen && route === 'settings' ? ' main-surface-settings' : ''}`}
+          className={`main-surface min-w-0 flex-1 overflow-hidden${loading ? ' main-surface-loading' : ''}${showWelcomeScreen ? ' main-surface-welcome' : ''}${shellReady && !showWelcomeScreen && route === 'thread' ? ' main-surface-thread' : ''}${shellReady && !showWelcomeScreen && route === 'settings' ? ' main-surface-settings' : ''}`}
         >
         {loading ? (
           <div className="loading-state loading-state-boot">
@@ -5676,340 +4599,72 @@ export function App() {
           />
         ) : null}
         {shellReady && !showWelcomeScreen && route === 'thread' ? (
-          <section className="flex h-full min-h-0 flex-1 flex-col xl:flex-row">
-          <section className="thread-view flex min-h-0 min-w-0 flex-1 flex-col gap-0">
-            {activeThread || workspaceProject ? (
-              <header className="thread-header flex items-start justify-between gap-4 px-7 py-5">
-                <div className="thread-header-main min-w-0 flex-1">
-                  <div className="thread-title-row flex min-w-0 items-center gap-2">
-                    {activeThread ? (
-                      <>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <h2 className="truncate text-[28px] font-semibold tracking-[-0.04em] text-[color:var(--ui-text-title)]">{normalizeDisplayText(activeThread.title)}</h2>
-                          </TooltipTrigger>
-                          <TooltipContent>{normalizeDisplayText(activeThread.title)}</TooltipContent>
-                        </Tooltip>
-                        <span className="thread-title-separator text-[color:var(--ui-text-subtle)]" aria-hidden="true">·</span>
-                      </>
-                    ) : (
-                      <h2 className="truncate text-[28px] font-semibold tracking-[-0.04em] text-[color:var(--ui-text-title)]">New thread</h2>
-                    )}
-                    {workspaceProject?.folderPath ? (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <p
-                            className={cx(
-                              'thread-eyebrow truncate text-[13px] font-medium text-[color:var(--ui-text-muted)]',
-                              showWorkspaceRepairAction && 'thread-eyebrow-missing'
-                            )}
-                          >
-                            {workspaceProject.name}
-                          </p>
-                        </TooltipTrigger>
-                        <TooltipContent>{workspaceProject.folderPath}</TooltipContent>
-                      </Tooltip>
-                    ) : (
-                      <p className="thread-eyebrow truncate text-[13px] font-medium text-[color:var(--ui-text-muted)]">{workspaceProject?.name ?? 'Workspace'}</p>
-                    )}
-                  </div>
-                </div>
-                {showWorkspaceRepairAction ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <ActionButton
-                        size="compact"
-                        tone="quiet"
-                        className="thread-header-trust-button"
-                        leadingIcon={<FolderIcon />}
-                        onClick={() => void repairWorkspaceProjectPath(workspaceProject)}
-                      >
-                        Repair path
-                      </ActionButton>
-                    </TooltipTrigger>
-                    <TooltipContent className="thread-header-trust-tooltip">
-                      This thread still points to a missing workspace folder. Pick the current folder for this project before running tools again.
-                    </TooltipContent>
-                  </Tooltip>
-                ) : showWorkspaceTrustAction ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <ActionButton
-                        size="compact"
-                        tone="quiet"
-                        className="thread-header-trust-button"
-                        leadingIcon={<AccessIcon />}
-                        onClick={() => void trustProject(true)}
-                      >
-                        Trust workspace
-                      </ActionButton>
-                    </TooltipTrigger>
-                    <TooltipContent className="thread-header-trust-tooltip">
-                      Allow Vicode to work with files in this project folder, run coding tasks here, and set up workspace files like AGENTS.md and MEMORY.md. This applies to the whole project, not just this thread.
-                    </TooltipContent>
-                  </Tooltip>
-                ) : showWorkspaceBootstrapAction ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <ActionButton
-                        size="compact"
-                        tone="quiet"
-                        className="thread-header-trust-button"
-                        data-testid="workspace-bootstrap-open"
-                        onClick={() => void openWorkspaceBootstrap()}
-                      >
-                        Workspace
-                      </ActionButton>
-                    </TooltipTrigger>
-                    <TooltipContent className="thread-header-trust-tooltip">
-                      Vicode will automatically draft workspace instruction and memory files for this trusted project workspace. You can review and edit them before saving, but that is optional.
-                    </TooltipContent>
-                  </Tooltip>
-                ) : null}
-                {activeThread ? (
-                  <Menu>
-                    <MenuTrigger asChild>
-                      <IconButton className="thread-header-menu-button" label="Thread actions">
-                        <MoreIcon />
-                      </IconButton>
-                    </MenuTrigger>
-                    <MenuContent align="end" className="thread-header-menu">
-                      {selectedProject?.folderPath ? (
-                        <MenuItem onSelect={() => void openSelectedProjectFolder()}>
-                          <MenuItemLabel>Open folder location</MenuItemLabel>
-                          <FolderIcon />
-                        </MenuItem>
-                      ) : null}
-                      <MenuItem onSelect={() => void renameThread()}>
-                        <MenuItemLabel>Rename thread</MenuItemLabel>
-                        <EditIcon />
-                      </MenuItem>
-                      <MenuItem onSelect={() => void duplicateThread()}>
-                        <MenuItemLabel>Duplicate thread</MenuItemLabel>
-                        <CopyIcon />
-                      </MenuItem>
-                      <MenuItem onSelect={() => void retryThread()}>
-                        <MenuItemLabel>Retry last prompt</MenuItemLabel>
-                        <RefreshIcon />
-                      </MenuItem>
-                      <MenuSeparator />
-                      <MenuItem onSelect={() => void archiveThread()}>
-                        <MenuItemLabel>Archive thread</MenuItemLabel>
-                        <ArchiveIcon />
-                      </MenuItem>
-                      <MenuItem className="ui-menu-item-danger" onSelect={() => setDeleteDialogOpen(true)}>
-                        <MenuItemLabel>Delete permanently</MenuItemLabel>
-                        <TrashIcon />
-                      </MenuItem>
-                    </MenuContent>
-                  </Menu>
-                ) : null}
-              </header>
-            ) : null}
-
-            <div className="thread-column flex min-h-0 flex-1 flex-col overflow-hidden">
-              <section
-                className={cx(
-                  'transcript flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-7 pb-6 pt-5',
-                  showTranscriptRailCentered && 'items-center justify-center pb-0 pt-0'
-                )}
-                ref={transcriptRef}
-                onWheelCapture={() => {
-                  markTranscriptUserScrollIntent();
-                }}
-                onTouchMoveCapture={() => {
-                  markTranscriptUserScrollIntent();
-                }}
-                onScroll={(event) => {
-                  if (transcriptProgrammaticScrollRef.current) {
-                    return;
-                  }
-                  if (!transcriptUserScrollIntentRef.current) {
-                    return;
-                  }
-                  transcriptAutoFollowRef.current = isTranscriptNearBottom(event.currentTarget);
-                }}
-              >
-                <div
-                  className={cx(
-                    'thread-transcript-rail mx-auto flex w-full max-w-[980px] flex-col gap-5',
-                    showTranscriptRailCentered && 'min-h-full flex-1 items-center justify-center'
-                  )}
-                >
-                  {activeThread ? (
-                    <>
-                      {transcriptTurns.length > 0 ? transcriptTurns.map((turn) => (
-                        <div key={turn.id} className="thread-transcript-entry flex flex-col gap-4">
-                          {turn.role === 'assistant' && turn.runId && runTranscriptItemsByRunId[turn.runId]?.length > 0 ? (
-                            <RunTranscriptTimeline
-                              items={runTranscriptItemsByRunId[turn.runId]}
-                              skills={skills}
-                              runState={runActivityByRunId[turn.runId]?.state ?? null}
-                            />
-                          ) : turn.role === 'assistant' && !turn.content.trim() ? null : (
-                            <article
-                              className={cx(
-                                `turn turn-${turn.role}`,
-                                'flex flex-col gap-1',
-                                turn.role === 'user' && 'items-end'
-                              )}
-                            >
-                              {turn.role === 'assistant' ? (
-                                <MessageResponse
-                                  className="turn-content turn-content-assistant text-[15px] leading-7 text-[color:var(--ui-text-title)]"
-                                  normalizeSource
-                                >
-                                  {turn.content || ''}
-                                </MessageResponse>
-                              ) : (
-                                <div className="turn-user-stack flex w-full max-w-[860px] flex-col items-end gap-3">
-                                    {extractTurnImageAttachments(turn.metadata).length > 0 ? (
-                                      <div className="turn-image-strip flex flex-wrap justify-end gap-2">
-                                        {extractTurnImageAttachments(turn.metadata).map((attachment) => (
-                                          <button
-                                            key={attachment.id}
-                                            type="button"
-                                            className="turn-image-thumb overflow-hidden rounded-[18px] border border-[color:var(--ui-border)] bg-[color:var(--ui-alpha-04)] p-0 transition-colors hover:border-[color:var(--ui-border-strong)] hover:bg-[color:var(--ui-alpha-06)]"
-                                            onClick={() => setActiveImageAttachment(attachment)}
-                                            aria-label={`Open ${attachment.name}`}
-                                          >
-                                            <img className="block h-24 w-24 object-cover" src={attachment.dataUrl} alt={attachment.name} />
-                                          </button>
-                                        ))}
-                                      </div>
-                                    ) : null}
-                                    {extractTurnTextAttachments(turn.metadata).length > 0 ? (
-                                      <div className="turn-text-attachment-strip flex flex-wrap justify-end gap-2">
-                                        {extractTurnTextAttachments(turn.metadata).map((attachment) => (
-                                          <button
-                                            key={attachment.id}
-                                            type="button"
-                                            className="turn-text-attachment-chip inline-flex max-w-[360px] items-center gap-2 rounded-[18px] border border-[color:var(--ui-border)] bg-[color:var(--ui-alpha-04)] px-3 py-2 text-left transition-colors hover:border-[color:var(--ui-border-strong)] hover:bg-[color:var(--ui-alpha-06)]"
-                                            onClick={() => void window.vicode.app.revealPath(attachment.absolutePath)}
-                                            aria-label={`Reveal ${attachment.name}`}
-                                          >
-                                            <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-xl border border-white/8 bg-white/[0.04] text-zinc-300">
-                                              <BookIcon />
-                                            </span>
-                                            <span className="flex min-w-0 flex-1 flex-col">
-                                              <span className="truncate text-[12px] font-medium text-[color:var(--ui-text-title)]">{attachment.name}</span>
-                                              <span className="truncate text-[11px] text-[color:var(--ui-text-muted)]">
-                                                {attachment.relativePath} · {attachment.charCount.toLocaleString()} chars
-                                              </span>
-                                            </span>
-                                          </button>
-                                        ))}
-                                      </div>
-                                    ) : null}
-                                    <MessageResponse className="turn-content turn-content-user rounded-[22px] bg-[image:var(--ui-panel-gradient-strong)] px-5 py-4 text-[15px] leading-7 text-[color:var(--ui-text-title)]">
-                                      {turn.content}
-                                    </MessageResponse>
-                                  </div>
-                                )}
-                              </article>
-                            )
-                          }
-                          {turn.role === 'user' &&
-                          activeRunActivity &&
-                          activeRunActivity.state === 'running' &&
-                          !hasAssistantTurnForRun(activeThread, activeDisplayedRunId) &&
-                          turn.id === transcriptRunAnchorTurnId ? (
-                            activeRunTranscriptItems.length > 0 ? (
-                              <RunTranscriptTimeline
-                                items={activeRunTranscriptItems}
-                                skills={skills}
-                                runState={activeRunActivity.state}
-                              />
-                            ) : (
-                              <RunActivityPanel activity={activeRunActivity} />
-                            )
-                          ) : null}
-                        </div>
-                      )) : emptyActiveThreadState}
-                      {activeSubagents.length > 0 ? (
-                        <div className="thread-transcript-entry thread-transcript-subagent-entry flex flex-col gap-4">
-                          <ThreadSubagentActivityCard
-                            subagents={activeSubagents}
-                            resolveThreadTitle={resolveThreadTitle}
-                          />
-                        </div>
-                      ) : null}
-                    </>
-                  ) : startupThreadRestoreState === 'pending' ? (
-                    restoringThreadState
-                  ) : (
-                    emptyThreadHero
-                  )}
-                </div>
-              </section>
-
-              <div className="thread-composer-stack flex shrink-0 flex-col px-7 py-5">
-                <div className="thread-composer-rail flex w-full max-w-[980px] flex-col gap-3">
-                  {activeRunActivity && (activeRunActivity.state === 'failed' || activeRunActivity.state === 'aborted') ? (
-                    <RunActivityPanel activity={activeRunActivity} showTimeline={false} />
-                  ) : null}
-                  <LiveRunStatus activity={activeRunActivity} />
-                  {selectedProject ? (
-                    <>
-                      <ComposerPanel
-                        activityItems={composerActivityItems}
-                        prompt={composer.prompt}
-                        setPrompt={(prompt) => setComposer((current) => ({ ...current, prompt }))}
-                        imageAttachments={composer.imageAttachments}
-                        textAttachments={composer.textAttachments}
-                        canCreateTextAttachments={Boolean(composerProjectId && workspaceProject?.folderPath && workspaceProject.trusted)}
-                        addImageFiles={addComposerImageFiles}
-                        addTextAttachmentFromPaste={addComposerTextAttachment}
-                        removeImageAttachment={removeComposerImageAttachment}
-                        removeTextAttachment={removeComposerTextAttachment}
-                        composerRef={composerRef}
-                        providers={visibleProviders}
-                        providerId={composer.providerId}
-                        modelId={composer.modelId}
-                        composerMode={composer.mode}
-                        contextWindow={composerContextWindow}
-                        executionPermission={composer.executionPermission}
-                        runtimeCommandPolicy={workspaceProject?.runtimeCommandPolicy}
-                        runtimeNetworkPolicy={workspaceProject?.runtimeNetworkPolicy}
-                        onSelectPermission={(executionPermission) => void setExecutionPermission(executionPermission)}
-                        effort={composerEffort}
-                        thinkingEnabled={composer.thinkingEnabled}
-                        installedSkills={installedComposerSkills}
-                        availableSkills={availableComposerSkills}
-                        attachedSkillIds={attachedSkillIds}
-                        toggleAttachedSkill={toggleAttachedSkill}
-                        selectComposerModel={selectComposerModel}
-                        selectComposerEffort={selectComposerEffort}
-                        selectProviderThinking={selectProviderThinking}
-                        refreshProvider={refreshProvider}
-                        openProviderSettings={() => openSettingsSection('providers')}
-                        openProjectFromPicker={openProjectFromPicker}
-                        createThread={createThread}
-                        toggleComposerMode={toggleComposerMode}
-                        handleComposerVoice={handleComposerVoice}
-                        voiceState={voiceState}
-                        voiceAvailable={isVoiceDictationSupported()}
-                        voiceElapsedLabel={formatVoiceElapsed(voiceElapsedMs)}
-                        voiceLevel={voiceLevel}
-                        pendingNativeCommandId={pendingNativeCommandId}
-                        setPendingNativeCommandId={setPendingNativeCommandId}
-                        stopPrompt={stopPrompt}
-                        enhancePrompt={enhanceComposerPrompt}
-                        enhancingPrompt={enhancingPrompt}
-                        submittingPrompt={composerSubmitting || plannerSubmitting}
-                        submitPrompt={submitPrompt}
-                        activeRunId={activeDisplayedRunId}
-                        showToast={showToast}
-                      />
-                    </>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          </section>
-          </section>
+          <ThreadRouteContainer
+            activeDisplayedRunId={activeDisplayedRunId}
+            activeRunActivity={activeRunActivity}
+            activeRunTranscriptItems={activeRunTranscriptItems}
+            activeSubagents={activeSubagents}
+            activeThread={activeThread}
+            addComposerImageFiles={addComposerImageFiles}
+            addComposerTextAttachment={addComposerTextAttachment}
+            attachedSkillIds={attachedSkillIds}
+            availableComposerSkills={availableComposerSkills}
+            canCreateTextAttachments={Boolean(composerProjectId && workspaceProject?.folderPath && workspaceProject.trusted)}
+            composer={composer}
+            composerActivityItems={composerActivityItems}
+            composerContextWindow={composerContextWindow}
+            composerEffort={composerEffort}
+            composerProjectId={composerProjectId}
+            composerRef={composerRef}
+            composerSubmitting={composerSubmitting}
+            createThread={createThread}
+            emptyThreadHero={emptyThreadHero}
+            enhanceComposerPrompt={enhanceComposerPrompt}
+            enhancingPrompt={enhancingPrompt}
+            handleComposerVoice={handleComposerVoice}
+            installedComposerSkills={installedComposerSkills}
+            markTranscriptUserScrollIntent={markTranscriptUserScrollIntent}
+            openProviderSettings={() => openSettingsSection('providers')}
+            openProjectFromPicker={openProjectFromPicker}
+            pendingNativeCommandId={pendingNativeCommandId}
+            plannerSubmitting={plannerSubmitting}
+            refreshProvider={refreshProvider}
+            removeComposerImageAttachment={removeComposerImageAttachment}
+            removeComposerTextAttachment={removeComposerTextAttachment}
+            resolveThreadTitle={resolveThreadTitle}
+            restoringThreadState={restoringThreadState}
+            runActivityByRunId={runActivityByRunId}
+            runTranscriptItemsByRunId={runTranscriptItemsByRunId}
+            selectedProject={selectedProject}
+            selectComposerEffort={selectComposerEffort}
+            selectComposerModel={selectComposerModel}
+            selectProviderThinking={selectProviderThinking}
+            setActiveImageAttachment={setActiveImageAttachment}
+            setComposerPrompt={(prompt) => setComposer((current) => ({ ...current, prompt }))}
+            setExecutionPermission={setExecutionPermission}
+            setPendingNativeCommandId={setPendingNativeCommandId}
+            showToast={showToast}
+            showTranscriptRailCentered={showTranscriptRailCentered}
+            skills={skills}
+            startupThreadRestoreState={startupThreadRestoreState}
+            stopPrompt={stopPrompt}
+            submitPrompt={submitPrompt}
+            thinkingEnabled={composer.thinkingEnabled}
+            toggleAttachedSkill={toggleAttachedSkill}
+            toggleComposerMode={toggleComposerMode}
+            transcriptRef={transcriptRef}
+            transcriptRunAnchorTurnId={transcriptRunAnchorTurnId}
+            transcriptTurns={transcriptTurns}
+            updateTranscriptAutoFollow={updateTranscriptAutoFollow}
+            visibleProviders={visibleProviders}
+            voiceAvailable={voiceAvailable}
+            voiceElapsedLabel={formatVoiceElapsed(voiceElapsedMs)}
+            voiceLevel={voiceLevel}
+            voiceState={voiceState}
+            workspaceProject={workspaceProject}
+          />
         ) : null}
-        {COLLABORATION_SHELL_ENABLED && shellReady && !showWelcomeScreen && route === 'collab' ? (
+        {COLLABORATION_ENABLED && shellReady && !showWelcomeScreen && route === 'collab' ? (
           <ChatUtilityPane
             standalone
             onBack={() => setRoute('thread')}
@@ -6039,7 +4694,7 @@ export function App() {
           />
         ) : null}
         {shellReady && route === 'settings' ? (
-        <SettingsView
+        <SettingsRouteContainer
             section={settingsSection}
             setSection={setSettingsSection}
             onBack={toggleSettingsRoute}
@@ -6066,8 +4721,6 @@ export function App() {
             clearAllProviderAuth={clearAllProviderAuth}
             appMeta={appMeta}
             appUpdateState={appUpdateState}
-            hasActiveRun={hasActiveRun}
-            queuedUpdateInstallKey={queuedUpdateInstallKey}
             checkForAppUpdates={checkForAppUpdates}
             restartToUpdate={requestRestartToUpdate}
             storageDiagnostics={storageDiagnostics}
@@ -6079,6 +4732,10 @@ export function App() {
             saveProjectRuntimeNetworkPolicy={saveProjectRuntimeNetworkPolicy}
             workspaceBootstrapStatus={workspaceBootstrapStatus}
             openWorkspaceBootstrap={openWorkspaceBootstrap}
+            activeThreadTitle={activeThread?.title ?? null}
+            captureDailyNoteFromThread={captureDailyNoteFromThread}
+            promoteThreadToMemory={promoteThreadToMemory}
+            suggestUserPreferenceFromThread={suggestUserPreferenceFromThread}
             archivedThreads={archivedThreads}
             projects={projects}
             restoreArchivedThread={restoreArchivedThread}
@@ -6088,7 +4745,7 @@ export function App() {
         {shellReady && route === 'ui-dev' && import.meta.env.DEV ? <UiDevSurface /> : null}
 
         {shellReady && route === 'skills' ? (
-          <SkillsView
+          <SkillsRouteContainer
             skills={skills}
             selectedProject={selectedProject}
             composerProviderId={composer.providerId}
@@ -6105,571 +4762,76 @@ export function App() {
             showToast={showToast}
           />
         ) : null}
-        {shellReady && (route === 'automations' || route === 'build-control') ? (
-          <section className="catalog-view automation-view">
-            <div className="automation-page-shell">
-              <header className="view-header automation-view-header flex items-start justify-between gap-4">
-                <div>
-                  <h2>{route === 'build-control' ? 'Autonomous Builds' : 'Automations'}</h2>
-                  <p>{route === 'build-control' ? 'Prompt-driven build plans with visible planner, builder, and finisher threads.' : 'Manual and while-open schedules in v1.'}</p>
-                </div>
-                <div className="automation-view-header-actions">
-                  {route === 'automations' ? (
-                    <PrimaryButton className="automation-toolbar-primary" size="compact" leadingIcon={<PlusIcon />} onClick={openAutomationEditor}>
-                      Create automation
-                    </PrimaryButton>
-                  ) : route === 'build-control' ? (
-                    <PrimaryButton className="automation-toolbar-primary" size="compact" leadingIcon={<PlayIcon />} onClick={openBuildPlanDialog}>
-                      New build plan
-                    </PrimaryButton>
-                  ) : null}
-                  <IconButton className="automation-toolbar-close rounded-xl" label="Close autonomous builds" onClick={() => setRoute('thread')}>
-                    <CloseIcon />
-                  </IconButton>
-                </div>
-              </header>
-              <div className="automation-route-shell">
-                <section className="automation-main-column">
-                  {route === 'build-control' ? (
-                    <VicodeBuildControlView
-                      snapshot={vicodeBuildSnapshot}
-                      verification={vicodeBuildVerification}
-              busyAction={vicodeBuildBusyAction}
-              onRefresh={() => void refreshVicodeBuildSnapshot()}
-              onCreatePlan={openBuildPlanDialog}
-                      onClearInactivePlans={clearInactiveVicodeBuildPlans}
-                      onSetTeamPaused={setVicodeBuildTeamPaused}
-                      onWakeLane={wakeVicodeBuildLane}
-                      onRetryLane={retryVicodeBuildLane}
-                      onOpenThread={openVicodeBuildLaneThread}
-                      onRunVerification={runVicodeBuildVerification}
-                    />
-                  ) : (
-                    <>
-                      <section className="automation-template-group">
-                        <div className="automation-template-group-header">
-                          <h3>Manual automations</h3>
-                        </div>
-                      </section>
-                      <section className="automation-template-section">
-                        {automationTemplateGroups.map(([group, templates]) => (
-                          <div key={group} className="automation-template-group">
-                            <div className="automation-template-group-header">
-                              <h3>{group}</h3>
-                            </div>
-                            <div className="automation-template-grid">
-                              {templates.map((template) => (
-                                <article key={template.id} className="automation-template-card">
-                                  <div className="automation-template-copy">
-                                    <strong>{template.name}</strong>
-                                    <p>{template.summary}</p>
-                                  </div>
-                                  <ActionButton className="automation-template-action" size="compact" tone="quiet" onClick={() => applyAutomationTemplate(template)}>
-                                    Use template
-                                  </ActionButton>
-                                </article>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </section>
-                      <section className="automation-list">
-                {reviewItems.length > 0 ? (
-                  <div ref={pendingReviewSectionRef} className="panel pending-review-panel" data-testid="pending-review-section">
-                    <div className="pending-review-header">
-                      <div className="pending-review-header-copy">
-                        <h3>Pending review</h3>
-                        <p>Approve queued automation runs and any remaining manual review items.</p>
-                      </div>
-                      <StatusPill tone="warning">{reviewItems.length} pending</StatusPill>
-                    </div>
-                    {reviewItems.map((reviewItem) => {
-                      const job = jobs.find((item) => item.id === reviewItem.jobId) ?? null;
-                      const presentation = describeReviewItem(reviewItem, job);
-                      const persistedDraftContent = String(reviewItem.details.content ?? '');
-                      const draftContent = reviewDraftEdits[reviewItem.id] ?? persistedDraftContent;
-                      const hasUnsavedDraftChanges = presentation.isManualWrite && draftContent.trim() !== persistedDraftContent.trim();
-                      return (
-                        <article
-                          key={reviewItem.id}
-                          className="automation-card review-card"
-                          data-testid={`pending-review-card-${reviewItem.id}`}
-                        >
-                          <div className="skill-card-top review-card-top">
-                            <div className="review-card-copy">
-                              <div className="review-card-eyebrow">
-                                <span className="review-card-eyebrow-icon" aria-hidden="true">
-                                  {renderReviewIcon(presentation.icon)}
-                                </span>
-                                <span>{presentation.kindLabel}</span>
-                              </div>
-                              <h3>{presentation.title}</h3>
-                              <p>{presentation.summary}</p>
-                            </div>
-                            <StatusPill tone="warning">pending review</StatusPill>
-                          </div>
-                          <div className="review-card-meta-list">
-                            {presentation.meta.map((entry) => (
-                              <div key={`${reviewItem.id}-${entry.label}-${entry.value}`} className="review-card-meta-pill">
-                                <span className="review-card-meta-label">{entry.label}</span>
-                                <span className="review-card-meta-value">{entry.value}</span>
-                              </div>
-                            ))}
-                          </div>
-                          {presentation.isManualWrite ? (
-                            <SurfaceCard className="review-card-draft">
-                              <div className="review-card-draft-header">
-                                <div className="review-card-draft-copy">
-                                  <strong>Proposed contents</strong>
-                                  <span>{String(reviewItem.details.relativePath ?? 'workspace file')}</span>
-                                </div>
-                                <div className="review-card-draft-actions">
-                                  {hasUnsavedDraftChanges ? (
-                                    <span className="review-card-draft-status">Edited locally</span>
-                                  ) : null}
-                                  <ActionButton
-                                    size="compact"
-                                    tone="quiet"
-                                    onClick={() => void saveReviewDraft(reviewItem)}
-                                    leadingIcon={<SaveIcon />}
-                                    disabled={!hasUnsavedDraftChanges || reviewDraftSavingId === reviewItem.id}
-                                  >
-                                    {reviewDraftSavingId === reviewItem.id ? 'Saving...' : 'Save draft changes'}
-                                  </ActionButton>
-                                </div>
-                              </div>
-                              <TextArea
-                                rows={8}
-                                className="workspace-bootstrap-editor review-card-editor"
-                                value={draftContent}
-                                onChange={(event) =>
-                                  setReviewDraftEdits((current) => ({
-                                    ...current,
-                                    [reviewItem.id]: event.target.value
-                                  }))
-                                }
-                              />
-                            </SurfaceCard>
-                          ) : null}
-                          <div className="automation-actions">
-                            <ActionButton onClick={() => void rejectReview(reviewItem.id)} leadingIcon={<CloseIcon />}>
-                              Reject
-                            </ActionButton>
-                            <PrimaryButton
-                              onClick={() => void approveReview(reviewItem.id)}
-                              leadingIcon={<PlayIcon />}
-                              disabled={hasUnsavedDraftChanges}
-                            >
-                              {presentation.isManualWrite
-                                ? 'Approve and write'
-                                : 'Approve and run'}
-                            </PrimaryButton>
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-                ) : null}
-                {automations.map((automation) => (
-                  <article key={automation.id} className="automation-card">
-                    <div className="skill-card-top">
-                      <div>
-                        <h3>{automation.name}</h3>
-                        <p>{automation.promptTemplate}</p>
-                      </div>
-                      <StatusPill tone={automation.enabled ? 'connected' : 'disconnected'}>{automation.enabled ? 'enabled' : 'disabled'}</StatusPill>
-                    </div>
-                    <div className="skill-meta">
-                      <span>{selectedProject?.id === automation.projectId ? selectedProject.name : automation.projectId}</span>
-                      <span>{automation.providerId}</span>
-                      <span>{automation.modelId}</span>
-                      {automation.skillId ? (
-                        <span>{skills.find((skill) => skill.id === automation.skillId)?.name ?? 'Attached skill'}</span>
-                      ) : null}
-                      <span>{formatAutomationSchedule(automation)}</span>
-                      <span>{`Last ${formatTime(automation.lastRunAt)}`}</span>
-                      {automation.scheduleType === 'interval_while_app_open' ? (
-                        <span>{`Next ${formatTime(automation.nextRunAt)}`}</span>
-                      ) : null}
-                    </div>
-                    <div className="automation-actions">
-                      <ActionButton onClick={() => void toggleAutomation(automation.id, !automation.enabled)} leadingIcon={automation.enabled ? <CloseIcon /> : <CheckIcon />}>
-                        {automation.enabled ? 'Disable' : 'Enable'}
-                      </ActionButton>
-                      <ActionButton onClick={() => editAutomation(automation)} leadingIcon={<EditIcon />}>
-                        Edit
-                      </ActionButton>
-                      <ActionButton onClick={() => void openAutomationHistory(automation.id)} leadingIcon={<TaskIcon />}>
-                        History
-                      </ActionButton>
-                      <PrimaryButton onClick={() => void runAutomation(automation.id)} leadingIcon={<PlayIcon />}>Run now</PrimaryButton>
-                      <DangerButton onClick={() => setAutomationDeleteId(automation.id)} leadingIcon={<TrashIcon />}>
-                        Delete
-                      </DangerButton>
-                    </div>
-                  </article>
-                ))}
-                      </section>
-                    </>
-                  )}
-                </section>
-              </div>
-            </div>
-          </section>
+        {shellReady && route === 'build-control' ? (
+          <BuildControlRouteContainer
+            snapshot={vicodeBuildSnapshot}
+            verification={vicodeBuildVerification}
+            busyAction={vicodeBuildBusyAction}
+            onRefresh={() => void refreshVicodeBuildSnapshot()}
+            onCreatePlan={openBuildPlanDialog}
+            onClearInactivePlans={clearInactiveVicodeBuildPlans}
+            onSetTeamPaused={setVicodeBuildTeamPaused}
+            onWakeLane={wakeVicodeBuildLane}
+            onRetryLane={retryVicodeBuildLane}
+            onOpenThread={openVicodeBuildLaneThread}
+            onRunVerification={runVicodeBuildVerification}
+            onBack={() => setRoute('thread')}
+            dialogOpen={buildPlanDialogOpen}
+            setDialogOpen={setBuildPlanDialogOpen}
+            closeDialog={closeBuildPlanDialog}
+            launchBuildPlanSetupThread={launchBuildPlanSetupThread}
+            buildPlanLaunch={buildPlanLaunch}
+            setBuildPlanLaunch={setBuildPlanLaunch}
+            visibleProviders={visibleProviders}
+            buildPlanLaunchModelOptions={buildPlanLaunchModelOptions}
+            buildPlanLaunchProvider={buildPlanLaunchProvider}
+          />
+        ) : null}
+        {shellReady && route === 'automations' ? (
+          <AutomationsRouteContainer
+            onBack={() => setRoute('thread')}
+            selectedProject={selectedProject ? { id: selectedProject.id, name: selectedProject.name } : null}
+            automations={automations}
+            skills={skills}
+            reviewItems={reviewItems}
+            jobs={jobs}
+            reviewDraftEdits={reviewDraftEdits}
+            setReviewDraftEdits={setReviewDraftEdits}
+            reviewDraftSavingId={reviewDraftSavingId}
+            saveReviewDraft={saveReviewDraft}
+            approveReview={approveReview}
+            rejectReview={rejectReview}
+            openAutomationEditor={openAutomationEditor}
+            editAutomation={editAutomation}
+            openAutomationHistory={openAutomationHistory}
+            toggleAutomation={toggleAutomation}
+            runAutomation={runAutomation}
+            automationEditorOpen={automationEditorOpen}
+            closeAutomationEditor={closeAutomationEditor}
+            setAutomationEditorOpen={setAutomationEditorOpen}
+            automationDraft={automationDraft}
+            setAutomationDraft={setAutomationDraft}
+            createAutomation={createAutomation}
+            visibleProviders={visibleProviders}
+            automationModelOptions={automationModelOptions}
+            availableAutomationSkills={availableAutomationSkills}
+            automationHistoryId={automationHistoryId}
+            setAutomationHistoryId={setAutomationHistoryId}
+            automationHistoryTarget={automationHistoryTarget}
+            automationHistoryRuns={automationHistoryRuns}
+            setAutomationHistoryRuns={setAutomationHistoryRuns}
+            automationHistoryLoading={automationHistoryLoading}
+            setAutomationHistoryLoading={setAutomationHistoryLoading}
+            openThread={openThread}
+            automationDeleteId={automationDeleteId}
+            setAutomationDeleteId={setAutomationDeleteId}
+            automationDeleteTarget={automationDeleteTarget}
+            deleteAutomation={deleteAutomation}
+            applyAutomationTemplate={applyAutomationTemplate}
+          />
         ) : null}
       </main>
       </div>
-
-      <ModalDialog
-        open={buildPlanDialogOpen}
-        onOpenChange={(open) => {
-          if (!open) {
-            closeBuildPlanDialog();
-            return;
-          }
-          setBuildPlanDialogOpen(true);
-        }}
-        title="Start build plan"
-        description="Launch a dedicated setup thread. That thread will ask clarifying questions if needed, then shape the planner, builder, and finisher flow."
-        className="automation-editor-dialog build-plan-launch-dialog"
-        actions={
-          <>
-            <ActionButton tone="quiet" onClick={closeBuildPlanDialog}>
-              Cancel
-            </ActionButton>
-            <PrimaryButton
-              onClick={() => void launchBuildPlanSetupThread()}
-              leadingIcon={<PlayIcon />}
-              disabled={vicodeBuildBusyAction === 'launch-plan'}
-            >
-              {vicodeBuildBusyAction === 'launch-plan' ? 'Starting...' : 'Start setup thread'}
-            </PrimaryButton>
-          </>
-        }
-      >
-        <div className="automation-editor-form">
-          <label className="settings-field">
-            <span>Goal</span>
-          <TextArea
-            rows={7}
-            value={buildPlanLaunch.goal}
-            onChange={(event) =>
-              setBuildPlanLaunch((current) => ({
-                ...current,
-                goal: event.target.value
-              }))
-            }
-            placeholder="Describe what you want this build plan to accomplish. The setup thread will turn this into a concrete planner, builder, and finisher workflow."
-          />
-          </label>
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="settings-field">
-              <span>Setup provider</span>
-              <Menu>
-                <MenuTrigger asChild>
-                  <MenuButton
-                    className="h-10 w-full rounded-[var(--ui-radius-lg)] px-3 text-left"
-                    trailingIcon={<ChevronDownIcon />}
-                  >
-                    {buildPlanLaunchProvider
-                      ? `${providerDisplayName(buildPlanLaunch.providerId)} / ${providerModelTriggerSummary(buildPlanLaunchProvider, buildPlanLaunchModelOptions.find((model) => model.id === buildPlanLaunch.modelId)?.label ?? null)}`
-                      : providerDisplayName(buildPlanLaunch.providerId)}
-                  </MenuButton>
-                </MenuTrigger>
-                <MenuContent className="composer-menu composer-model-menu build-plan-menu" align="start">
-                  {visibleProviders.map((provider) => (
-                    <MenuSub key={provider.id}>
-                      <MenuSubTrigger className={cx(buildPlanLaunch.providerId === provider.id ? 'is-selected bg-white/[0.06] text-white' : '', 'rounded-xl')}>
-                        <MenuItemLabel>{providerDisplayName(provider.id)}</MenuItemLabel>
-                        <span>{providerModelTriggerSummary(provider, provider.models.find((model) => model.id === buildPlanLaunch.modelId)?.label ?? null)}</span>
-                      </MenuSubTrigger>
-                      <MenuSubContent className="composer-menu composer-submenu composer-model-menu build-plan-menu">
-                        {provider.models.length > 0 ? (
-                          provider.models.map((model) => {
-                            const selected = buildPlanLaunch.providerId === provider.id && buildPlanLaunch.modelId === model.id;
-                            const recommendationLabel = providerModelRecommendationLabel(model.recommendation);
-                            return (
-                              <MenuCheckboxItem
-                                key={`${provider.id}:${model.id}`}
-                                className={cx(selected ? 'is-selected bg-white/[0.06] text-white' : '', 'rounded-xl')}
-                                checked={selected}
-                                onCheckedChange={() => {
-                                  setBuildPlanLaunch((current) => ({
-                                    ...current,
-                                    providerId: provider.id,
-                                    modelId: model.id,
-                                    reasoningEffort:
-                                      current.providerId === provider.id
-                                        ? current.reasoningEffort
-                                        : getProviderMetadata(provider.id).defaultReasoningEffort
-                                  }));
-                                }}
-                              >
-                                <MenuItemLabel>
-                                  <span className="flex items-center gap-2">
-                                    <span>{model.label}</span>
-                                    {recommendationLabel ? (
-                                      <span className={cx('inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em]', modelBadgeClassName(recommendationLabel))}>
-                                        {recommendationLabel}
-                                      </span>
-                                    ) : null}
-                                  </span>
-                                </MenuItemLabel>
-                                {selected ? <CheckIcon /> : null}
-                              </MenuCheckboxItem>
-                            );
-                          })
-                        ) : (
-                          <MenuItem onSelect={(event) => event.preventDefault()} className="rounded-xl">
-                            <MenuItemLabel>No models available</MenuItemLabel>
-                          </MenuItem>
-                        )}
-                      </MenuSubContent>
-                    </MenuSub>
-                  ))}
-                </MenuContent>
-              </Menu>
-            </label>
-            <label className="settings-field">
-              <span>Setup model</span>
-              <Menu>
-                <MenuTrigger asChild>
-                  <MenuButton
-                    className="h-10 w-full rounded-[var(--ui-radius-lg)] px-3 text-left"
-                    trailingIcon={<ChevronDownIcon />}
-                  >
-                    {buildPlanLaunchModelOptions.find((model) => model.id === buildPlanLaunch.modelId)?.label ?? 'Select model'}
-                  </MenuButton>
-                </MenuTrigger>
-                <MenuContent className="composer-menu composer-model-menu build-plan-menu" align="start">
-                  {buildPlanLaunchModelOptions.map((model) => {
-                    const selected = buildPlanLaunch.modelId === model.id;
-                    const recommendationLabel = providerModelRecommendationLabel(model.recommendation);
-                    return (
-                      <MenuCheckboxItem
-                        key={model.id}
-                        className={cx(selected ? 'is-selected bg-white/[0.06] text-white' : '', 'rounded-xl')}
-                        checked={selected}
-                        onCheckedChange={() =>
-                          setBuildPlanLaunch((current) => ({
-                            ...current,
-                            modelId: model.id
-                          }))
-                        }
-                      >
-                        <MenuItemLabel>
-                          <span className="flex items-center gap-2">
-                            <span>{model.label}</span>
-                            {recommendationLabel ? (
-                              <span className={cx('inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em]', modelBadgeClassName(recommendationLabel))}>
-                                {recommendationLabel}
-                              </span>
-                            ) : null}
-                          </span>
-                        </MenuItemLabel>
-                        {selected ? <CheckIcon /> : null}
-                      </MenuCheckboxItem>
-                    );
-                  })}
-                </MenuContent>
-              </Menu>
-            </label>
-          </div>
-          {buildPlanLaunch.providerId === 'openai' ? (
-            <label className="settings-field">
-              <span>Reasoning level</span>
-              <Menu>
-                <MenuTrigger asChild>
-                  <MenuButton
-                    className="h-10 w-full rounded-[var(--ui-radius-lg)] px-3 text-left md:w-[220px]"
-                    trailingIcon={<ChevronDownIcon />}
-                  >
-                    {buildPlanReasoningLabel(buildPlanLaunch.reasoningEffort)}
-                  </MenuButton>
-                </MenuTrigger>
-                <MenuContent className="composer-menu composer-submenu build-plan-menu" align="start">
-                  {(['low', 'medium', 'high', 'xhigh'] as const).map((candidate) => {
-                    const selected = buildPlanLaunch.reasoningEffort === candidate;
-                    return (
-                      <MenuCheckboxItem
-                        key={candidate}
-                        className={cx(selected ? 'is-selected bg-white/[0.06] text-white' : '', 'rounded-xl')}
-                        checked={selected}
-                        onCheckedChange={() =>
-                          setBuildPlanLaunch((current) => ({
-                            ...current,
-                            reasoningEffort: candidate
-                          }))
-                        }
-                      >
-                        <MenuItemLabel>{buildPlanReasoningLabel(candidate)}</MenuItemLabel>
-                        {selected ? <CheckIcon /> : null}
-                      </MenuCheckboxItem>
-                    );
-                  })}
-                </MenuContent>
-              </Menu>
-            </label>
-          ) : null}
-          <p className="text-sm text-[color:var(--ui-text-muted)]">
-            Use the current workspace provider if you want the build-plan conversation to match the rest of the thread flow. The actual planning conversation happens in the setup thread, not in this modal.
-          </p>
-        </div>
-      </ModalDialog>
-
-      <ModalDialog
-        open={automationEditorOpen}
-        onOpenChange={(open) => {
-          if (!open) {
-            closeAutomationEditor();
-            return;
-          }
-          setAutomationEditorOpen(true);
-        }}
-        title={automationDraft.id ? 'Edit automation' : 'Create automation'}
-        description="Saved workflows queue reviewed agent runs for the current project."
-        className="automation-editor-dialog"
-        actions={
-          <>
-            <ActionButton tone="quiet" onClick={closeAutomationEditor}>
-              Cancel
-            </ActionButton>
-            <PrimaryButton onClick={() => void createAutomation()} leadingIcon={<TaskIcon />}>
-              {automationDraft.id ? 'Update automation' : 'Save automation'}
-            </PrimaryButton>
-          </>
-        }
-      >
-        <div className="automation-editor-form">
-          <TextInput
-            placeholder="Name"
-            value={automationDraft.name}
-            onChange={(event) => setAutomationDraft((current) => ({ ...current, name: event.target.value }))}
-          />
-          <div className="automation-readonly-meta">
-            <span className="automation-readonly-label">Project</span>
-            <strong>{selectedProject?.name ?? 'Select a project first'}</strong>
-          </div>
-          <SelectField
-            value={automationDraft.providerId}
-            onChange={(event) => {
-              const nextProviderId = event.target.value as ProviderId;
-              setAutomationDraft((current) => ({
-                ...current,
-                providerId: nextProviderId,
-                modelId: resolveProviderModelId(visibleProviders, nextProviderId, current.modelId),
-                skillId: ''
-              }));
-            }}
-          >
-            {visibleProviders.map((provider) => (
-              <option key={provider.id} value={provider.id}>
-                {provider.label}
-              </option>
-            ))}
-          </SelectField>
-          <SelectField
-            value={automationDraft.modelId}
-            onChange={(event) => setAutomationDraft((current) => ({ ...current, modelId: event.target.value }))}
-          >
-            {automationModelOptions.map((model) => (
-              <option key={model.id} value={model.id}>
-                {model.label}
-              </option>
-            ))}
-          </SelectField>
-          <SelectField
-            value={automationDraft.skillId}
-            onChange={(event) => setAutomationDraft((current) => ({ ...current, skillId: event.target.value }))}
-          >
-            <option value="">No skill attached</option>
-            {availableAutomationSkills.map((skill) => (
-              <option key={skill.id} value={skill.id}>
-                {skill.name}
-              </option>
-            ))}
-          </SelectField>
-          <SelectField
-            value={automationDraft.scheduleType}
-            onChange={(event) =>
-              setAutomationDraft((current) => ({
-                ...current,
-                scheduleType: event.target.value as 'manual' | 'interval_while_app_open'
-              }))
-            }
-          >
-            <option value="manual">Manual</option>
-            <option value="interval_while_app_open">While app is open</option>
-          </SelectField>
-          {automationDraft.scheduleType === 'interval_while_app_open' ? (
-            <TextInput
-              placeholder="Interval minutes"
-              value={automationDraft.intervalMinutes}
-              onChange={(event) => setAutomationDraft((current) => ({ ...current, intervalMinutes: event.target.value }))}
-            />
-          ) : null}
-          <TextArea
-            className="tall"
-            placeholder="Describe what this automation should do when it runs."
-            value={automationDraft.promptTemplate}
-            onChange={(event) =>
-              setAutomationDraft((current) => ({ ...current, promptTemplate: event.target.value }))
-            }
-          />
-          <p className="automation-form-note">Automation runs enter the review queue before execution.</p>
-        </div>
-      </ModalDialog>
-
-      <ModalDialog
-        open={Boolean(automationHistoryId)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setAutomationHistoryId(null);
-            setAutomationHistoryRuns([]);
-            setAutomationHistoryLoading(false);
-          }
-        }}
-        title={automationHistoryTarget ? `${automationHistoryTarget.name} history` : 'Automation history'}
-        description="Recent review and execution events for this automation."
-        className="automation-history-dialog"
-      >
-        <div className="automation-history-list">
-          {automationHistoryLoading ? (
-            <SurfaceCard className="automation-history-empty">
-              <p>Loading history...</p>
-            </SurfaceCard>
-          ) : automationHistoryRuns.length === 0 ? (
-            <SurfaceCard className="automation-history-empty">
-              <p>No runs recorded yet.</p>
-            </SurfaceCard>
-          ) : (
-            automationHistoryRuns.map((run) => (
-              <SurfaceCard key={run.id} className="automation-history-item">
-                <div className="automation-history-item-top">
-                  <StatusPill tone={
-                    run.status === 'completed'
-                      ? 'connected'
-                      : run.status === 'running' || run.status === 'waiting_for_review'
-                        ? 'warning'
-                        : run.status === 'failed'
-                          ? 'disconnected'
-                          : 'default'
-                  }>
-                    {run.status.replaceAll('_', ' ')}
-                  </StatusPill>
-                  <span>{formatTime(run.createdAt)}</span>
-                </div>
-                <p>{run.message}</p>
-                {run.threadId ? (
-                  <ActionButton size="compact" tone="quiet" onClick={() => void openThread(run.threadId!)}>
-                    Open thread
-                  </ActionButton>
-                ) : null}
-              </SurfaceCard>
-            ))
-          )}
-        </div>
-      </ModalDialog>
       <ModalDialog
         open={workspaceBootstrapModalOpen}
         onOpenChange={(open) => {
@@ -6680,8 +4842,8 @@ export function App() {
             setWorkspaceBootstrapActiveDraftPath(null);
           }
         }}
-        title="Vicode will set up workspace files"
-        description="Vicode automatically drafts project instructions and memory files for this trusted project workspace. You can review and edit them before saving, but that is optional."
+        title="Set up project"
+        description="Vicode drafts project instructions, preferences, and memory files for trusted runs. You review and edit files before saving."
         className="workspace-bootstrap-dialog"
         actions={
           <>
@@ -6710,16 +4872,36 @@ export function App() {
           <div className="workspace-bootstrap-summary">
             <strong>{selectedProject?.name ?? 'No project selected'}</strong>
             <p>{workspaceBootstrapStatus?.reason ?? workspaceBootstrapStatus?.folderPath ?? 'A trusted project workspace is required.'}</p>
-            {workspaceBootstrapStatus?.missingFiles?.length ? (
-              <p className="subtle-row">Missing: {workspaceBootstrapStatus.missingFiles.join(', ')}</p>
+            {formatWorkspaceBootstrapMissingFiles(workspaceBootstrapStatus) ? (
+              <p className="subtle-row">{formatWorkspaceBootstrapMissingFiles(workspaceBootstrapStatus)}</p>
             ) : null}
           </div>
             <div className="workspace-bootstrap-summary">
-              <strong>How this works</strong>
+              <strong>Review first</strong>
               <p>
-                Vicode checks the workspace contract files first, drafts <code>AGENTS.md</code>, optional <code>SOUL.md</code>, and can also prepare curated <code>USER.md</code> and <code>MEMORY.md</code> files from your repo plus the short answers below.
-                You can leave fields blank, then review and edit each draft before saving.
+                Vicode scans this trusted folder, checks which project files already exist, then drafts only the missing files. After saving, <code>AGENTS.md</code>, <code>USER.md</code>, and optional <code>SOUL.md</code> load directly into trusted runs. <code>MEMORY.md</code> and daily notes are recalled only when relevant.
               </p>
+            </div>
+            <div className="workspace-bootstrap-summary">
+              <strong>Files</strong>
+              <div className="workspace-bootstrap-file-guide" aria-label="Project setup file guide">
+                <div>
+                  <strong>AGENTS.md</strong>
+                  <span>Repo rules, commands, boundaries, and quality expectations.</span>
+                </div>
+                <div>
+                  <strong>USER.md</strong>
+                  <span>Your durable preferences for communication, risk, planning, and delivery.</span>
+                </div>
+                <div>
+                  <strong>MEMORY.md</strong>
+                  <span>Stable project facts, decisions, and constraints that should survive threads.</span>
+                </div>
+                <div>
+                  <strong>SOUL.md</strong>
+                  <span>Optional tone and identity layer. Skip it if repo instructions are enough.</span>
+                </div>
+              </div>
             </div>
 
           {!workspaceBootstrapDraftBundle ? (
@@ -6874,23 +5056,6 @@ export function App() {
         confirmLabel="Delete permanently"
         tone="danger"
         onConfirm={() => void deleteThread()}
-      />
-      <ConfirmDialog
-        open={Boolean(automationDeleteId)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setAutomationDeleteId(null);
-          }
-        }}
-        title="Delete automation?"
-        description={
-          automationDeleteTarget
-            ? `Delete "${automationDeleteTarget.name}" permanently from Vicode's local automation store?`
-            : 'Delete this automation permanently from Vicode\'s local automation store?'
-        }
-        confirmLabel="Delete automation"
-        tone="danger"
-        onConfirm={() => void deleteAutomation()}
       />
       <ConfirmDialog
         open={microphoneConsentOpen}

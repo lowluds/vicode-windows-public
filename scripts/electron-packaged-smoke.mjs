@@ -89,8 +89,8 @@ async function waitForStartupSurface(window, timeoutMs = 45_000) {
 }
 
 async function waitForThreadTitle(window, expectedTitle) {
-  await window.locator('.thread-title-row h2').waitFor({ state: 'visible', timeout: 30_000 });
-  const actualTitle = (await window.locator('.thread-title-row h2').textContent())?.trim() ?? '';
+  await window.locator('.windows-titlebar-context-thread').waitFor({ state: 'visible', timeout: 30_000 });
+  const actualTitle = (await window.locator('.windows-titlebar-context-thread').textContent())?.trim() ?? '';
   if (actualTitle !== expectedTitle) {
     throw new Error(`Expected restored thread title "${expectedTitle}" but found "${actualTitle}".`);
   }
@@ -122,9 +122,9 @@ async function dismissWelcomeIfVisible(window) {
 
 async function waitForSettingsSurface(window, timeoutMs = 30_000) {
   await window
-    .getByRole('heading', { name: 'General' })
+    .getByRole('heading', { name: 'App' })
     .waitFor({ state: 'visible', timeout: timeoutMs });
-  await window.getByText(/^Updates$/).waitFor({ state: 'visible', timeout: timeoutMs });
+  await window.getByRole('heading', { name: 'Updates' }).waitFor({ state: 'visible', timeout: timeoutMs });
   await window
     .getByRole('button', { name: /Check now|Checking\.\.\.|Downloading\.\.\.|Restart to update/ })
     .waitFor({ state: 'visible', timeout: timeoutMs });
@@ -132,13 +132,14 @@ async function waitForSettingsSurface(window, timeoutMs = 30_000) {
 
 async function waitForPluginsSurface(window, timeoutMs = 30_000) {
   await window
-    .getByRole('heading', { name: /^Plugins$/ })
+    .getByRole('heading', { name: /^Providers$/ })
     .waitFor({ state: 'visible', timeout: timeoutMs });
   await window
-    .getByRole('heading', { name: 'Recommended plugins' })
+    .getByText('Connect the CLIs and keys Vicode can run.')
     .waitFor({ state: 'visible', timeout: timeoutMs });
   await window
-    .getByText('Connect app-managed MCP plugins from the same shell as your skills.')
+    .getByText('Default model')
+    .first()
     .waitFor({ state: 'visible', timeout: timeoutMs });
 }
 
@@ -255,7 +256,7 @@ async function main() {
 
     await window.getByTestId('nav-settings').click();
     await waitForSettingsSurface(window);
-    await window.getByTestId('nav-plugins').click();
+    await window.getByRole('button', { name: 'Providers' }).click();
     await waitForPluginsSurface(window);
 
     console.log(

@@ -15,9 +15,9 @@ import {
   preferNormalizedAssistantText,
   reconcileAssistantTextSnapshot,
   normalizeAssistantVisibleTextChunk,
-  type AssistantTextNormalizationOptions
 } from '../../providers/text-normalization';
 import { deriveRunActivityInfo } from './run-activity';
+import { getProviderTextNormalizationOptions } from './provider-text-policy';
 
 export interface NormalizedProviderAssistantDelta {
   delta: string;
@@ -44,17 +44,6 @@ export interface NormalizedProviderInfoEvent {
   eventPayload: Record<string, unknown>;
   shouldPersist: boolean;
   dedupeKey: string | null;
-}
-
-function getProviderTextNormalizationOptions(providerId: ProviderId): AssistantTextNormalizationOptions {
-  if (providerId === 'ollama') {
-    return {
-      stripXmlFunctionCallMarkup: true,
-      stripReasoningLabels: true
-    };
-  }
-
-  return {};
 }
 
 export function normalizeProviderVisibleText(providerId: ProviderId, value: string) {

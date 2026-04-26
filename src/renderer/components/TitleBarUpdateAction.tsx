@@ -6,22 +6,14 @@ import { cx } from './ui/utils';
 
 interface TitleBarUpdateActionProps {
   appUpdateState: AppUpdateState | null;
-  hasActiveRun: boolean;
-  queuedUpdateInstallKey: string | null;
   onPress: () => void;
 }
 
 export function TitleBarUpdateAction({
   appUpdateState,
-  hasActiveRun,
-  queuedUpdateInstallKey,
   onPress
 }: TitleBarUpdateActionProps) {
-  const action = deriveTitleBarUpdateActionState({
-    appUpdateState,
-    hasActiveRun,
-    queuedUpdateInstallKey
-  });
+  const action = deriveTitleBarUpdateActionState(appUpdateState);
 
   if (!action) {
     return null;
@@ -35,7 +27,7 @@ export function TitleBarUpdateAction({
           className={cx(
             'windows-titlebar-action windows-titlebar-update-action',
             (action.variant === 'available' || action.variant === 'downloading') && 'is-progress',
-            (action.variant === 'downloaded' || action.variant === 'queued') && 'is-ready'
+            action.variant === 'downloaded' && 'is-ready'
           )}
           label={action.label}
           onClick={onPress}

@@ -29,11 +29,12 @@ describe('WorkspaceBootstrapService', () => {
     return dir;
   }
 
-  it('only allows bootstrap for trusted workspaces with a real folder', () => {
+  it('only allows bootstrap for workspaces with a real folder', () => {
     const service = new WorkspaceBootstrapService();
 
     expect(service.getStatus({ id: 'project-1', folderPath: null, trusted: true }).eligible).toBe(false);
     expect(service.getStatus({ id: 'project-1', folderPath: 'C:/workspace/project', trusted: false }).eligible).toBe(false);
+    expect(service.getStatus({ id: 'project-1', folderPath: 'C:/workspace/project', trusted: true }).eligible).toBe(true);
   });
 
   it('creates drafts only for missing files by default', () => {
@@ -94,6 +95,54 @@ describe('WorkspaceBootstrapService', () => {
     );
     expect(readFileSync(join(workspace, 'AGENTS.md'), 'utf8')).toContain('Ship durable workspace files.');
     expect(readFileSync(join(workspace, 'memory', '2026-03-17.md'), 'utf8')).toContain('2026-03-17');
+  });
+
+  it('reports durable profile file status for the workspace settings surface', () => {
+    const workspace = createWorkspace({
+      'AGENTS.md': '# Existing agent guide',
+      'USER.md': '# User preferences',
+      'MEMORY.md': '# Workspace memory',
+      'memory/2026-04-20.md': '# Recent note'
+    });
+    const service = new WorkspaceBootstrapService();
+
+    const status = service.getStatus({ id: 'project-1', folderPath: workspace, trusted: true });
+
+    expect(status.contractFiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'agents',
+          relativePath: 'AGENTS.md',
+          exists: true,
+          required: true,
+          loadMode: 'direct_prompt'
+        }),
+        expect.objectContaining({
+          kind: 'user',
+          relativePath: 'USER.md',
+          exists: true,
+          loadMode: 'direct_prompt'
+        }),
+        expect.objectContaining({
+          kind: 'memory',
+          relativePath: 'MEMORY.md',
+          exists: true,
+          loadMode: 'memory_retrieval'
+        }),
+        expect.objectContaining({
+          kind: 'daily_note',
+          relativePath: 'memory/2026-04-20.md',
+          exists: true,
+          loadMode: 'memory_retrieval'
+        }),
+        expect.objectContaining({
+          kind: 'soul',
+          relativePath: 'SOUL.md',
+          exists: false,
+          required: false
+        })
+      ])
+    );
   });
 
   it('marks suggestion eligibility false after dismissal until files are written', () => {

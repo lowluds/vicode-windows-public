@@ -1,14 +1,52 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { DragEvent } from 'react';
-import type { ReactNode } from 'react';
-import { ActionButton, ConfirmDialog, IconButton, Menu, MenuContent, MenuItem, MenuItemLabel, MenuTrigger, ProjectTreeButton, ThreadTreeButton, Tooltip, TooltipContent, TooltipTrigger } from './ui';
-import type { Project, SubagentSummary, ThreadSummary } from '../../shared/domain';
-import { normalizeDisplayText } from '../../shared/display-text';
-import { ArchiveIcon, ChevronDownIcon, ChevronRightIcon, FolderIcon, FolderOpenIcon, LoadingIcon, MoreIcon, NewThreadIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusFolderIcon, SettingsIcon, SidebarIcon, ThreadDotIcon } from './icons';
-import { cx } from './ui/utils';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { DragEvent } from "react";
+import type { ReactNode } from "react";
+import {
+  ActionButton,
+  ConfirmDialog,
+  IconButton,
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuItemLabel,
+  MenuLabel,
+  MenuSeparator,
+  MenuTrigger,
+  ProjectTreeButton,
+  ThreadTreeButton,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "./ui";
+import type {
+  Project,
+  SubagentSummary,
+  ThreadSummary,
+} from "../../shared/domain";
+import { normalizeDisplayText } from "../../shared/display-text";
+import {
+  ArchiveIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CollapseAllIcon,
+  EditIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  LoadingIcon,
+  MoreIcon,
+  NewThreadIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
+  PlusFolderIcon,
+  SettingsIcon,
+  SidebarIcon,
+  ThreadDotIcon,
+  TrashIcon,
+} from "./icons";
+import type { AppRoute } from "../lib/app-route";
+import { cx } from "./ui/utils";
 
-type Route = 'thread' | 'collab' | 'skills' | 'build-control' | 'automations' | 'settings' | 'ui-dev';
-type ProjectDropPlacement = 'before' | 'after';
+type ProjectDropPlacement = "before" | "after";
 
 interface ProjectDragState {
   activeProjectId: string;
@@ -17,21 +55,27 @@ interface ProjectDragState {
 }
 
 interface AppSidebarProps {
-  route: Route;
+  route: AppRoute;
   openProjectFromPicker: () => Promise<void>;
   createThreadForProject: (projectId: string) => Promise<void>;
   renameProject: (projectId: string) => Promise<void>;
+  archiveProjectThreads: (projectId: string) => Promise<void>;
   removeProject: (projectId: string) => Promise<void>;
   removingProjectId: string | null;
-  setProjectTrust: (projectId: string, trusted: boolean) => Promise<void>;
   projects: Project[];
-  selectedProjectId: string | null;
   expandedProjectIds: string[];
   toggleProjectThreads: (projectId: string) => Promise<void>;
+  collapseAllProjectThreads: () => void;
   reorderProjects: (projectIds: string[]) => void;
   threadsByProject: Record<string, ThreadSummary[]>;
   subagentsByThreadId: Record<string, SubagentSummary[]>;
   activeThreadId: string | null;
+  activeThreadActions: {
+    projectId: string;
+    rename: () => Promise<void>;
+    archive: () => Promise<void>;
+    remove: () => void;
+  } | null;
   openThread: (threadId: string) => Promise<void>;
   archiveThread: (threadId: string) => Promise<void>;
   openProjectFolderLocation: (projectId: string) => Promise<void>;
@@ -40,11 +84,47 @@ interface AppSidebarProps {
   toggleSidebar: () => void;
 }
 
+type ProjectActionMenuId =
+  | "open_in_explorer"
+  | "rename_project"
+  | "archive_chats"
+  | "remove_project";
+type CurrentThreadActionMenuId =
+  | "rename_thread"
+  | "archive_thread"
+  | "remove_thread";
+
+export function getProjectActionMenuItems(
+  project: Pick<Project, "folderPath">,
+): Array<{ id: ProjectActionMenuId; label: string }> {
+  const items: Array<{ id: ProjectActionMenuId; label: string }> = [];
+  if (project.folderPath) {
+    items.push({ id: "open_in_explorer", label: "Open in Explorer" });
+  }
+  items.push(
+    { id: "rename_project", label: "Rename project" },
+    { id: "archive_chats", label: "Archive chats" },
+    { id: "remove_project", label: "Remove" },
+  );
+  return items;
+}
+
+export function getCurrentThreadActionMenuItems(): Array<{
+  id: CurrentThreadActionMenuId;
+  label: string;
+}> {
+  return [
+    { id: "rename_thread", label: "Rename thread" },
+    { id: "archive_thread", label: "Archive thread" },
+    { id: "remove_thread", label: "Delete permanently" },
+  ];
+}
+
 const visibleThreadBatchSize = 8;
 
 function formatRelativeTime(value: string | null) {
   if (!value) {
-    return '';
+    return "";
   }
   const delta = Date.now() - new Date(value).getTime();
   const minutes = Math.max(1, Math.floor(delta / 60000));
@@ -63,61 +143,82 @@ function sidebarProjectLabel(project: Project) {
     return project.name;
   }
 
-  const normalized = project.folderPath.replace(/[\\\/]+$/u, '');
+  const normalized = project.folderPath.replace(/[\\\/]+$/u, "");
   const segments = normalized.split(/[\\\/]/u).filter(Boolean);
   return segments.at(-1) ?? project.name;
 }
 
-function isThreadProcessing(status: ThreadSummary['status']) {
-  return status === 'running';
+function isThreadProcessing(status: ThreadSummary["status"]) {
+  return status === "running";
 }
 
 function projectIdsMatch(left: string[], right: string[]) {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
 }
 
-function reorderProjectIds(projectIds: string[], draggedProjectId: string, targetProjectId: string, placement: ProjectDropPlacement) {
-  if (!draggedProjectId || !targetProjectId || draggedProjectId === targetProjectId) {
+function reorderProjectIds(
+  projectIds: string[],
+  draggedProjectId: string,
+  targetProjectId: string,
+  placement: ProjectDropPlacement,
+) {
+  if (
+    !draggedProjectId ||
+    !targetProjectId ||
+    draggedProjectId === targetProjectId
+  ) {
     return projectIds;
   }
 
-  const nextOrder = projectIds.filter((projectId) => projectId !== draggedProjectId);
+  const nextOrder = projectIds.filter(
+    (projectId) => projectId !== draggedProjectId,
+  );
   const targetIndex = nextOrder.indexOf(targetProjectId);
   if (targetIndex < 0) {
     return projectIds;
   }
 
-  nextOrder.splice(placement === 'after' ? targetIndex + 1 : targetIndex, 0, draggedProjectId);
+  nextOrder.splice(
+    placement === "after" ? targetIndex + 1 : targetIndex,
+    0,
+    draggedProjectId,
+  );
   return nextOrder;
 }
 
-function resolveProjectDropPlacement(clientY: number, rect: DOMRect): ProjectDropPlacement {
-  return clientY >= rect.top + rect.height / 2 ? 'after' : 'before';
+function resolveProjectDropPlacement(
+  clientY: number,
+  rect: DOMRect,
+): ProjectDropPlacement {
+  return clientY >= rect.top + rect.height / 2 ? "after" : "before";
 }
 
 function createProjectDragImage(source: HTMLDivElement) {
   const rect = source.getBoundingClientRect();
   const dragImage = source.cloneNode(true) as HTMLDivElement;
-  dragImage.classList.add('project-row-drag-image');
+  dragImage.classList.add("project-row-drag-image");
   dragImage.style.width = `${rect.width}px`;
-  dragImage.style.position = 'fixed';
-  dragImage.style.top = '0';
-  dragImage.style.left = '0';
-  dragImage.style.pointerEvents = 'none';
-  dragImage.style.transform = 'translate(-200vw, -200vh)';
-  dragImage.style.zIndex = '9999';
+  dragImage.style.position = "fixed";
+  dragImage.style.top = "0";
+  dragImage.style.left = "0";
+  dragImage.style.pointerEvents = "none";
+  dragImage.style.transform = "translate(-200vw, -200vh)";
+  dragImage.style.zIndex = "9999";
   document.body.appendChild(dragImage);
 
   return {
     dragImage,
     offsetX: rect.width / 2,
-    offsetY: rect.height / 2
+    offsetY: rect.height / 2,
   };
 }
 
 function CollapsibleProjectThreadRegion({
   expanded,
-  children
+  children,
 }: {
   expanded: boolean;
   children: () => ReactNode;
@@ -132,7 +233,7 @@ function CollapsibleProjectThreadRegion({
 
   return (
     <div
-      className={cx('project-thread-region', expanded && 'is-expanded')}
+      className={cx("project-thread-region", expanded && "is-expanded")}
       aria-hidden={!expanded}
       onTransitionEnd={(event) => {
         if (event.target !== event.currentTarget || expanded) {
@@ -141,18 +242,26 @@ function CollapsibleProjectThreadRegion({
         setShouldRender(false);
       }}
     >
-      <div className="project-thread-region-inner">{shouldRender ? children() : null}</div>
+      <div className="project-thread-region-inner">
+        {shouldRender ? children() : null}
+      </div>
     </div>
   );
 }
 
 export function AppSidebar(props: AppSidebarProps) {
   const [projectDrag, setProjectDrag] = useState<ProjectDragState | null>(null);
-  const [projectActionMenuId, setProjectActionMenuId] = useState<string | null>(null);
-  const [pendingProjectDeleteId, setPendingProjectDeleteId] = useState<string | null>(null);
+  const [projectActionMenuId, setProjectActionMenuId] = useState<string | null>(
+    null,
+  );
+  const [pendingProjectDeleteId, setPendingProjectDeleteId] = useState<
+    string | null
+  >(null);
   const [projectDeleteId, setProjectDeleteId] = useState<string | null>(null);
   const [sidebarFooterLocked, setSidebarFooterLocked] = useState(false);
-  const [visibleThreadCount, setVisibleThreadCount] = useState(visibleThreadBatchSize);
+  const [visibleThreadCount, setVisibleThreadCount] = useState(
+    visibleThreadBatchSize,
+  );
   const projectRowRefs = useRef(new Map<string, HTMLDivElement>());
   const previousProjectRowPositionsRef = useRef(new Map<string, number>());
   const dragImageRef = useRef<HTMLDivElement | null>(null);
@@ -165,18 +274,27 @@ export function AppSidebar(props: AppSidebarProps) {
       return props.projects;
     }
 
-    const projectLookup = new Map(props.projects.map((project) => [project.id, project]));
+    const projectLookup = new Map(
+      props.projects.map((project) => [project.id, project]),
+    );
     return projectDrag.previewProjectIds
       .map((projectId) => projectLookup.get(projectId) ?? null)
       .filter((project): project is Project => Boolean(project));
   }, [projectDrag, props.projects]);
 
-  const expandedProjectSet = useMemo(() => new Set(props.expandedProjectIds), [props.expandedProjectIds]);
-  const projectDeleteTarget = useMemo(
-    () => (projectDeleteId ? props.projects.find((project) => project.id === projectDeleteId) ?? null : null),
-    [projectDeleteId, props.projects]
+  const expandedProjectSet = useMemo(
+    () => new Set(props.expandedProjectIds),
+    [props.expandedProjectIds],
   );
-  const targetProjectId = props.selectedProjectId ?? props.projects[0]?.id ?? null;
+  const projectDeleteTarget = useMemo(
+    () =>
+      projectDeleteId
+        ? (props.projects.find((project) => project.id === projectDeleteId) ??
+          null)
+        : null,
+    [projectDeleteId, props.projects],
+  );
+  const hasExpandedProjects = props.expandedProjectIds.length > 0;
 
   useEffect(
     () => () => {
@@ -186,7 +304,7 @@ export function AppSidebar(props: AppSidebarProps) {
         window.clearTimeout(sidebarFooterLockTimerRef.current);
       }
     },
-    []
+    [],
   );
 
   useEffect(() => {
@@ -219,8 +337,8 @@ export function AppSidebar(props: AppSidebarProps) {
           continue;
         }
 
-        node.style.transition = '';
-        node.style.transform = '';
+        node.style.transition = "";
+        node.style.transform = "";
       }
 
       previousProjectRowPositionsRef.current = nextPositions;
@@ -234,7 +352,9 @@ export function AppSidebar(props: AppSidebarProps) {
         }
 
         const node = projectRowRefs.current.get(project.id);
-        const previousTop = previousProjectRowPositionsRef.current.get(project.id);
+        const previousTop = previousProjectRowPositionsRef.current.get(
+          project.id,
+        );
         const nextTop = nextPositions.get(project.id);
 
         if (!node || previousTop === undefined || nextTop === undefined) {
@@ -246,11 +366,12 @@ export function AppSidebar(props: AppSidebarProps) {
           continue;
         }
 
-        node.style.transition = 'none';
+        node.style.transition = "none";
         node.style.transform = `translateY(${deltaY}px)`;
         node.getBoundingClientRect();
-        node.style.transition = 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)';
-        node.style.transform = '';
+        node.style.transition =
+          "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)";
+        node.style.transform = "";
       }
     }
 
@@ -258,7 +379,7 @@ export function AppSidebar(props: AppSidebarProps) {
   }, [orderedProjects, projectDrag?.activeProjectId]);
 
   function lockSidebarFooterAfterExpand() {
-    if (typeof window === 'undefined') {
+    if (typeof window === "undefined") {
       return;
     }
     if (sidebarFooterLockTimerRef.current !== null) {
@@ -281,39 +402,49 @@ export function AppSidebar(props: AppSidebarProps) {
     setProjectDrag(nextState);
   }
 
-  function handleProjectDragStart(projectId: string, event: DragEvent<HTMLDivElement>) {
+  function handleProjectDragStart(
+    projectId: string,
+    event: DragEvent<HTMLDivElement>,
+  ) {
     const currentTarget = event.currentTarget;
     const originProjectIds = props.projects.map((project) => project.id);
-    const { dragImage, offsetX, offsetY } = createProjectDragImage(currentTarget);
+    const { dragImage, offsetX, offsetY } =
+      createProjectDragImage(currentTarget);
 
     dragImageRef.current = dragImage;
     didDropProjectRef.current = false;
     updateProjectDrag({
       activeProjectId: projectId,
       originProjectIds,
-      previewProjectIds: originProjectIds
+      previewProjectIds: originProjectIds,
     });
 
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', projectId);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", projectId);
     event.dataTransfer.setDragImage(dragImage, offsetX, offsetY);
   }
 
-  function handleProjectDragOver(projectId: string, event: DragEvent<HTMLDivElement>) {
+  function handleProjectDragOver(
+    projectId: string,
+    event: DragEvent<HTMLDivElement>,
+  ) {
     const currentDrag = projectDragRef.current;
     if (!currentDrag || currentDrag.activeProjectId === projectId) {
       return;
     }
 
     event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
+    event.dataTransfer.dropEffect = "move";
 
-    const placement = resolveProjectDropPlacement(event.clientY, event.currentTarget.getBoundingClientRect());
+    const placement = resolveProjectDropPlacement(
+      event.clientY,
+      event.currentTarget.getBoundingClientRect(),
+    );
     const nextPreviewProjectIds = reorderProjectIds(
       currentDrag.previewProjectIds,
       currentDrag.activeProjectId,
       projectId,
-      placement
+      placement,
     );
 
     if (projectIdsMatch(currentDrag.previewProjectIds, nextPreviewProjectIds)) {
@@ -322,7 +453,7 @@ export function AppSidebar(props: AppSidebarProps) {
 
     updateProjectDrag({
       ...currentDrag,
-      previewProjectIds: nextPreviewProjectIds
+      previewProjectIds: nextPreviewProjectIds,
     });
   }
 
@@ -347,14 +478,24 @@ export function AppSidebar(props: AppSidebarProps) {
       return;
     }
 
-    if (!projectIdsMatch(currentDrag.originProjectIds, currentDrag.previewProjectIds)) {
+    if (
+      !projectIdsMatch(
+        currentDrag.originProjectIds,
+        currentDrag.previewProjectIds,
+      )
+    ) {
       props.reorderProjects(currentDrag.previewProjectIds);
     }
   }
 
   return (
     <>
-      <aside className={cx('workspace-sidebar', props.sidebarCollapsed && 'is-collapsed')}>
+      <aside
+        className={cx(
+          "workspace-sidebar",
+          props.sidebarCollapsed && "is-collapsed",
+        )}
+      >
         {props.sidebarCollapsed ? (
           <>
             <div className="workspace-sidebar-collapsed-tools">
@@ -377,18 +518,14 @@ export function AppSidebar(props: AppSidebarProps) {
                 <TooltipTrigger asChild>
                   <IconButton
                     className="workspace-sidebar-tool"
-                    label="Start new thread"
-                    disabled={props.projects.length === 0}
-                    onClick={() => {
-                      if (targetProjectId) {
-                        void props.createThreadForProject(targetProjectId);
-                      }
-                    }}
+                    label="Collapse all project threads"
+                    disabled={!hasExpandedProjects}
+                    onClick={props.collapseAllProjectThreads}
                   >
-                    <NewThreadIcon />
+                    <CollapseAllIcon />
                   </IconButton>
                 </TooltipTrigger>
-                <TooltipContent side="right">Start new thread</TooltipContent>
+                <TooltipContent side="right">Collapse all</TooltipContent>
               </Tooltip>
             </div>
 
@@ -420,290 +557,505 @@ export function AppSidebar(props: AppSidebarProps) {
           </>
         ) : (
           <>
-        <div className="workspace-sidebar-header">
-          <div>
-            <strong>Projects</strong>
-          </div>
-          <div className="workspace-sidebar-tools">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <IconButton className="workspace-sidebar-tool" onClick={() => void props.openProjectFromPicker()} label="Open project">
-                  <PlusFolderIcon />
-                </IconButton>
-              </TooltipTrigger>
-              <TooltipContent>Open project</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-                <TooltipTrigger asChild>
-                  <IconButton
-                    className="workspace-sidebar-tool"
-                    onClick={() => {
-                      if (targetProjectId) {
-                        void props.createThreadForProject(targetProjectId);
-                      }
-                  }}
-                  label="Start new thread"
-                  disabled={props.projects.length === 0}
-                >
-                  <NewThreadIcon />
-                </IconButton>
-              </TooltipTrigger>
-              <TooltipContent>Start new thread</TooltipContent>
-            </Tooltip>
-          </div>
-        </div>
-
-        <div className="workspace-sidebar-scroll thread-tree">
-          {props.projects.length === 0 ? (
-            <div className="empty-inline">No projects yet.</div>
-          ) : (
-            orderedProjects.map((project) => {
-              const projectLabel = sidebarProjectLabel(project);
-              const projectIsRemoving = props.removingProjectId === project.id;
-              const projectExpanded = expandedProjectSet.has(project.id);
-              const projectThreads = props.threadsByProject[project.id] ?? [];
-              const childThreadIds = new Set(
-                projectThreads.flatMap((thread) =>
-                  (props.subagentsByThreadId[thread.id] ?? [])
-                    .map((subagent) => subagent.childThreadId)
-                    .filter((threadId): threadId is string => Boolean(threadId))
-                )
-              );
-              const topLevelThreads = projectThreads.filter((thread) => !childThreadIds.has(thread.id));
-              const visibleThreads = topLevelThreads.slice(0, visibleThreadCount);
-              const hasMoreThreads = visibleThreads.length < topLevelThreads.length;
-              return (
-                <div key={project.id} className="thread-tree-group">
-                  <div
-                    ref={(node) => {
-                      if (node) {
-                        projectRowRefs.current.set(project.id, node);
-                        return;
-                      }
-                      projectRowRefs.current.delete(project.id);
-                    }}
-                    className={cx(
-                      'project-row-shell rounded-[12px] border border-transparent bg-transparent py-1 pr-1 pl-0 transition-colors',
-                      projectExpanded && 'is-expanded',
-                      projectActionMenuId === project.id && 'is-actions-open',
-                      projectDrag?.activeProjectId === project.id && 'is-dragging',
-                      projectIsRemoving && 'is-removing'
-                    )}
-                    draggable={!projectIsRemoving}
-                    onDragStart={(event) => handleProjectDragStart(project.id, event)}
-                    onDragOver={(event) => handleProjectDragOver(project.id, event)}
-                    onDrop={handleProjectDrop}
-                    onDragEnd={handleProjectDragEnd}
-                  >
-                    <ProjectTreeButton
-                      data-testid={`project-row-${project.id}`}
-                      className="project-row rounded-[10px] px-3"
-                      onClick={() => {
-                        if (projectIsRemoving) {
-                          return;
-                        }
-                        void props.toggleProjectThreads(project.id);
-                      }}
-                      title={project.folderPath ?? project.name}
-                      aria-label={project.folderPath ? `${projectLabel} ${project.folderPath}` : projectLabel}
-                      aria-busy={projectIsRemoving}
-                      aria-expanded={projectExpanded}
-                      leadingIcon={
-                        <span className="project-row-icon-stack">
-                          <SidebarIcon className="project-row-folder-icon">
-                            {projectExpanded ? <FolderOpenIcon /> : <FolderIcon />}
-                          </SidebarIcon>
-                          <SidebarIcon className="project-row-arrow-icon">
-                            {projectExpanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
-                          </SidebarIcon>
-                        </span>
-                      }
+            <div className="workspace-sidebar-header">
+              <div>
+                <strong>Projects</strong>
+              </div>
+              <div className="workspace-sidebar-tools">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <IconButton
+                      className="workspace-sidebar-tool"
+                      onClick={() => void props.openProjectFromPicker()}
+                      label="Open project"
                     >
-                      <span className="project-name" title={project.folderPath ?? project.name}>
-                        {projectLabel}
-                      </span>
-                    </ProjectTreeButton>
+                      <PlusFolderIcon />
+                    </IconButton>
+                  </TooltipTrigger>
+                  <TooltipContent>Open project</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <IconButton
+                      className="workspace-sidebar-tool"
+                      onClick={props.collapseAllProjectThreads}
+                      label="Collapse all project threads"
+                      disabled={!hasExpandedProjects}
+                    >
+                      <CollapseAllIcon />
+                    </IconButton>
+                  </TooltipTrigger>
+                  <TooltipContent>Collapse all</TooltipContent>
+                </Tooltip>
+              </div>
+            </div>
 
-                    <div className="project-row-actions">
-                      {projectIsRemoving ? (
-                        <div className="project-row-pending" aria-live="polite">
-                          <span>Removing project</span>
-                          <span className="project-row-pending-dots" aria-hidden="true">
-                            <span>.</span>
-                            <span>.</span>
-                            <span>.</span>
-                          </span>
-                        </div>
-                      ) : (
-                        <>
-                          <Menu
-                            open={projectActionMenuId === project.id}
-                            onOpenChange={(open) =>
-                              setProjectActionMenuId((current) => {
-                                if (open) {
-                                  return project.id;
-                                }
-                                return current === project.id ? null : current;
-                              })
+            <div className="workspace-sidebar-scroll thread-tree">
+              {props.projects.length === 0 ? (
+                <div className="empty-inline">No projects yet.</div>
+              ) : (
+                orderedProjects.map((project) => {
+                  const projectLabel = sidebarProjectLabel(project);
+                  const projectIsRemoving =
+                    props.removingProjectId === project.id;
+                  const projectExpanded = expandedProjectSet.has(project.id);
+                  const projectThreads =
+                    props.threadsByProject[project.id] ?? [];
+                  const childThreadIds = new Set(
+                    projectThreads.flatMap((thread) =>
+                      (props.subagentsByThreadId[thread.id] ?? [])
+                        .map((subagent) => subagent.childThreadId)
+                        .filter((threadId): threadId is string =>
+                          Boolean(threadId),
+                        ),
+                    ),
+                  );
+                  const topLevelThreads = projectThreads.filter(
+                    (thread) => !childThreadIds.has(thread.id),
+                  );
+                  const visibleThreads = topLevelThreads.slice(
+                    0,
+                    visibleThreadCount,
+                  );
+                  const hasMoreThreads =
+                    visibleThreads.length < topLevelThreads.length;
+                  const showActiveThreadActions =
+                    props.route === "thread" &&
+                    props.activeThreadActions?.projectId === project.id;
+                  const projectActionLabel = showActiveThreadActions
+                    ? "Project and thread actions"
+                    : "Project actions";
+                  return (
+                    <div key={project.id} className="thread-tree-group">
+                      <div
+                        ref={(node) => {
+                          if (node) {
+                            projectRowRefs.current.set(project.id, node);
+                            return;
+                          }
+                          projectRowRefs.current.delete(project.id);
+                        }}
+                        className={cx(
+                          "project-row-shell rounded-[12px] border border-transparent bg-transparent py-1 pr-1 pl-0 transition-colors",
+                          projectExpanded && "is-expanded",
+                          projectActionMenuId === project.id &&
+                            "is-actions-open",
+                          projectDrag?.activeProjectId === project.id &&
+                            "is-dragging",
+                          projectIsRemoving && "is-removing",
+                        )}
+                        draggable={!projectIsRemoving}
+                        onDragStart={(event) =>
+                          handleProjectDragStart(project.id, event)
+                        }
+                        onDragOver={(event) =>
+                          handleProjectDragOver(project.id, event)
+                        }
+                        onDrop={handleProjectDrop}
+                        onDragEnd={handleProjectDragEnd}
+                      >
+                        <ProjectTreeButton
+                          data-testid={`project-row-${project.id}`}
+                          className="project-row rounded-[10px] px-3"
+                          onClick={() => {
+                            if (projectIsRemoving) {
+                              return;
                             }
+                            void props.toggleProjectThreads(project.id);
+                          }}
+                          title={project.folderPath ?? project.name}
+                          aria-label={
+                            project.folderPath
+                              ? `${projectLabel} ${project.folderPath}`
+                              : projectLabel
+                          }
+                          aria-busy={projectIsRemoving}
+                          aria-expanded={projectExpanded}
+                          leadingIcon={
+                            <span className="project-row-icon-stack">
+                              <SidebarIcon className="project-row-folder-icon">
+                                {projectExpanded ? (
+                                  <FolderOpenIcon />
+                                ) : (
+                                  <FolderIcon />
+                                )}
+                              </SidebarIcon>
+                              <SidebarIcon className="project-row-arrow-icon">
+                                {projectExpanded ? (
+                                  <ChevronDownIcon />
+                                ) : (
+                                  <ChevronRightIcon />
+                                )}
+                              </SidebarIcon>
+                            </span>
+                          }
+                        >
+                          <span
+                            className="project-name"
+                            title={project.folderPath ?? project.name}
                           >
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <MenuTrigger asChild>
+                            {projectLabel}
+                          </span>
+                        </ProjectTreeButton>
+
+                        <div className="project-row-actions">
+                          {projectIsRemoving ? (
+                            <div
+                              className="project-row-pending"
+                              aria-live="polite"
+                            >
+                              <span>Removing project</span>
+                              <span
+                                className="project-row-pending-dots"
+                                aria-hidden="true"
+                              >
+                                <span>.</span>
+                                <span>.</span>
+                                <span>.</span>
+                              </span>
+                            </div>
+                          ) : (
+                            <>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
                                   <IconButton
                                     className="project-row-action-button"
-                                    label="Project actions"
+                                    label={`Start new thread for ${projectLabel}`}
                                     draggable={false}
-                                    onClick={(event) => event.stopPropagation()}
+                                    onPointerDown={(event) =>
+                                      event.stopPropagation()
+                                    }
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void props.createThreadForProject(
+                                        project.id,
+                                      );
+                                    }}
                                   >
-                                    <MoreIcon />
+                                    <NewThreadIcon />
                                   </IconButton>
-                                </MenuTrigger>
-                              </TooltipTrigger>
-                              <TooltipContent>Project actions</TooltipContent>
-                            </Tooltip>
-                            <MenuContent align="end" sideOffset={8}>
-                              {project.folderPath ? (
-                                <MenuItem onSelect={() => void props.openProjectFolderLocation(project.id)}>
-                                  <MenuItemLabel>Open folder location</MenuItemLabel>
-                                  <FolderIcon />
-                                </MenuItem>
-                              ) : null}
-                              <MenuItem onSelect={() => void props.renameProject(project.id)}>
-                                <MenuItemLabel>Edit name</MenuItemLabel>
-                              </MenuItem>
-                              {project.folderPath ? (
-                                <MenuItem onSelect={() => void props.setProjectTrust(project.id, !project.trusted)}>
-                                  <MenuItemLabel>{project.trusted ? 'Mark as untrusted' : 'Trust workspace'}</MenuItemLabel>
-                                </MenuItem>
-                              ) : null}
-                              <MenuItem
-                                className="ui-menu-item-danger"
-                                onSelect={(event) => {
-                                  event.preventDefault();
-                                  setPendingProjectDeleteId(project.id);
-                                  setProjectActionMenuId(null);
-                                }}
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  Start new thread
+                                </TooltipContent>
+                              </Tooltip>
+                              <Menu
+                                open={projectActionMenuId === project.id}
+                                onOpenChange={(open) =>
+                                  setProjectActionMenuId((current) => {
+                                    if (open) {
+                                      return project.id;
+                                    }
+                                    return current === project.id
+                                      ? null
+                                      : current;
+                                  })
+                                }
                               >
-                                <MenuItemLabel>Remove</MenuItemLabel>
-                              </MenuItem>
-                            </MenuContent>
-                          </Menu>
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  <CollapsibleProjectThreadRegion expanded={projectExpanded}>
-                    {() => (
-                      <div className="project-thread-list">
-                      {projectThreads.length === 0 ? (
-                        <div className="empty-inline nested-empty">No saved threads yet.</div>
-                      ) : (
-                        visibleThreads.map((thread) => {
-                          const isActiveThread = props.activeThreadId === thread.id;
-
-                          return (
-                            <div
-                              key={thread.id}
-                              className={cx('sidebar-thread-shell', isActiveThread && 'is-active-thread')}
-                            >
-                              <ThreadTreeButton
-                                data-testid={`thread-row-${thread.id}`}
-                                className={cx(
-                                  'sidebar-thread-row rounded-[10px] px-3 text-[12.5px]',
-                                  isActiveThread && 'is-active'
-                                )}
-                                onClick={() => void props.openThread(thread.id)}
-                                title={normalizeDisplayText(thread.title)}
-                              >
-                                <span className="sidebar-thread-title">
-                                  <SidebarIcon className={isThreadProcessing(thread.status) ? 'sidebar-thread-spinner' : undefined}>
-                                    {isThreadProcessing(thread.status) ? <LoadingIcon /> : <ThreadDotIcon />}
-                                  </SidebarIcon>
-                                  <span>{normalizeDisplayText(thread.title)}</span>
-                                </span>
-                                <span className="sidebar-thread-time">{formatRelativeTime(thread.lastMessageAt)}</span>
-                              </ThreadTreeButton>
-                              <div className="sidebar-thread-trailing">
                                 <Tooltip>
                                   <TooltipTrigger asChild>
-                                    <IconButton
-                                      className="sidebar-thread-archive-button size-7 rounded-lg border border-[color:var(--ui-border-soft)] bg-transparent text-[color:var(--ui-text-subtle)] shadow-none hover:bg-[color:var(--ui-alpha-06)] hover:text-[color:var(--ui-text-title)]"
-                                      label="Archive thread"
-                                      onPointerDown={(event) => {
-                                        event.preventDefault();
-                                        event.stopPropagation();
-                                      }}
-                                      onClick={(event) => {
-                                        event.preventDefault();
-                                        event.stopPropagation();
-                                        void props.archiveThread(thread.id);
-                                      }}
-                                    >
-                                      <ArchiveIcon />
-                                    </IconButton>
+                                    <MenuTrigger asChild>
+                                      <IconButton
+                                        className="project-row-action-button"
+                                        label={projectActionLabel}
+                                        draggable={false}
+                                        onClick={(event) =>
+                                          event.stopPropagation()
+                                        }
+                                      >
+                                        <MoreIcon />
+                                      </IconButton>
+                                    </MenuTrigger>
                                   </TooltipTrigger>
-                                  <TooltipContent side="bottom" align="center">
-                                    Archive thread
+                                  <TooltipContent>
+                                    {projectActionLabel}
                                   </TooltipContent>
                                 </Tooltip>
+                                <MenuContent align="end" sideOffset={8}>
+                                  {getProjectActionMenuItems(project).map(
+                                    (item) => {
+                                      switch (item.id) {
+                                        case "open_in_explorer":
+                                          return (
+                                            <MenuItem
+                                              key={item.id}
+                                              onSelect={() =>
+                                                void props.openProjectFolderLocation(
+                                                  project.id,
+                                                )
+                                              }
+                                            >
+                                              <MenuItemLabel>
+                                                {item.label}
+                                              </MenuItemLabel>
+                                              <FolderIcon />
+                                            </MenuItem>
+                                          );
+                                        case "rename_project":
+                                          return (
+                                            <MenuItem
+                                              key={item.id}
+                                              onSelect={() =>
+                                                void props.renameProject(
+                                                  project.id,
+                                                )
+                                              }
+                                            >
+                                              <MenuItemLabel>
+                                                {item.label}
+                                              </MenuItemLabel>
+                                              <EditIcon />
+                                            </MenuItem>
+                                          );
+                                        case "archive_chats":
+                                          return (
+                                            <MenuItem
+                                              key={item.id}
+                                              onSelect={() =>
+                                                void props.archiveProjectThreads(
+                                                  project.id,
+                                                )
+                                              }
+                                            >
+                                              <MenuItemLabel>
+                                                {item.label}
+                                              </MenuItemLabel>
+                                              <ArchiveIcon />
+                                            </MenuItem>
+                                          );
+                                        case "remove_project":
+                                          return (
+                                            <MenuItem
+                                              key={item.id}
+                                              className="ui-menu-item-danger"
+                                              onSelect={(event) => {
+                                                event.preventDefault();
+                                                setPendingProjectDeleteId(
+                                                  project.id,
+                                                );
+                                                setProjectActionMenuId(null);
+                                              }}
+                                            >
+                                              <MenuItemLabel>
+                                                {item.label}
+                                              </MenuItemLabel>
+                                              <TrashIcon />
+                                            </MenuItem>
+                                          );
+                                        default:
+                                          return null;
+                                      }
+                                    },
+                                  )}
+                                  {showActiveThreadActions ? (
+                                    <>
+                                      <MenuSeparator />
+                                      <MenuLabel>Current thread</MenuLabel>
+                                      {getCurrentThreadActionMenuItems().map(
+                                        (item) => {
+                                          switch (item.id) {
+                                            case "rename_thread":
+                                              return (
+                                                <MenuItem
+                                                  key={item.id}
+                                                  onSelect={() =>
+                                                    void props.activeThreadActions?.rename()
+                                                  }
+                                                >
+                                                  <MenuItemLabel>
+                                                    {item.label}
+                                                  </MenuItemLabel>
+                                                  <EditIcon />
+                                                </MenuItem>
+                                              );
+                                            case "archive_thread":
+                                              return (
+                                                <MenuItem
+                                                  key={item.id}
+                                                  onSelect={() =>
+                                                    void props.activeThreadActions?.archive()
+                                                  }
+                                                >
+                                                  <MenuItemLabel>
+                                                    {item.label}
+                                                  </MenuItemLabel>
+                                                  <ArchiveIcon />
+                                                </MenuItem>
+                                              );
+                                            case "remove_thread":
+                                              return (
+                                                <MenuItem
+                                                  key={item.id}
+                                                  className="ui-menu-item-danger"
+                                                  onSelect={() =>
+                                                    props.activeThreadActions?.remove()
+                                                  }
+                                                >
+                                                  <MenuItemLabel>
+                                                    {item.label}
+                                                  </MenuItemLabel>
+                                                  <TrashIcon />
+                                                </MenuItem>
+                                              );
+                                            default:
+                                              return null;
+                                          }
+                                        },
+                                      )}
+                                    </>
+                                  ) : null}
+                                </MenuContent>
+                              </Menu>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      <CollapsibleProjectThreadRegion
+                        expanded={projectExpanded}
+                      >
+                        {() => (
+                          <div className="project-thread-list">
+                            {projectThreads.length === 0 ? (
+                              <div className="empty-inline nested-empty">
+                                No saved threads yet.
                               </div>
+                            ) : (
+                              visibleThreads.map((thread) => {
+                                const isActiveThread =
+                                  props.activeThreadId === thread.id;
 
-                            </div>
-                          );
-                        })
-                      )}
-                      {hasMoreThreads ? (
-                        <ActionButton
-                          className="sidebar-thread-show-more mt-1 h-8 justify-center rounded-xl border border-[color:var(--ui-border-soft)] bg-transparent px-3 text-[12px] text-[color:var(--ui-text-muted)] shadow-none hover:bg-[color:var(--ui-alpha-05)] hover:text-[color:var(--ui-text-title)]"
-                          tone="quiet"
-                          size="compact"
-                          onClick={() => setVisibleThreadCount((current) => current + visibleThreadBatchSize)}
-                        >
-                          Show more
-                        </ActionButton>
-                      ) : null}
+                                return (
+                                  <div
+                                    key={thread.id}
+                                    className={cx(
+                                      "sidebar-thread-shell",
+                                      isActiveThread && "is-active-thread",
+                                    )}
+                                  >
+                                    <ThreadTreeButton
+                                      data-testid={`thread-row-${thread.id}`}
+                                      className={cx(
+                                        "sidebar-thread-row rounded-[10px] px-3 text-[12.5px]",
+                                        isActiveThread && "is-active",
+                                      )}
+                                      onClick={() =>
+                                        void props.openThread(thread.id)
+                                      }
+                                      title={normalizeDisplayText(thread.title)}
+                                    >
+                                      <span className="sidebar-thread-title">
+                                        <SidebarIcon
+                                          className={
+                                            isThreadProcessing(thread.status)
+                                              ? "sidebar-thread-spinner"
+                                              : undefined
+                                          }
+                                        >
+                                          {isThreadProcessing(thread.status) ? (
+                                            <LoadingIcon />
+                                          ) : (
+                                            <ThreadDotIcon />
+                                          )}
+                                        </SidebarIcon>
+                                        <span>
+                                          {normalizeDisplayText(thread.title)}
+                                        </span>
+                                      </span>
+                                      <span className="sidebar-thread-time">
+                                        {formatRelativeTime(
+                                          thread.lastMessageAt,
+                                        )}
+                                      </span>
+                                    </ThreadTreeButton>
+                                    <div className="sidebar-thread-trailing">
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <IconButton
+                                            className="sidebar-thread-archive-button size-7 rounded-lg border border-[color:var(--ui-border-soft)] bg-transparent text-[color:var(--ui-text-subtle)] shadow-none hover:bg-[color:var(--ui-alpha-06)] hover:text-[color:var(--ui-text-title)]"
+                                            label="Archive thread"
+                                            onPointerDown={(event) => {
+                                              event.preventDefault();
+                                              event.stopPropagation();
+                                            }}
+                                            onClick={(event) => {
+                                              event.preventDefault();
+                                              event.stopPropagation();
+                                              void props.archiveThread(
+                                                thread.id,
+                                              );
+                                            }}
+                                          >
+                                            <ArchiveIcon />
+                                          </IconButton>
+                                        </TooltipTrigger>
+                                        <TooltipContent
+                                          side="bottom"
+                                          align="center"
+                                        >
+                                          Archive thread
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            )}
+                            {hasMoreThreads ? (
+                              <ActionButton
+                                className="sidebar-thread-show-more mt-1 h-8 justify-center rounded-xl border border-[color:var(--ui-border-soft)] bg-transparent px-3 text-[12px] text-[color:var(--ui-text-muted)] shadow-none hover:bg-[color:var(--ui-alpha-05)] hover:text-[color:var(--ui-text-title)]"
+                                tone="quiet"
+                                size="compact"
+                                onClick={() =>
+                                  setVisibleThreadCount(
+                                    (current) =>
+                                      current + visibleThreadBatchSize,
+                                  )
+                                }
+                              >
+                                Show more
+                              </ActionButton>
+                            ) : null}
+                          </div>
+                        )}
+                      </CollapsibleProjectThreadRegion>
                     </div>
-                    )}
-                  </CollapsibleProjectThreadRegion>
-                </div>
-              );
-            })
-          )}
-        </div>
+                  );
+                })
+              )}
+            </div>
 
-        <div className="workspace-sidebar-footer">
-          <div className="workspace-sidebar-footer-action">
-            <ActionButton
-              data-testid="nav-sidebar-settings"
-              className="workspace-footer-button"
-              tone="quiet"
-              leadingIcon={<SettingsIcon />}
-              onClick={() => {
-                if (sidebarFooterLocked) {
-                  return;
-                }
-                props.openSettings();
-              }}
-            >
-              Settings
-            </ActionButton>
-            <IconButton
-              data-testid="nav-sidebar-toggle"
-              className="workspace-footer-icon workspace-footer-toggle"
-              label="Hide sidebar"
-              onClick={() => {
-                if (sidebarFooterLocked) {
-                  return;
-                }
-                props.toggleSidebar();
-              }}
-            >
-              <PanelLeftCloseIcon />
-            </IconButton>
-          </div>
-        </div>
+            <div className="workspace-sidebar-footer">
+              <div className="workspace-sidebar-footer-action">
+                <ActionButton
+                  data-testid="nav-sidebar-settings"
+                  className="workspace-footer-button"
+                  tone="quiet"
+                  leadingIcon={<SettingsIcon />}
+                  onClick={() => {
+                    if (sidebarFooterLocked) {
+                      return;
+                    }
+                    props.openSettings();
+                  }}
+                >
+                  Settings
+                </ActionButton>
+                <IconButton
+                  data-testid="nav-sidebar-toggle"
+                  className="workspace-footer-icon workspace-footer-toggle"
+                  label="Hide sidebar"
+                  onClick={() => {
+                    if (sidebarFooterLocked) {
+                      return;
+                    }
+                    props.toggleSidebar();
+                  }}
+                >
+                  <PanelLeftCloseIcon />
+                </IconButton>
+              </div>
+            </div>
           </>
         )}
       </aside>
@@ -719,7 +1071,7 @@ export function AppSidebar(props: AppSidebarProps) {
         description={
           projectDeleteTarget
             ? `Remove "${projectDeleteTarget.name}" and its saved local threads from Vicode?`
-            : 'Remove this project and its saved local threads from Vicode?'
+            : "Remove this project and its saved local threads from Vicode?"
         }
         confirmLabel="Remove project"
         tone="danger"

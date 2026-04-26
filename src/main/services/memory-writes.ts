@@ -255,8 +255,8 @@ export class MemoryWritesService {
     const thread = this.db.getThread(threadId);
     const normalizedThreadTitle = normalizeDisplayText(thread.title);
     const project = this.db.getProject(thread.projectId);
-    if (!project.trusted || !project.folderPath) {
-      throw new Error('Daily note capture requires a trusted project with a real workspace folder.');
+    if (!project.folderPath) {
+      throw new Error('Daily note capture requires a project with a real workspace folder.');
     }
 
     const sourceId = `daily-note:${thread.id}`;
@@ -299,8 +299,8 @@ export class MemoryWritesService {
     const thread = this.db.getThread(threadId);
     const normalizedThreadTitle = normalizeDisplayText(thread.title);
     const project = this.db.getProject(thread.projectId);
-    if (!project.trusted || !project.folderPath) {
-      throw new Error('Daily note capture requires a trusted project with a real workspace folder.');
+    if (!project.folderPath) {
+      throw new Error('Daily note capture requires a project with a real workspace folder.');
     }
 
     const sourceId = sourceKey ? `daily-note:${thread.id}:${sourceKey}` : `daily-note:${thread.id}`;
@@ -330,8 +330,8 @@ export class MemoryWritesService {
     const thread = this.db.getThread(threadId);
     const normalizedThreadTitle = normalizeDisplayText(thread.title);
     const project = this.db.getProject(thread.projectId);
-    if (!project.trusted || !project.folderPath) {
-      throw new Error('Memory promotion requires a trusted project with a real workspace folder.');
+    if (!project.folderPath) {
+      throw new Error('Memory promotion requires a project with a real workspace folder.');
     }
 
     const sourceId = `memory-promotion:${thread.id}`;
@@ -374,8 +374,8 @@ export class MemoryWritesService {
     const thread = this.db.getThread(threadId);
     const normalizedThreadTitle = normalizeDisplayText(thread.title);
     const project = this.db.getProject(thread.projectId);
-    if (!project.trusted || !project.folderPath) {
-      throw new Error('Memory promotion requires a trusted project with a real workspace folder.');
+    if (!project.folderPath) {
+      throw new Error('Memory promotion requires a project with a real workspace folder.');
     }
 
     const sourceId = `memory-promotion:${thread.id}`;
@@ -405,8 +405,8 @@ export class MemoryWritesService {
     const thread = this.db.getThread(threadId);
     const normalizedThreadTitle = normalizeDisplayText(thread.title);
     const project = this.db.getProject(thread.projectId);
-    if (!project.trusted || !project.folderPath) {
-      throw new Error('USER.md updates require a trusted project with a real workspace folder.');
+    if (!project.folderPath) {
+      throw new Error('USER.md updates require a project with a real workspace folder.');
     }
 
     const sourceId = `user-preference:${thread.id}`;
@@ -449,8 +449,8 @@ export class MemoryWritesService {
     const thread = this.db.getThread(threadId);
     const normalizedThreadTitle = normalizeDisplayText(thread.title);
     const project = this.db.getProject(thread.projectId);
-    if (!project.trusted || !project.folderPath) {
-      throw new Error('USER.md updates require a trusted project with a real workspace folder.');
+    if (!project.folderPath) {
+      throw new Error('USER.md updates require a project with a real workspace folder.');
     }
 
     const sourceId = `user-preference:${thread.id}`;

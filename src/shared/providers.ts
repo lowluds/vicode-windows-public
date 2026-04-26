@@ -31,7 +31,7 @@ export const PROVIDER_METADATA: Record<ProviderId, ProviderMetadata> = {
     cliCommands: ['codex.cmd', 'codex.exe', 'codex'],
     authLaunchTitle: 'OpenAI Codex Login',
     authLaunchArgs: ['login'],
-    defaultModelId: 'gpt-5.4',
+    defaultModelId: 'gpt-5.5',
     defaultReasoningEffort: 'high',
     defaultThinking: false,
     capabilities: {
@@ -200,7 +200,7 @@ export function providerPermissionBoundaryNote(providerId: ProviderId, execution
 
   if (capabilities.approvalAuthority === 'app') {
     return executionPermission === 'default'
-      ? 'Vicode owns approvals in this lane. Default keeps the runtime on trusted-workspace file tools only.'
+      ? 'Vicode owns approvals in this lane. Default keeps the runtime on workspace file tools only.'
       : 'Vicode owns approvals in this lane. Full access can unlock host-local commands under the workspace runtime policy.';
   }
 
@@ -241,24 +241,24 @@ export function providerRecommendedRouteSummary(
   options?: { hosted?: boolean }
 ) {
   if (providerId === 'openai') {
-    return 'Default: GPT-5.4.';
+    return 'Newest available Codex model first.';
   }
 
   if (providerId === 'gemini') {
-    return 'Default: Auto Gemini 2.5.';
+    return 'Auto Gemini 2.5 by default.';
   }
 
   if (providerId === 'ollama') {
     return options?.hosted
-      ? 'Cloud default: Qwen 3 Coder.'
-      : 'Local default: Qwen 3 Coder.';
+      ? 'Qwen 3 Coder for cloud models.'
+      : 'Qwen 3 Coder for local models.';
   }
 
   if (providerId === 'qwen') {
-    return 'Default: Qwen 3.5 Plus.';
+    return 'Qwen 3.5 Plus by default.';
   }
 
-  return 'Default: Kimi K2 Thinking.';
+  return 'Kimi K2 Thinking by default.';
 }
 
 export function providerSetupMenuSummary(
@@ -385,7 +385,7 @@ export function providerSettingsAuthTitle(provider: Pick<ProviderDescriptor, 'id
     return 'Checking sign-in';
   }
   if (provider.authState === 'connected') {
-    return `${providerDisplayName(provider.id)} is ready`;
+    return 'Ready to run';
   }
   if (provider.authState === 'detected') {
     return 'Local sign-in found';
@@ -416,19 +416,19 @@ export function providerSettingsAuthDescription(provider: Pick<ProviderDescripto
           : `Install ${providerCliLabel(provider.id)} on this PC, then sign in here.`);
   }
   if (provider.authState === 'checking') {
-    return 'Vicode is finishing sign-in.';
+    return 'Finishing sign-in.';
   }
   if (provider.authState === 'detected') {
     return (
       provider.message ??
-      'Vicode found a machine-local sign-in. Nothing is imported automatically. Use it explicitly here or open the official CLI sign-in flow again.'
+      'A machine-local sign-in is available. Choose Connect to use it in Vicode.'
     );
   }
   if (provider.authMode === 'cli' && provider.authState === 'connected') {
-    return `${providerDisplayName(provider.id)} is ready in Vicode.`;
+    return 'Ready to use.';
   }
   if (provider.authMode === 'api_key' && provider.authState === 'connected') {
-    return 'Your saved API key is ready in Vicode.';
+    return 'Saved API key is ready.';
   }
   if (provider.authState === 'disconnected' && provider.authMode === 'cli') {
     return provider.message ?? 'This provider is disconnected in Vicode, but a machine-local sign-in is still available.';
@@ -568,10 +568,10 @@ export function providerSettingsStatusSummary(
       : 'Vicode is waiting for sign-in to finish.';
   }
   if (provider.authState === 'connected') {
-    return `${providerDisplayName(provider.id)} is ready to use.`;
+    return 'Ready to use.';
   }
   if (provider.authState === 'detected') {
-    return 'A machine-local sign-in is available. Use it explicitly here before new runs can start.';
+    return 'A machine-local sign-in is available. Connect it before starting new runs.';
   }
   if (provider.authState === 'disconnected') {
     return provider.authMode === 'cli'
@@ -616,6 +616,45 @@ export function selectPreferredOllamaModel<T extends { id: string }>(models: rea
   );
 }
 
+const OLLAMA_PRACTICAL_VISION_MODEL_MAX_BILLIONS = 32;
+
+function getOllamaVisionModelFamilyRank(modelId: string) {
+  if (/qwen.*(?:vl|vision)|qwen2\.5vl|qwen2-vl/i.test(modelId)) {
+    return 0;
+  }
+  if (/gemma3/i.test(modelId)) {
+    return 1;
+  }
+  if (/llava|bakllava/i.test(modelId)) {
+    return 2;
+  }
+  if (/minicpm-v|moondream|mllama/i.test(modelId)) {
+    return 3;
+  }
+  return 4;
+}
+
+function isPracticalOllamaVisionModel(modelId: string) {
+  const size = parseModelSizeBillions(modelId);
+  return !Number.isFinite(size) || size <= OLLAMA_PRACTICAL_VISION_MODEL_MAX_BILLIONS;
+}
+
+function compareOllamaVisionModels<T extends { id: string }>(left: T, right: T) {
+  const leftFamilyRank = getOllamaVisionModelFamilyRank(left.id);
+  const rightFamilyRank = getOllamaVisionModelFamilyRank(right.id);
+  if (leftFamilyRank !== rightFamilyRank) {
+    return leftFamilyRank - rightFamilyRank;
+  }
+
+  const leftSize = parseModelSizeBillions(left.id);
+  const rightSize = parseModelSizeBillions(right.id);
+  if (leftSize !== rightSize) {
+    return leftSize - rightSize;
+  }
+
+  return left.id.localeCompare(right.id, undefined, { sensitivity: 'base' });
+}
+
 export function selectPreferredOllamaVisionModel<T extends { id: string; supportsVision?: boolean }>(
   models: readonly T[]
 ) {
@@ -624,13 +663,12 @@ export function selectPreferredOllamaVisionModel<T extends { id: string; support
     return null;
   }
 
-  return (
-    visionModels.find((entry) => /qwen.*(?:vl|vision)/i.test(entry.id)) ??
-    visionModels.find((entry) => /gemma3/i.test(entry.id)) ??
-    visionModels.find((entry) => /llava|bakllava/i.test(entry.id)) ??
-    visionModels.find((entry) => /minicpm-v|moondream|mllama/i.test(entry.id)) ??
-    visionModels[0]
-  );
+  const practicalVisionModels = visionModels.filter((model) => isPracticalOllamaVisionModel(model.id));
+  const rankedModels = (practicalVisionModels.length > 0 ? practicalVisionModels : visionModels)
+    .slice()
+    .sort(compareOllamaVisionModels);
+
+  return rankedModels[0] ?? null;
 }
 
 export function selectPreferredOllamaValidationModels<T extends { id: string }>(models: readonly T[]) {

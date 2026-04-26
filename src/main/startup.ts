@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { app } from 'electron';
 import { AgentRuntimeService } from './services/agent-runtime';
+import { createAgentRuntimeVicodeCreatorBridge } from './services/agent-runtime-vicode-creators';
 import { AppUpdaterService } from './services/app-updater';
 import { AutonomousTaskService } from './services/autonomous-tasks';
 import { AutomationScheduler } from './services/automation-scheduler';
@@ -23,6 +24,7 @@ import { VoiceService } from './services/voice';
 import { WorkspaceBootstrapService } from './services/workspace-bootstrap';
 import { SubagentOrchestratorService } from './services/subagents';
 import { DatabaseService } from '../storage/database';
+import { COLLABORATION_ENABLED } from '../shared/product-flags';
 
 export interface AppServices {
   db: DatabaseService;
@@ -39,7 +41,7 @@ export interface AppServices {
   subagents: SubagentOrchestratorService;
   workspaceBootstrap: WorkspaceBootstrapService;
   voice: VoiceService;
-  collab: CollaborationService;
+  collab: CollaborationService | null;
   composerTextAttachments: ComposerTextAttachmentService;
   heartbeat: HeartbeatService | null;
 }
@@ -56,7 +58,9 @@ export function createAppServices(input: {
   db.migrate();
   db.recoverInterruptedThreads();
 
-  const updater = new AppUpdaterService();
+  const updater = new AppUpdaterService(undefined, {
+    logPath: join(input.stateDir, 'updater.log')
+  });
   const ollamaRuntime = new OllamaRuntimeService();
   const mcp = new McpRegistryService(db, { name: 'vicode', version: app.getVersion() }, {
     appRoot: app.getAppPath(),
@@ -76,18 +80,34 @@ export function createAppServices(input: {
     clearDismissal: (projectId) => db.clearWorkspaceBootstrapDismissal(projectId)
   });
   const skills = new SkillCatalogService(db, input.stateDir);
+  skills.refreshSkillsFromDisk();
   const automations = new AutomationScheduler(db, jobs);
   const vicodeBuild = new VicodeBuildControlService(db, providers);
   const exportsDir = join(input.stateDir, 'exports');
-  const collab = new CollaborationService(db);
-  const diagnostics = new DiagnosticsService(db, exportsDir, () => ({
-    bootstrap: db.getCollabBootstrap(),
-    roomSessions: db.listCollabRoomSessions(),
-    ...collab.getDiagnosticsSnapshot()
-  }));
+  const collab = COLLABORATION_ENABLED ? new CollaborationService(db) : null;
+  const diagnostics = new DiagnosticsService(
+    db,
+    exportsDir,
+    () => ({
+      bootstrap: db.getCollabBootstrap(),
+      roomSessions: db.listCollabRoomSessions(),
+      ...(collab?.getDiagnosticsSnapshot() ?? {})
+    }),
+    () => ({
+      bootstrapDiagnostics: db.getBootstrapDiagnostics(),
+      skillCatalogDiagnostics: skills.getListDiagnostics()
+    })
+  );
   const voice = new VoiceService();
   const subagents = new SubagentOrchestratorService(db, providers);
   agentRuntime.setSubagents(subagents);
+  agentRuntime.setCreators(
+    createAgentRuntimeVicodeCreatorBridge({
+      statePath: input.stateDir,
+      skills,
+      mcp
+    })
+  );
   const autonomousTasks = new AutonomousTaskService(db, jobs, vicodeBuild, subagents);
   const composerTextAttachments = new ComposerTextAttachmentService();
 
@@ -147,18 +167,23 @@ export function startDeferredAppServices(
   services: Pick<AppServices, 'updater' | 'providers' | 'mcp' | 'collab' | 'automations' | 'heartbeat'>,
   options: { reportError?: DeferredStartupErrorReporter; reportTiming?: DeferredStartupTimingReporter } = {}
 ) {
-  const collabDeferredDisabled = process.env.VICODE_DISABLE_DEFERRED_COLLAB === '1';
+  const collabDeferredDisabled = !COLLABORATION_ENABLED || process.env.VICODE_DISABLE_DEFERRED_COLLAB === '1';
   void runDeferredStartupStep('updater', () => services.updater.initialize(), options);
   void runDeferredStartupStep('providers', () => services.providers.resumeQueuedFollowUps(), options);
 
   void runDeferredStartupStep('mcp', () => services.mcp.initialize(), options);
 
-  const unsubscribeProviderRelay = services.providers.onEvent((event) => {
-    void services.collab.handleAppEvent(event);
-  });
+  const unsubscribeProviderRelay =
+    COLLABORATION_ENABLED && services.collab
+      ? services.providers.onEvent((event) => {
+          void services.collab?.handleAppEvent(event);
+        })
+      : () => {
+          return undefined;
+        };
 
-  if (!collabDeferredDisabled) {
-    void runDeferredStartupStep('collab', () => services.collab.initialize(), options);
+  if (!collabDeferredDisabled && services.collab) {
+    void runDeferredStartupStep('collab', () => services.collab?.initialize(), options);
   }
   void runDeferredStartupStep('automations', () => services.automations.refresh(), options);
   if (services.heartbeat) {

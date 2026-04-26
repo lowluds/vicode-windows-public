@@ -26,10 +26,14 @@ test('sidebar thread rows keep archive actions inside the shell at minimum app w
     const fixture = await window.evaluate(
       async ({ workspaceDir }) => {
         const bootstrap = await window.vicode.app.getBootstrap();
-        const provider = bootstrap.providers.find((entry) => entry.installed) ?? bootstrap.providers[0] ?? null;
+        const provider =
+          bootstrap.providers.find((entry) => entry.id === 'openai') ??
+          bootstrap.providers.find((entry) => entry.id === 'gemini') ??
+          bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+          null;
 
         if (!provider) {
-          throw new Error('Expected at least one provider for sidebar tight-layout coverage.');
+          throw new Error('Expected a release-facing provider for sidebar tight-layout coverage.');
         }
 
         const project = await window.vicode.projects.create({

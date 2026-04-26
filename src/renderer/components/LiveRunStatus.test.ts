@@ -47,7 +47,7 @@ describe('deriveLiveRunStatusSnapshot', () => {
       })
     );
 
-    expect(snapshot.actionLabel).toBe('Completed research topic');
+    expect(snapshot.actionLabel).toBe('Searching the web');
     expect(snapshot.reasoningText).toBe('Comparing open-source finetuning options before replying.');
   });
 
@@ -71,7 +71,7 @@ describe('deriveLiveRunStatusSnapshot', () => {
       })
     );
 
-    expect(snapshot.actionLabel).toBe('Running npm test');
+    expect(snapshot.actionLabel).toBe('Running command');
     expect(snapshot.reasoningText).toBeNull();
   });
 
@@ -102,7 +102,31 @@ describe('deriveLiveRunStatusSnapshot', () => {
     expect(html).toContain('Thinking');
   });
 
-  it('keeps the concrete action visible when the reasoning label matches it', () => {
+  it('summarizes detailed reasoning as a generic Thinking status above the composer', () => {
+    const activity = createActivity({
+      thinkingLines: [
+        {
+          id: 'reasoning',
+          kind: 'thinking',
+          label: 'Thinking',
+          text: 'Inspecting the existing page before editing.',
+          url: null,
+          path: null
+        }
+      ]
+    });
+
+    const snapshot = deriveLiveRunStatusSnapshot(activity);
+    const html = renderToStaticMarkup(React.createElement(LiveRunStatus, { activity }));
+
+    expect(snapshot.actionLabel).toBe('Thinking');
+    expect(snapshot.reasoningText).toBe('Inspecting the existing page before editing.');
+    expect(shouldShowLiveRunAction(snapshot)).toBe(true);
+    expect(html).toContain('Thinking');
+    expect(html).not.toContain('Inspecting the existing page before editing.');
+  });
+
+  it('keeps the concrete action visible without rendering reasoning details above the composer', () => {
     const activity = createActivity({
       thinkingLines: [
         {
@@ -131,6 +155,6 @@ describe('deriveLiveRunStatusSnapshot', () => {
     expect(snapshot.reasoningText).toBe('Comparing sources before drafting the response.');
     expect(shouldShowLiveRunAction(snapshot)).toBe(true);
     expect(html).toContain('Searching the web');
-    expect(html).toContain('Comparing sources before drafting the response.');
+    expect(html).not.toContain('Comparing sources before drafting the response.');
   });
 });

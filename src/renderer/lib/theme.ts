@@ -3,7 +3,7 @@ import type { AccentMode, AppearanceMode } from '../../shared/domain';
 export type ResolvedAppearance = 'dark' | 'light';
 
 const SYSTEM_DARK_MEDIA = '(prefers-color-scheme: dark)';
-const hardFallbackAccent = ['#', '0078', 'd4'].join('');
+const hardFallbackAccent = ['#', '3f3f', '3f'].join('');
 
 type MatchMediaCapable = {
   matchMedia(query: string): MediaQueryList;

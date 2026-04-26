@@ -2,6 +2,23 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
+
+function normalizeTarget(target) {
+  return target.replace(/\\/gu, '/');
+}
+
+function listMarkdownFiles(relativeDir) {
+  const absoluteDir = path.join(root, relativeDir);
+  try {
+    return readdirSync(absoluteDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+      .map((entry) => normalizeTarget(path.join(relativeDir, entry.name)))
+      .sort((left, right) => left.localeCompare(right));
+  } catch {
+    return [];
+  }
+}
+
 const canonicalTargets = [
   'AGENTS.md',
   'README.md',
@@ -12,9 +29,8 @@ const canonicalTargets = [
   'docs/engineering/public-launch-checklist.md',
   'docs/engineering/release-gates.md',
   'docs/engineering/release-program.md',
-  'docs/releases/0.2.1.md',
-  'docs/releases/0.2.1-reviewer-guide.md',
-  'docs/releases/beta-tester-quick-start.md',
+  'docs/engineering/windows-release-runbook.md',
+  ...listMarkdownFiles('docs/releases'),
   'docs/setup/windows-provider-setup.md',
   'src/main/AGENTS.md',
   'src/renderer/AGENTS.md',
@@ -49,10 +65,6 @@ const localPathPatterns = [
   /AppData\\Roaming\\npm\\[^\s`)<>\]]+/gu,
   /AppData\/Roaming\/npm\/[^\s`)<>\]]+/gu
 ];
-
-function normalizeTarget(target) {
-  return target.replace(/\\/gu, '/');
-}
 
 function scanFile(relativePath, findings) {
   const absolutePath = path.join(root, relativePath);

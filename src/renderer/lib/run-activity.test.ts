@@ -197,6 +197,52 @@ describe('deriveRunActivityMap', () => {
     ]);
   });
 
+  it('surfaces Vicode guidance references as visible run activity', () => {
+    const thread = createThreadDetail([
+      {
+        id: 'started',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'started',
+        payload: {},
+        createdAt: '2026-03-16T00:00:00.000Z'
+      },
+      {
+        id: 'guidance',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          activity: {
+            kind: 'guidance',
+            summary: 'Using: Task Routing, Source-Backed Workflow',
+            text: 'Using: Task Routing, Source-Backed Workflow',
+            providerEventType: 'vicode_guidance_using'
+          }
+        },
+        createdAt: '2026-03-16T00:00:01.000Z'
+      }
+    ]);
+
+    const activity = deriveRunActivityMap(thread)['run-1'];
+    expect(activity.thinkingLines).toEqual([
+      expect.objectContaining({
+        kind: 'guidance',
+        label: 'Using: Task Routing, Source-Backed Workflow'
+      })
+    ]);
+    expect(activity.activeHeading).toBe('Working');
+
+    const transcriptItems = deriveRunTranscriptItemsMap(thread)['run-1'];
+    expect(transcriptItems).toEqual([
+      expect.objectContaining({
+        kind: 'activity_line',
+        activityKind: 'guidance',
+        label: 'Using: Task Routing, Source-Backed Workflow'
+      })
+    ]);
+  });
+
   it('normalizes raw research tool names into friendly transcript copy', () => {
     const thread = createThreadDetail([
       {
@@ -1902,7 +1948,7 @@ describe('deriveRunActivityMap', () => {
             summary: 'Failed run_command',
             toolName: 'run_command',
             status: 'error',
-            text: 'run_command is blocked by runtime path policy. The command references a relative path that resolves outside the trusted workspace (..\\..\\outside.txt).'
+            text: 'run_command is blocked by runtime path policy. The command references a relative path that resolves outside the workspace (..\\..\\outside.txt).'
           }
         },
         createdAt: '2026-03-16T00:00:01.000Z'
@@ -1923,7 +1969,7 @@ describe('deriveRunActivityMap', () => {
         kind: 'activity_line',
         activityKind: 'tool_result',
         label: 'Blocked command: path escape',
-        text: 'run_command is blocked by runtime path policy. The command references a relative path that resolves outside the trusted workspace (..\\..\\outside.txt).'
+        text: 'run_command is blocked by runtime path policy. The command references a relative path that resolves outside the workspace (..\\..\\outside.txt).'
       })
     );
   });

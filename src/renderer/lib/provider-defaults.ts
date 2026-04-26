@@ -1,6 +1,22 @@
 import { resolveProviderModelAlias } from '../../providers/catalog';
 import type { ProviderDescriptor, ProviderId } from '../../shared/domain';
-import { providerCanRunInComposer, selectPreferredOllamaModel } from '../../shared/providers';
+import { getProviderMetadata, providerCanRunInComposer, selectPreferredOllamaModel } from '../../shared/providers';
+
+interface ResolveProviderModelOptions {
+  promoteStaleDefault?: boolean;
+}
+
+function shouldPromoteManagedDefault(provider: ProviderDescriptor, modelId: string) {
+  if (provider.id === 'ollama') {
+    return false;
+  }
+
+  if (provider.id === 'openai') {
+    return /^gpt-\d+(?:\.\d+)?$/iu.test(modelId);
+  }
+
+  return modelId === getProviderMetadata(provider.id).defaultModelId;
+}
 
 export function resolveDefaultProviderId(
   providers: ProviderDescriptor[],
@@ -38,7 +54,8 @@ export function resolveDefaultProviderId(
 export function resolveProviderModelId(
   providers: ProviderDescriptor[],
   providerId: ProviderId,
-  preferredModelId: string
+  preferredModelId: string,
+  options: ResolveProviderModelOptions = {}
 ) {
   const provider = providers.find((entry) => entry.id === providerId);
   if (!provider || provider.models.length === 0) {
@@ -47,6 +64,16 @@ export function resolveProviderModelId(
 
   const normalizedModelId = resolveProviderModelAlias(providerId, preferredModelId);
   if (provider.models.some((model) => model.id === normalizedModelId)) {
+    const topModelId = provider.models[0]?.id;
+    const providerDefaultId = getProviderMetadata(provider.id).defaultModelId;
+    if (
+      options.promoteStaleDefault
+      && topModelId
+      && topModelId !== normalizedModelId
+      && (normalizedModelId === providerDefaultId || shouldPromoteManagedDefault(provider, normalizedModelId))
+    ) {
+      return topModelId;
+    }
     return normalizedModelId;
   }
 

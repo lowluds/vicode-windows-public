@@ -42,8 +42,6 @@ export interface SettingsViewProps {
   clearAllProviderAuth: () => Promise<void>;
   appMeta: AppMeta | null;
   appUpdateState: AppUpdateState | null;
-  hasActiveRun: boolean;
-  queuedUpdateInstallKey: string | null;
   checkForAppUpdates: () => Promise<void>;
   restartToUpdate: () => Promise<void>;
   storageDiagnostics: StorageDiagnostics | null;
@@ -61,6 +59,10 @@ export interface SettingsViewProps {
   ) => Promise<void>;
   workspaceBootstrapStatus: WorkspaceBootstrapStatus | null;
   openWorkspaceBootstrap: () => Promise<void>;
+  activeThreadTitle: string | null;
+  captureDailyNoteFromThread: () => Promise<void>;
+  promoteThreadToMemory: () => Promise<void>;
+  suggestUserPreferenceFromThread: () => Promise<void>;
   archivedThreads: ThreadSummary[];
   projects: Project[];
   restoreArchivedThread: (threadId: string) => Promise<void>;

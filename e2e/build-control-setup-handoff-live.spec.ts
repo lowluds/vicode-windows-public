@@ -164,7 +164,7 @@ async function openThreadInUi(window: Page, projectId: string, threadId: string)
 const durableStatePaths = getDurableStatePaths();
 test.skip(!durableStatePaths, 'APPDATA and LOCALAPPDATA must be available for durable-state live E2E.');
 
-test('approving a build-plan setup thread starts Build Control handoff instead of normal execution', async () => {
+test('approving a build-plan setup thread starts Build Control handoff instead of normal execution @live-provider', async () => {
   let app: Awaited<ReturnType<typeof launchDurableApp>>['app'] | null = null;
   let window: Page | null = null;
   let projectId: string | null = null;
@@ -230,7 +230,7 @@ test('approving a build-plan setup thread starts Build Control handoff instead o
 
     await waitForPlanReady(window, thread.id);
     await openThreadInUi(window, project.id, thread.id);
-    await expect(window.getByTestId('planner-approve-button')).toContainText('Accept and start Build Control', {
+    await expect(window.getByTestId('planner-approve-button')).toContainText('Accept and start Autonomous Builds', {
       timeout: 30_000
     });
 

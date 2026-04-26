@@ -268,6 +268,7 @@ export function PluginServerDialog({
             <ActionButton
               size="compact"
               className={!draft.launchApproved ? 'skills-toggle-button is-active' : 'skills-toggle-button'}
+              aria-pressed={!draft.launchApproved}
               onClick={() => updateDraft({ launchApproved: false })}
             >
               Approval required
@@ -275,6 +276,7 @@ export function PluginServerDialog({
             <ActionButton
               size="compact"
               className={draft.launchApproved ? 'skills-toggle-button is-active' : 'skills-toggle-button'}
+              aria-pressed={draft.launchApproved}
               onClick={() => updateDraft({ launchApproved: true })}
             >
               Start immediately

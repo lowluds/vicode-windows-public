@@ -1,13 +1,25 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const root = process.cwd();
+const packageJson = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
 const releaseDir = path.join(root, 'release');
 const winUnpackedDir = path.join(releaseDir, 'win-unpacked');
 const appAsarPath = path.join(winUnpackedDir, 'resources', 'app.asar');
+const packagedBetterSqlitePath = path.join(
+  winUnpackedDir,
+  'resources',
+  'app.asar.unpacked',
+  'node_modules',
+  'better-sqlite3',
+  'build',
+  'Release',
+  'better_sqlite3.node'
+);
 const textExtensions = new Set([
   '.blockmap',
   '.css',
@@ -22,7 +34,8 @@ const textExtensions = new Set([
   '.yml'
 ]);
 const forbiddenReleaseFiles = ['builder-debug.yml', 'builder-effective-config.yaml'];
-const requiredAsarEntries = ['\\out\\main\\index.js', '\\out\\preload\\index.cjs', '\\out\\renderer\\index.html'];
+const packageMainEntry = `\\${String(packageJson.main ?? 'out/main/index.js').replace(/\//gu, '\\')}`;
+const requiredAsarEntries = [packageMainEntry, '\\out\\preload\\index.cjs', '\\out\\renderer\\index.html'];
 const forbiddenRootAsarPrefixes = [
   '\\.vicode\\',
   '\\docs\\',
@@ -102,6 +115,21 @@ function getAsarEntries() {
     .filter(Boolean);
 }
 
+function getFileSha256(filePath) {
+  return createHash('sha256').update(readFileSync(filePath)).digest('hex');
+}
+
+function getExpectedElectronBetterSqlitePath() {
+  const electronVersion = JSON.parse(readFileSync(require.resolve('electron/package.json'), 'utf8')).version;
+  return path.join(
+    root,
+    '.cache',
+    'native-modules',
+    'better-sqlite3',
+    `electron-${electronVersion}-${process.platform}-${process.arch}.node`
+  );
+}
+
 function main() {
   if (!existsSync(releaseDir)) {
     throw new Error('release/ was not found. Run "npm run dist:win" before auditing release artifacts.');
@@ -124,6 +152,27 @@ function main() {
   for (const requiredEntry of requiredAsarEntries) {
     if (!asarEntriesLower.includes(requiredEntry.toLowerCase())) {
       findings.push(`Packaged app is missing expected entry: ${requiredEntry}`);
+    }
+  }
+
+  if (!existsSync(packagedBetterSqlitePath)) {
+    findings.push(
+      'Packaged app is missing resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node'
+    );
+  } else {
+    const expectedElectronBetterSqlitePath = getExpectedElectronBetterSqlitePath();
+    if (!existsSync(expectedElectronBetterSqlitePath)) {
+      findings.push(
+        `Expected Electron better-sqlite3 cache was not found: ${path.relative(root, expectedElectronBetterSqlitePath)}`
+      );
+    } else if (getFileSha256(packagedBetterSqlitePath) !== getFileSha256(expectedElectronBetterSqlitePath)) {
+      findings.push(
+        [
+          'Packaged better_sqlite3.node does not match the prepared Electron-target binary.',
+          `expected cache: ${path.relative(root, expectedElectronBetterSqlitePath)}`,
+          'This usually means a Node ABI build was packaged into the desktop app.'
+        ].join(' ')
+      );
     }
   }
 

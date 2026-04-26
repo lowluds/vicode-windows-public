@@ -269,7 +269,7 @@ describe('MemoryWritesService', () => {
     db.close();
   });
 
-  it('blocks daily note review drafts for untrusted workspaces', () => {
+  it('creates daily note review drafts when a folder is attached, even if legacy trust is false', () => {
     const db = createDb();
     const workspaceDir = createTempDir('vicode-memory-untrusted-workspace-');
     const project = db.createProject({
@@ -287,11 +287,12 @@ describe('MemoryWritesService', () => {
 
     const service = new MemoryWritesService(db, new WorkspaceMemoryService(db));
 
-    expect(() => service.createDailyNoteReview(thread.id)).toThrow(
-      'Daily note capture requires a trusted project with a real workspace folder.'
-    );
-    expect(db.listJobs()).toHaveLength(0);
-    expect(db.listPendingReviewItems()).toHaveLength(0);
+    const created = service.createDailyNoteReview(thread.id);
+
+    expect(created.alreadyPending).toBe(false);
+    expect(created.reviewItem.details.actionType).toBe('daily_note_capture');
+    expect(db.listJobs()).toHaveLength(1);
+    expect(db.listPendingReviewItems()).toHaveLength(1);
 
     db.close();
   });
@@ -315,10 +316,10 @@ describe('MemoryWritesService', () => {
     const service = new MemoryWritesService(db, new WorkspaceMemoryService(db));
 
     expect(() => service.createMemoryPromotionReview(thread.id)).toThrow(
-      'Memory promotion requires a trusted project with a real workspace folder.'
+      'Memory promotion requires a project with a real workspace folder.'
     );
     expect(() => service.createUserPreferenceReview(thread.id)).toThrow(
-      'USER.md updates require a trusted project with a real workspace folder.'
+      'USER.md updates require a project with a real workspace folder.'
     );
     expect(db.listJobs()).toHaveLength(0);
     expect(db.listPendingReviewItems()).toHaveLength(0);

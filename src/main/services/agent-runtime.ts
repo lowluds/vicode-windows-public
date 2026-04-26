@@ -49,6 +49,13 @@ import {
   createWorkspaceDirectory,
   writeWorkspaceTextFile
 } from './agent-runtime-workspace-writes';
+import type {
+  AgentRuntimeVicodeCreatorBridge
+} from './agent-runtime-vicode-creators';
+import {
+  parsePluginBundleToolInput,
+  parseSkillBundleToolInput
+} from './agent-runtime-vicode-creators';
 import {
   buildToolCallActivity,
   buildToolResultActivity,
@@ -151,6 +158,7 @@ function looksBinary(content: string) {
 
 export class AgentRuntimeService implements AgentRuntime {
   private subagents: AgentRuntimeSubagentBridge | null = null;
+  private creators: AgentRuntimeVicodeCreatorBridge | null = null;
 
   constructor(
     private readonly mcpBridge?: {
@@ -162,6 +170,10 @@ export class AgentRuntimeService implements AgentRuntime {
 
   setSubagents(subagents: AgentRuntimeSubagentBridge | null) {
     this.subagents = subagents;
+  }
+
+  setCreators(creators: AgentRuntimeVicodeCreatorBridge | null) {
+    this.creators = creators;
   }
 
   async listAvailableMcpTools(): Promise<McpToolDescriptor[]> {
@@ -181,6 +193,7 @@ export class AgentRuntimeService implements AgentRuntime {
     return buildAgentRuntimeToolCatalog({
       ...context,
       delegationEnabled: this.subagents !== null,
+      creatorToolsEnabled: this.creators !== null,
       nativeWebResearchEnabled,
       mcpTools
     });
@@ -225,6 +238,10 @@ export class AgentRuntimeService implements AgentRuntime {
             return await this.researchTopic(call.arguments, context);
           case 'mkdir':
             return await this.makeDirectory(call.arguments, context);
+          case 'create_skill_bundle':
+            return await this.createSkillBundle(call.arguments, context);
+          case 'create_plugin_bundle':
+            return await this.createPluginBundle(call.arguments, context);
           case 'write_file':
             return await this.writeFile(call.arguments, context);
           case 'apply_patch':
@@ -684,6 +701,76 @@ export class AgentRuntimeService implements AgentRuntime {
     return {
       toolName: 'mkdir',
       content
+    };
+  }
+
+  private async createSkillBundle(
+    args: Record<string, unknown>,
+    context: AgentToolExecutionContext
+  ): Promise<AgentToolExecutionResult> {
+    if (!this.creators) {
+      throw new Error('create_skill_bundle is not available because no Vicode creator bridge is configured.');
+    }
+
+    const input = parseSkillBundleToolInput(args);
+    const created = await this.creators.createSkillBundle(input);
+    const summary = `${created.existed ? 'Updated' : 'Created'} ${created.relativeRootPath}`;
+    context.onInfo?.({
+      message: summary,
+      activity: {
+        kind: 'file_write',
+        path: created.relativeRootPath,
+        summary
+      }
+    });
+
+    return {
+      toolName: 'create_skill_bundle',
+      content: [
+        summary,
+        `scope: ${created.scope}`,
+        created.projectId ? `project_id: ${created.projectId}` : null,
+        created.importedId ? `skill_id: ${created.importedId}` : null,
+        'files:',
+        ...created.filePaths.map((path) => `- ${path}`)
+      ]
+        .filter((value): value is string => Boolean(value))
+        .join('\n')
+    };
+  }
+
+  private async createPluginBundle(
+    args: Record<string, unknown>,
+    context: AgentToolExecutionContext
+  ): Promise<AgentToolExecutionResult> {
+    if (!this.creators) {
+      throw new Error('create_plugin_bundle is not available because no Vicode creator bridge is configured.');
+    }
+
+    const input = parsePluginBundleToolInput(args);
+    const created = await this.creators.createPluginBundle(input);
+    const summary = `${created.existed ? 'Updated' : 'Created'} ${created.relativeRootPath}`;
+    context.onInfo?.({
+      message: summary,
+      activity: {
+        kind: 'file_write',
+        path: created.relativeRootPath,
+        summary
+      }
+    });
+
+    return {
+      toolName: 'create_plugin_bundle',
+      content: [
+        summary,
+        `scope: ${created.scope}`,
+        created.projectId ? `project_id: ${created.projectId}` : null,
+        created.importedId ? `server_id: ${created.importedId}` : null,
+        'files:',
+        ...created.filePaths.map((path) => `- ${path}`)
+      ]
+        .filter((value): value is string => Boolean(value))
+        .join('\n')
     };
   }
 

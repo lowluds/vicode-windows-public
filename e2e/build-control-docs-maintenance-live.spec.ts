@@ -143,7 +143,7 @@ async function openThreadInUi(window: Page, projectId: string, threadId: string,
     'vicode.vicodeBuild'
   ]);
   await dismissWelcomeIfVisible(window);
-  await expect(window.locator('.thread-title-row h2')).toHaveText(threadTitle, { timeout: 30_000 });
+  await expect(window.locator('.windows-titlebar-context-thread')).toHaveText(threadTitle, { timeout: 30_000 });
 }
 
 async function waitForPlannerState(

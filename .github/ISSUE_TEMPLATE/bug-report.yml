@@ -1,0 +1,68 @@
+name: Bug report
+description: Report a reproducible Vicode problem for the Windows public beta.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. Please include the exact desktop build, provider, and steps so the issue can be reproduced.
+  - type: input
+    id: version
+    attributes:
+      label: Vicode version
+      description: Example: 0.2.5
+      placeholder: 0.2.5
+    validations:
+      required: true
+  - type: dropdown
+    id: install_path
+    attributes:
+      label: Install path
+      options:
+        - Windows installer
+        - win-unpacked build
+        - Local dev build
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options:
+        - OpenAI / Codex CLI
+        - Gemini CLI
+        - Ollama
+        - Other / not provider-specific
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the shortest exact path to trigger the problem.
+      placeholder: |
+        1. Open Vicode
+        2. Attach workspace...
+        3. Start a run...
+        4. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs or screenshots
+      description: Paste any error text, updater log lines, or screenshots that help.

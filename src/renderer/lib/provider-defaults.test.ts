@@ -127,6 +127,56 @@ describe('resolveDefaultProviderId', () => {
     expect(modelId).toBe('deepseek-r1:8b');
   });
 
+  it('promotes a stale metadata default to the provider runtime order when requested', () => {
+    const providers = [
+      createProvider('openai', true, [
+        {
+          id: 'gpt-5.5',
+          label: 'GPT-5.5',
+          description: 'Latest Codex model.',
+          supportsVision: true
+        },
+        {
+          id: 'gpt-5.4',
+          label: 'GPT-5.4',
+          description: 'Previous Codex default.',
+          supportsVision: true
+        }
+      ])
+    ];
+
+    expect(resolveProviderModelId(providers, 'openai', 'gpt-5.4')).toBe('gpt-5.4');
+    expect(
+      resolveProviderModelId(providers, 'openai', 'gpt-5.4', {
+        promoteStaleDefault: true
+      })
+    ).toBe('gpt-5.5');
+
+    expect(
+      resolveProviderModelId(
+        [
+          createProvider('openai', true, [
+            {
+              id: 'gpt-5.6',
+              label: 'GPT-5.6',
+              description: 'Future Codex model.',
+              supportsVision: true
+            },
+            {
+              id: 'gpt-5.5',
+              label: 'GPT-5.5',
+              description: 'Previous managed default.',
+              supportsVision: true
+            }
+          ])
+        ],
+        'openai',
+        'gpt-5.5',
+        { promoteStaleDefault: true }
+      )
+    ).toBe('gpt-5.6');
+  });
+
   it('returns the preferred visible Ollama model for UI previews', () => {
     const model = resolvePreferredProviderModel(
       [

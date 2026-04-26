@@ -108,7 +108,8 @@ describe('OpenAIAdapter runtime discovery', () => {
                         model: 'gpt-5.4',
                         displayName: 'gpt-5.4',
                         description: 'Latest frontier agentic coding model.',
-                        inputModalities: ['text', 'image']
+                        inputModalities: ['text', 'image'],
+                        isDefault: true
                       }
                     ],
                     nextCursor: 'page-2'
@@ -150,7 +151,7 @@ describe('OpenAIAdapter runtime discovery', () => {
         label: 'GPT-5.4',
         description: 'Latest frontier agentic coding model.',
         supportsVision: true,
-        recommendation: 'recommended',
+        recommendation: undefined,
         contextWindowTokens: 1_000_000,
         contextWindowSource: 'configured',
         autoCompactTokenLimit: 750_000
@@ -2082,14 +2083,11 @@ describe('OpenAIAdapter runtime discovery', () => {
     expect(command).not.toContain('model_auto_compact_token_limit=');
   });
 
-  it('rejects untrusted workspaces through project validation', () => {
+  it('accepts legacy false-trust workspaces through project validation', () => {
     const adapter = new OpenAIAdapter();
     expect(
       adapter.validateProjectContext('C:\\Users\\test-user\\Desktop\\vicode-project\\vicode-windows', false)
-    ).toEqual({
-      valid: false,
-      message: 'Trust the project before running Codex against this workspace.'
-    });
+    ).toEqual({ valid: true });
   });
 
   it('keeps dangerous bypass flags for full-access runs', async () => {
@@ -2126,6 +2124,97 @@ describe('OpenAIAdapter runtime discovery', () => {
 
     expect(spawnMock.mock.calls[0]?.[1]?.join(' ')).toContain('--dangerously-bypass-approvals-and-sandbox');
     expect(spawnMock.mock.calls[0]?.[1]?.join(' ')).toContain('--ephemeral');
+  });
+
+  it('does not surface Codex CLI operational warnings as run activity', async () => {
+    const child = new FakeChildProcess();
+    spawnMock.mockReturnValue(child);
+
+    const adapter = new OpenAIAdapter();
+    vi.spyOn(adapter, 'detectInstall').mockResolvedValue({
+      installed: true,
+      cliPath: 'C:\\Users\\test-user\\AppData\\Roaming\\npm\\codex.cmd'
+    });
+    const onInfo = vi.fn();
+    const onComplete = vi.fn();
+    const onError = vi.fn();
+
+    await adapter.startRun(
+      {
+        threadId: 'thread-1',
+        runId: 'run-1',
+        prompt: 'hello',
+        modelId: 'gpt-5.4',
+        folderPath: 'C:\\Users\\test-user\\Desktop\\vicode-project\\vicode-windows',
+        trusted: true,
+        apiKey: null,
+        runMode: 'default',
+        executionPermission: 'default'
+      },
+      {
+        onStart: vi.fn(),
+        onDelta: vi.fn(),
+        onInfo,
+        onComplete,
+        onError,
+        onAbort: vi.fn()
+      }
+    );
+
+    child.stdout.write('2026-04-24T01:21:08.607613Z WARN codex_core_plugins:: manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\\Users\\kyle-.codex.tmp\\plugins\\plugins\\build-ios-apps.codex-plugin\\plugin.json\n');
+    child.stderr.write('2026-04-24T01:21:08.609319Z WARN codex_core_plugins:: manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\\Users\\kyle-.codex.tmp\\plugins\\plugins\\plugin-eval.codex-plugin\\plugin.json\n');
+    child.stderr.write('2026-04-24T01:21:09.068500Z WARN codex_analytics:: client: events failed with status 403 Forbidden:\n');
+    child.stderr.write('<html>\n<head><title>Challenge</title></head>\n<body>Enable JavaScript and cookies to continue</body>\n</html>\n');
+    child.stderr.write('2026-04-24T01:21:09.168500Z ERROR codex_core::session: failed to load skill C:\\Users\\kyle-\\.codex\\skills\\ci-triage\\SKILL.md: missing YAML frontmatter delimited by ---\n');
+    child.stdout.write('2026-04-24T01:21:10.270393Z WARN rmcp::service::client: Received unexpected message notification=JsonRpcNotification { jsonrpc: JsonRpcVersion2_0, notification: CustomNotification(CustomNotification { method: "window/logMessage", params: Some(Object {"type": Number(3), "message": String("Starting server v0.0.46 (PID: 59740)")}), extensions: Extensions }) }\n');
+    child.stdout.write(`${JSON.stringify({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hi.' }] })}\n`);
+    child.emit('close', 0);
+
+    expect(onInfo).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+    expect(onComplete).toHaveBeenCalledWith('Hi.');
+  });
+
+  it('does not report suppressed Codex operational diagnostics as the terminal run error', async () => {
+    const child = new FakeChildProcess();
+    spawnMock.mockReturnValue(child);
+
+    const adapter = new OpenAIAdapter();
+    vi.spyOn(adapter, 'detectInstall').mockResolvedValue({
+      installed: true,
+      cliPath: 'C:\\Users\\test-user\\AppData\\Roaming\\npm\\codex.cmd'
+    });
+    const onInfo = vi.fn();
+    const onError = vi.fn();
+
+    await adapter.startRun(
+      {
+        threadId: 'thread-1',
+        runId: 'run-1',
+        prompt: 'hello',
+        modelId: 'gpt-5.4',
+        folderPath: 'C:\\Users\\test-user\\Desktop\\vicode-project\\vicode-windows',
+        trusted: true,
+        apiKey: null,
+        runMode: 'default',
+        executionPermission: 'default'
+      },
+      {
+        onStart: vi.fn(),
+        onDelta: vi.fn(),
+        onInfo,
+        onComplete: vi.fn(),
+        onError,
+        onAbort: vi.fn()
+      }
+    );
+
+    child.stderr.write('2026-04-24T01:21:12.117294Z WARN codex_core_plugins:: manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\\Users\\kyle-.codex.tmp\\plugins\\plugins\\plugin-eval.codex-plugin\\plugin.json\n');
+    child.emit('close', 1);
+
+    expect(onInfo).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith('Codex CLI exited with code 1.');
+    expect(String(onError.mock.calls[0]?.[0])).not.toContain('codex.tmp');
   });
 
   it('returns null when Codex runtime model discovery fails before initialization completes', async () => {

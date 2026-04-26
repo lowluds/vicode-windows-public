@@ -11,7 +11,7 @@ Supported secondary lane:
 
 - `Ollama`
 
-Compatibility-only lanes:
+Temporarily hidden compatibility lanes in the current beta UI:
 
 - `Qwen`
 - `Kimi`
@@ -50,7 +50,7 @@ Current Vicode truth:
 
 - Codex runs as a provider-owned CLI lane
 - Vicode does not claim app-owned approval pauses for this lane
-- trusted workspace gating is required before execution
+- an attached workspace folder is required before workspace-dependent execution
 - if Vicode finds an existing Codex CLI sign-in on this machine, it shows that as a local sign-in the user may explicitly adopt; it does not silently import or sync those credentials
 
 ## Gemini
@@ -70,7 +70,7 @@ Current Vicode truth:
 
 - Gemini runs as a provider-owned CLI lane
 - Gemini keeps its own approval and sandbox boundary
-- trusted workspace gating is required before execution
+- an attached workspace folder is required before workspace-dependent execution
 - if Vicode finds an existing Gemini CLI sign-in on this machine, it shows that as a local sign-in the user may explicitly adopt; it does not silently import or sync those credentials
 - when Vicode starts a fresh Gemini CLI sign-in, it launches Gemini's browser-based OAuth flow through a managed background CLI process instead of requiring a separate visible terminal window
 
@@ -97,7 +97,7 @@ Two supported routes:
 Current Vicode truth:
 
 - Ollama is the only active production lane where Vicode owns runtime approval behavior directly
-- trusted workspace gating is required before execution
+- an attached workspace folder is required before workspace-dependent execution
 - workspace command and network policy apply to app-owned shell execution in this lane
 
 ## Qwen and Kimi
@@ -105,6 +105,7 @@ Current Vicode truth:
 Current stance:
 
 - available as compatibility-only lanes
+- currently hidden from the beta provider UI
 - not part of the active production optimization program
 - keep install and run truth honest, but do not expect the same depth of active hardening as OpenAI, Gemini, or Ollama
 

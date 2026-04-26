@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { createProviderModelFromId, sanitizeDiscoveredModels } from './catalog';
 
 describe('provider catalog recommendations', () => {
-  it('marks the preferred OpenAI model as recommended', () => {
-    expect(createProviderModelFromId('openai', 'gpt-5.4')?.recommendation).toBe('recommended');
+  it('marks quick OpenAI models without guessing the live Codex default', () => {
+    expect(createProviderModelFromId('openai', 'gpt-5.5')?.recommendation).toBeUndefined();
+    expect(createProviderModelFromId('openai', 'gpt-5.4')?.recommendation).toBeUndefined();
     expect(createProviderModelFromId('openai', 'gpt-5-mini')?.recommendation).toBe('fast');
   });
 
@@ -50,6 +51,29 @@ describe('provider catalog recommendations', () => {
     expect(models[1].recommendation).toBeUndefined();
   });
 
+  it('can preserve provider runtime order for Ollama discovery', () => {
+    const models = sanitizeDiscoveredModels(
+      'ollama',
+      [
+        {
+          id: 'llama3.1',
+          label: 'Llama 3.1',
+          description: 'General local model.',
+          supportsVision: false
+        },
+        {
+          id: 'qwen3-coder',
+          label: 'Qwen 3 Coder',
+          description: 'Coding local model.',
+          supportsVision: false
+        }
+      ],
+      { preserveInputOrder: true }
+    );
+
+    expect(models.map((model) => model.id)).toEqual(['llama3.1', 'qwen3-coder']);
+  });
+
   it('keeps non-certified Ollama coding families unlabeled until benchmark evidence exists', () => {
     expect(createProviderModelFromId('ollama', 'deepseek-coder:33b')).toMatchObject({
       id: 'deepseek-coder:33b',
@@ -62,7 +86,43 @@ describe('provider catalog recommendations', () => {
     expect(createProviderModelFromId('openai', 'gpt-5.4-mini')?.recommendation).toBe('fast');
   });
 
+  it('keeps newly discovered OpenAI versioned models ahead of older hard-coded routes', () => {
+    const models = sanitizeDiscoveredModels('openai', [
+      {
+        id: 'gpt-5.4',
+        label: 'GPT-5.4',
+        description: 'Known route.',
+        supportsVision: true
+      },
+      {
+        id: 'gpt-5.6',
+        label: 'GPT-5.6',
+        description: 'Future discovered route.',
+        supportsVision: true
+      },
+      {
+        id: 'gpt-5.5',
+        label: 'GPT-5.5',
+        description: 'Current discovered route.',
+        supportsVision: true
+      },
+      {
+        id: 'gpt-5.6-mini',
+        label: 'GPT-5.6 Mini',
+        description: 'Future quick route.',
+        supportsVision: true
+      }
+    ]);
+
+    expect(models.map((model) => model.id)).toEqual(['gpt-5.6', 'gpt-5.6-mini', 'gpt-5.5', 'gpt-5.4']);
+  });
+
   it('attaches model-specific context metadata for known provider routes', () => {
+    expect(createProviderModelFromId('openai', 'gpt-5.5')).toMatchObject({
+      contextWindowTokens: 400_000,
+      autoCompactTokenLimit: null,
+      contextWindowSource: 'official'
+    });
     expect(createProviderModelFromId('openai', 'gpt-5.4')).toMatchObject({
       contextWindowTokens: 1_000_000,
       autoCompactTokenLimit: 750_000,

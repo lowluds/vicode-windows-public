@@ -68,6 +68,10 @@ describe('provider text normalization', () => {
     const acronymBoundary = appendAssistantTextDelta('10GB VRAM', 'while retaining near-full functionality.');
     expect(acronymBoundary.text).toBe('10GB VRAM while retaining near-full functionality.');
     expect(acronymBoundary.delta).toBe(' while retaining near-full functionality.');
+
+    const technicalFragment = appendAssistantTextDelta('m', 'cp: hello-world');
+    expect(technicalFragment.text).toBe('mcp: hello-world');
+    expect(technicalFragment.delta).toBe('cp: hello-world');
   });
 
   it('promotes separate prose blocks into paragraph breaks when a later chunk starts a new sentence block', () => {
@@ -183,6 +187,8 @@ describe('provider text normalization', () => {
     expect(normalizeAssistantVisibleTextChunk('Agent ic workflows with tool use')).toBe(
       'Agentic workflows with tool use'
     );
+    expect(normalizeAssistantVisibleTextChunk('h ello world')).toBe('hello world');
+    expect(normalizeAssistantVisibleTextChunk('m cp: hello-world')).toBe('mcp: hello-world');
     expect(normalizeAssistantVisibleTextChunk('AImodels can still fail if VRAMwhile loading is too limited.')).toBe(
       'AI models can still fail if VRAM while loading is too limited.'
     );
@@ -251,6 +257,9 @@ describe('provider text normalization', () => {
     );
     expect(findSuspiciousAssistantTextPatterns('Agent ic workflows with tool use')).toEqual(
       expect.arrayContaining(['split-word-fragment'])
+    );
+    expect(findSuspiciousAssistantTextPatterns('m cp: hello-world')).toEqual(
+      expect.arrayContaining(['split-acronym-fragment'])
     );
     expect(findSuspiciousAssistantTextPatterns('AImodel output can still jam words together.')).toEqual(
       expect.arrayContaining(['missing-space-after-acronym'])

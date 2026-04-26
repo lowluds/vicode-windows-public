@@ -7,10 +7,14 @@ import { closeApp, launchApp, waitForBridge } from './helpers/electron';
 async function seedSidebarFixture(window: Page, workspaceDir: string) {
   return await window.evaluate(async ({ workspaceDir }) => {
     const bootstrap = await window.vicode.app.getBootstrap();
-    const provider = bootstrap.providers.find((entry) => entry.installed) ?? bootstrap.providers[0] ?? null;
+    const provider =
+      bootstrap.providers.find((entry) => entry.id === 'openai') ??
+      bootstrap.providers.find((entry) => entry.id === 'gemini') ??
+      bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+      null;
 
     if (!provider) {
-      throw new Error('Expected at least one provider for the sidebar fixture.');
+      throw new Error('Expected a release-facing provider for the sidebar fixture.');
     }
 
     const project = await window.vicode.projects.create({
@@ -88,7 +92,7 @@ test.describe.serial('sidebar thread indicator', () => {
     rmSync(workspaceDir, { recursive: true, force: true });
   });
 
-  test('draws a connector rail for the selected thread row only', async () => {
+  test('draws one connector rail with row elbows for thread rows', async () => {
     const launched = await launchApp({
       bridgePaths: ['vicode.app', 'vicode.projects', 'vicode.threads', 'vicode.settings']
     });
@@ -111,10 +115,12 @@ test.describe.serial('sidebar thread indicator', () => {
         }
         const row = document.querySelector(`[data-testid="thread-row-${threadId}"]`);
         const shell = row?.parentElement;
+        const list = shell?.closest('.project-thread-list');
         if (!shell) {
           return null;
         }
         const pseudo = window.getComputedStyle(shell, '::before');
+        const listPseudo = list ? window.getComputedStyle(list, '::before') : null;
         return {
           className: shell.className,
           width: pseudo.width,
@@ -122,7 +128,9 @@ test.describe.serial('sidebar thread indicator', () => {
           borderLeftStyle: pseudo.borderLeftStyle,
           borderBottomStyle: pseudo.borderBottomStyle,
           borderBottomLeftRadius: pseudo.borderBottomLeftRadius,
-          content: pseudo.content
+          content: pseudo.content,
+          listRailWidth: listPseudo?.width ?? null,
+          listRailContent: listPseudo?.content ?? null
         };
       };
 
@@ -138,6 +146,8 @@ test.describe.serial('sidebar thread indicator', () => {
     expect(connectorState.active).not.toBeNull();
     expect(connectorState.active?.className).toContain('is-active-thread');
     expect(connectorState.active?.content).toBe('""');
+    expect(connectorState.active?.listRailContent).toBe('""');
+    expect(connectorState.active?.listRailWidth).toBe('1px');
     expect(connectorState.active?.borderLeftStyle).toBe('solid');
     expect(connectorState.active?.borderBottomStyle).toBe('solid');
     expect(connectorState.active?.width).not.toBe('0px');
@@ -146,6 +156,13 @@ test.describe.serial('sidebar thread indicator', () => {
 
     expect(connectorState.inactive).not.toBeNull();
     expect(connectorState.inactive?.className).not.toContain('is-active-thread');
-    expect(connectorState.inactive?.content).toBe('none');
+    expect(connectorState.inactive?.content).toBe('""');
+    expect(connectorState.inactive?.listRailContent).toBe('""');
+    expect(connectorState.inactive?.listRailWidth).toBe('1px');
+    expect(connectorState.inactive?.borderLeftStyle).toBe('solid');
+    expect(connectorState.inactive?.borderBottomStyle).toBe('solid');
+    expect(connectorState.inactive?.width).not.toBe('0px');
+    expect(connectorState.inactive?.height).not.toBe('0px');
+    expect(connectorState.inactive?.borderBottomLeftRadius).not.toBe('0px');
   });
 });

@@ -1,4 +1,6 @@
 import { EventEmitter } from 'node:events';
+import { appendFileSync, mkdirSync } from 'node:fs';
+import path from 'node:path';
 import { app } from 'electron';
 import electronUpdater, { type AppUpdater, type ProgressInfo, type UpdateInfo } from 'electron-updater';
 import type { AppUpdateState } from '../../shared/domain';
@@ -76,6 +78,7 @@ export class AppUpdaterService {
   private readonly currentVersion: string;
   private readonly detachListeners: Array<() => void> = [];
   private readonly updateCheckIntervalMs: number;
+  private readonly logPath: string | null;
   private state: AppUpdateState;
   private initialized = false;
   private scheduledCheckTimer: NodeJS.Timeout | null = null;
@@ -88,14 +91,22 @@ export class AppUpdaterService {
       updateCheckIntervalMs?: number;
       isPackaged?: boolean;
       platform?: NodeJS.Platform;
+      logPath?: string | null;
     }
   ) {
     this.currentVersion = options?.currentVersion ?? app?.getVersion?.() ?? '0.0.0';
     this.updateCheckIntervalMs = options?.updateCheckIntervalMs ?? DEFAULT_UPDATE_CHECK_INTERVAL_MS;
+    this.logPath = options?.logPath?.trim() ? options.logPath : null;
     this.state = createInitialState({
       currentVersion: this.currentVersion,
       isPackaged: options?.isPackaged ?? Boolean(app?.isPackaged),
       platform: options?.platform ?? process.platform
+    });
+    this.log('constructed', {
+      currentVersion: this.currentVersion,
+      enabled: this.state.enabled,
+      status: this.state.status,
+      message: this.state.message
     });
   }
 
@@ -110,11 +121,18 @@ export class AppUpdaterService {
 
   initialize() {
     if (this.initialized) {
+      this.log('initialize.skip', { reason: 'already_initialized' });
       return;
     }
     this.initialized = true;
+    this.log('initialize.start', {
+      enabled: this.state.enabled,
+      packaged: Boolean(app?.isPackaged),
+      platform: process.platform
+    });
 
     if (!this.state.enabled) {
+      this.log('initialize.disabled', { message: this.state.message });
       return;
     }
 
@@ -126,6 +144,11 @@ export class AppUpdaterService {
     }
 
     this.attachUpdaterListeners();
+    this.log('initialize.listeners_attached', {
+      autoDownload: this.updater.autoDownload,
+      autoInstallOnAppQuit: this.updater.autoInstallOnAppQuit,
+      forceDevUpdateConfig: this.updater.forceDevUpdateConfig
+    });
     void this.checkForUpdates().catch(() => undefined);
     this.scheduledCheckTimer = setInterval(() => {
       void this.checkForUpdates().catch(() => undefined);
@@ -134,19 +157,27 @@ export class AppUpdaterService {
 
   async checkForUpdates(): Promise<AppUpdateState> {
     if (!this.state.enabled) {
+      this.log('check.skip', { reason: 'disabled' });
       return this.getState();
     }
 
     if (this.checkPromise) {
+      this.log('check.skip', { reason: 'already_running' });
       return this.checkPromise;
     }
 
     this.checkPromise = (async () => {
       try {
+        this.log('check.start', { currentVersion: this.currentVersion });
         await this.updater.checkForUpdates();
+        this.log('check.complete', {
+          status: this.state.status,
+          availableVersion: this.state.availableVersion
+        });
         return this.getState();
       } catch (error) {
         const message = normalizeErrorMessage(error);
+        this.log('check.error', { message });
         this.updateState({
           status: 'error',
           lastCheckedAt: new Date().toISOString(),
@@ -167,8 +198,13 @@ export class AppUpdaterService {
 
   async restartToUpdate() {
     if (this.state.status !== 'downloaded') {
+      this.log('restart.skip', {
+        reason: 'not_downloaded',
+        status: this.state.status
+      });
       throw new Error('No downloaded desktop update is ready to install.');
     }
+    this.log('restart.start', { availableVersion: this.state.availableVersion });
     this.updater.quitAndInstall();
   }
 
@@ -256,9 +292,13 @@ export class AppUpdaterService {
   }
 
   private attachListener(eventName: string, listener: (...args: any[]) => void) {
-    this.updater.on(eventName as never, listener as never);
+    const wrappedListener = (...args: any[]) => {
+      this.log(`event.${eventName}`, args[0] ?? null);
+      listener(...args);
+    };
+    this.updater.on(eventName as never, wrappedListener as never);
     this.detachListeners.push(() => {
-      this.updater.off(eventName as never, listener as never);
+      this.updater.off(eventName as never, wrappedListener as never);
     });
   }
 
@@ -269,9 +309,31 @@ export class AppUpdaterService {
       currentVersion: this.currentVersion,
       enabled: this.state.enabled
     };
+    this.log('state.update', this.state);
     this.emitter.emit('event', {
       type: 'app.updateStateChanged',
       update: this.getState()
     } satisfies AppEvent);
+  }
+
+  private log(event: string, detail: unknown) {
+    if (!this.logPath) {
+      return;
+    }
+
+    try {
+      mkdirSync(path.dirname(this.logPath), { recursive: true });
+      appendFileSync(
+        this.logPath,
+        `${JSON.stringify({
+          at: new Date().toISOString(),
+          event,
+          detail
+        })}\n`,
+        'utf8'
+      );
+    } catch {
+      // Logging must never break updater behavior.
+    }
   }
 }

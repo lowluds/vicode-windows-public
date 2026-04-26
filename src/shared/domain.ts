@@ -502,6 +502,9 @@ export type RunRuntimeTraceStage =
   | 'submit_received'
   | 'workspace_context_started'
   | 'workspace_context_completed'
+  | 'image_review_started'
+  | 'image_review_completed'
+  | 'image_review_failed'
   | 'prompt_assembled'
   | 'provider_dispatch_started'
   | 'run_started'
@@ -1216,7 +1219,7 @@ export interface RunEvent {
 }
 
 export interface RunActivityInfo {
-  kind: 'thinking' | 'skill' | 'memory_recall' | 'memory_checkpoint' | 'web_search' | 'delegation' | 'tool_call' | 'tool_result' | 'file_edit' | 'file_write' | 'mkdir' | 'terminal_command' | 'terminal_output' | 'file_open' | 'file_read' | 'file_search' | 'change_summary';
+  kind: 'thinking' | 'guidance' | 'skill' | 'memory_recall' | 'memory_checkpoint' | 'web_search' | 'delegation' | 'tool_call' | 'tool_result' | 'file_edit' | 'file_write' | 'mkdir' | 'terminal_command' | 'terminal_output' | 'file_open' | 'file_read' | 'file_search' | 'change_summary';
   phase?: 'started' | 'completed' | 'stopped';
   summary: string;
   providerEventType?: string | null;
@@ -1362,16 +1365,14 @@ export interface McpRecommendedSetupInput {
   projectId?: string | null;
 }
 
-export interface BootstrapData {
+export interface ShellBootstrapData {
   projects: Project[];
   threadsByProject: Record<string, ThreadSummary[]>;
-  skills: SkillDefinition[];
-  automations: AutomationDefinition[];
-  jobs: JobDefinition[];
-  reviewItems: ReviewItem[];
-  pendingRunToolApprovals: RunToolApprovalRequest[];
-  providers: ProviderDescriptor[];
   preferences: Preferences;
   personalization: PersonalizationSettings;
-  collaboration: CollabBootstrap;
+}
+
+export interface BootstrapData extends ShellBootstrapData {
+  pendingRunToolApprovals: RunToolApprovalRequest[];
+  providers: ProviderDescriptor[];
 }

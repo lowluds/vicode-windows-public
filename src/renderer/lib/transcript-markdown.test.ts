@@ -112,6 +112,44 @@ describe('normalizeTranscriptMarkdownSource', () => {
     );
   });
 
+  it('strips standalone bullet separator lines from malformed summary sections', () => {
+    expect(
+      normalizeTranscriptMarkdownSource(
+        [
+          'Qwen2.5-Coder / Qwen3-Coder (32B & 72B)',
+          '',
+          '- **Best for:** Rawcode generation accuracy and tool-use (function calling).',
+          '',
+          '  - **Capabilities:** Leads many HumanEval benchmarks; frequently used as the backend for agentic IDE plugins due to its instruction-following reliability.',
+          '',
+          '-',
+          '',
+          'Codestral 25.01 (Mistral AI)',
+          '',
+          '- **Best for:** FIM (Fill-In-the-Middle) and low-latency autocomplete.',
+          '',
+          '  - **Capabilities:** Specifically optimized for Python and SQL with a very fast response time for real-time code completion.',
+          '',
+          '-'
+        ].join('\n')
+      )
+    ).toBe(
+      [
+        'Qwen2.5-Coder / Qwen3-Coder (32B & 72B)',
+        '',
+        '- **Best for:** Rawcode generation accuracy and tool-use (function calling).',
+        '',
+        '  - **Capabilities:** Leads many HumanEval benchmarks; frequently used as the backend for agentic IDE plugins due to its instruction-following reliability.',
+        '',
+        'Codestral 25.01 (Mistral AI)',
+        '',
+        '- **Best for:** FIM (Fill-In-the-Middle) and low-latency autocomplete.',
+        '',
+        '  - **Capabilities:** Specifically optimized for Python and SQL with a very fast response time for real-time code completion.'
+      ].join('\n')
+    );
+  });
+
   it('repairs ordered list markers that were split onto their own line', () => {
     expect(
       normalizeTranscriptMarkdownSource(

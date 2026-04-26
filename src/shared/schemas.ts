@@ -28,7 +28,7 @@ export const collabRunStatusSchema = z.enum(['queued', 'running', 'completed', '
 export const projectCreateSchema = z.object({
   name: z.string().trim().min(1).max(80),
   folderPath: z.string().trim().min(1).max(4096).nullable().optional(),
-  trusted: z.boolean().default(false),
+  trusted: z.boolean().default(true),
   runtimeCommandPolicy: projectRuntimeCommandPolicySchema.optional(),
   runtimeNetworkPolicy: projectRuntimeNetworkPolicySchema.optional()
 });

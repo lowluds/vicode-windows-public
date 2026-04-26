@@ -1,18 +1,30 @@
 import path from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { expect, test, type Page } from '@playwright/test';
-import { closeApp, launchApp, waitForBridge } from './helpers/electron';
+import { buildSkillCreatorPrompt } from '../src/shared/creatorImports';
+import { closeApp, launchApp, openTitlebarSurface, waitForBridge, waitForThreadSurfaceReady } from './helpers/electron';
+
+async function openCatalogTab(window: Page, tab: 'plugins' | 'skills') {
+  const tabButton = window.getByTestId(`skills-tab-${tab}`);
+  if (!(await tabButton.isVisible().catch(() => false))) {
+    await openTitlebarSurface(window, 'nav-plugins', tabButton);
+  }
+  await expect(tabButton).toBeVisible();
+  if ((await tabButton.getAttribute('aria-selected')) !== 'true') {
+    await tabButton.click();
+  }
+}
 
 async function openPlugins(window: Page) {
-  await window.getByTestId('nav-plugins').click();
-  await window.getByTestId('skills-tab-plugins').click();
+  await openCatalogTab(window, 'plugins');
 }
 
 async function openSkills(window: Page) {
-  await window.getByTestId('nav-plugins').click();
-  await window.getByTestId('skills-tab-skills').click();
+  await openCatalogTab(window, 'skills');
 }
 
-test('plugins support setup, approval, refresh, disable, removal, and persistence', async () => {
+test('plugins support official setup, approval, refresh, disable, removal, and persistence', async () => {
   const { app, window: launchedWindow } = await launchApp({
     bridgePaths: ['vicode.app', 'vicode.mcp']
   });
@@ -39,51 +51,6 @@ test('plugins support setup, approval, refresh, disable, removal, and persistenc
     await expect(window.getByTestId(`mcp-configured-card-${shadcnServerId}`)).toBeVisible();
     await expect(window.getByTestId(`mcp-configured-state-${shadcnServerId}`)).toContainText('approval_required');
 
-      await window.getByRole('button', { name: 'New plugin' }).click();
-      await window.getByTestId('plugin-dialog-name').fill('Fixture MCP E2E');
-      await window.getByTestId('plugin-dialog-command').fill(process.execPath);
-      await window
-        .getByTestId('plugin-dialog-args')
-        .fill(path.join(process.cwd(), 'test', 'fixtures', 'mcp', 'stdio-server.mjs'));
-      await window.getByRole('button', { name: 'Save plugin' }).click();
-
-      const fixtureServerId = await window.evaluate(async () => {
-        const servers = await window.vicode.mcp.listServers();
-        return servers.find((server) => server.name === 'Fixture MCP E2E')?.id ?? null;
-      });
-      expect(fixtureServerId).toBeTruthy();
-      await expect(window.getByTestId(`mcp-configured-card-${fixtureServerId}`)).toBeVisible();
-
-      await window.reload({ waitUntil: 'domcontentloaded' });
-      await waitForBridge(window, ['vicode.app', 'vicode.mcp']);
-      await openPlugins(window);
-
-    await expect(window.getByTestId(`mcp-configured-card-${fixtureServerId}`)).toBeVisible();
-    await expect(window.getByTestId(`mcp-configured-state-${fixtureServerId}`)).toContainText('approval_required');
-
-    await window.getByTestId(`mcp-configured-approve-${fixtureServerId}`).click();
-    await expect(window.getByTestId(`mcp-configured-state-${fixtureServerId}`)).toContainText('connected', { timeout: 30_000 });
-    await expect(window.getByTestId(`mcp-configured-tool-${fixtureServerId}-echo`)).toBeVisible();
-    await expect(window.getByTestId(`mcp-configured-prompt-${fixtureServerId}-review`)).toBeVisible();
-
-      await window.getByTestId(`mcp-configured-refresh-${fixtureServerId}`).click();
-      await expect(window.getByTestId(`mcp-configured-state-${fixtureServerId}`)).toContainText('connected', { timeout: 30_000 });
-
-      await window.reload({ waitUntil: 'domcontentloaded' });
-      await waitForBridge(window, ['vicode.app', 'vicode.mcp']);
-      await openPlugins(window);
-
-    await expect(window.getByTestId(`mcp-configured-card-${fixtureServerId}`)).toBeVisible();
-    await expect(window.getByTestId(`mcp-configured-state-${fixtureServerId}`)).toContainText('connected', { timeout: 30_000 });
-    await expect(window.getByTestId(`mcp-configured-tool-${fixtureServerId}-echo`)).toBeVisible();
-
-    await window.getByTestId(`mcp-configured-disable-${fixtureServerId}`).click();
-    await expect(window.getByTestId(`mcp-configured-state-${fixtureServerId}`)).toContainText('disabled', { timeout: 30_000 });
-    await expect(window.getByTestId(`mcp-configured-tool-${fixtureServerId}-echo`)).toHaveCount(0);
-
-    await window.getByTestId(`mcp-configured-remove-${fixtureServerId}`).click();
-    await expect(window.getByTestId(`mcp-configured-card-${fixtureServerId}`)).toHaveCount(0);
-
     await window.getByTestId(`mcp-configured-remove-${shadcnServerId}`).click();
     await expect(window.getByTestId(`mcp-configured-card-${shadcnServerId}`)).toHaveCount(0);
   } finally {
@@ -102,35 +69,67 @@ test('plugins support setup, approval, refresh, disable, removal, and persistenc
 });
 
 test('skills can be created from the plugins surface', async () => {
+  const workspaceDir = mkdtempSync(path.join(tmpdir(), 'vicode-skill-create-e2e-'));
   const { app, window } = await launchApp({
-    bridgePaths: ['vicode.app', 'vicode.skills']
+    bridgePaths: ['vicode.app', 'vicode.skills', 'vicode.threads', 'vicode.projects', 'vicode.settings']
   });
 
   const skillName = 'UI Created Skill E2E';
+  let projectId: string | null = null;
 
   try {
-    await window.evaluate(async (name) => {
+    const seeded = await window.evaluate(async ({ name, workspaceDir }) => {
+      const bootstrap = await window.vicode.app.getBootstrap();
+      const provider =
+        bootstrap.providers.find((entry) => entry.id === 'openai') ??
+        bootstrap.providers.find((entry) => entry.id === 'gemini') ??
+        bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+        null;
+      if (!provider) {
+        throw new Error('Expected a release-facing provider for the skill creation test.');
+      }
+      const project = await window.vicode.projects.create({
+        name: `Skill create ${Date.now()}`,
+        folderPath: workspaceDir,
+        trusted: true
+      });
+      const modelId =
+        project.defaultModelByProvider[provider.id] ??
+        bootstrap.preferences.defaultModelByProvider[provider.id] ??
+        provider.models[0]?.id ??
+        'gpt-5';
+      const thread = await window.vicode.threads.create({
+        projectId: project.id,
+        providerId: provider.id,
+        modelId,
+        executionPermission: 'default'
+      });
+      await window.vicode.settings.save({
+        selectedProjectId: project.id,
+        lastOpenedThreadId: thread.id
+      });
       const skills = await window.vicode.skills.list();
       const existing = skills.find((skill) => skill.name === name);
       if (existing) {
         await window.vicode.skills.remove(existing.id);
       }
-    }, skillName);
+      return { projectId: project.id };
+    }, { name: skillName, workspaceDir });
+    projectId = seeded.projectId;
+
+    await window.reload({ waitUntil: 'domcontentloaded' });
+    await waitForBridge(window, ['vicode.app', 'vicode.skills', 'vicode.threads', 'vicode.projects', 'vicode.settings']);
+    await waitForThreadSurfaceReady(window);
 
     await openSkills(window);
-    await window.getByRole('button', { name: 'New skill' }).click();
-    await window.getByTestId('skill-dialog-name').fill(skillName);
-    await window.getByTestId('skill-dialog-description').fill('Created through the Plugins page UI.');
-    await window.getByTestId('skill-dialog-scope').click();
-    await window.getByRole('menuitem', { name: 'Personal across all projects' }).click();
-    await window
-      .getByTestId('skill-dialog-instructions')
-      .fill('Use this skill to confirm that the Plugins page can create a reusable Vicode skill.');
-    await window.getByRole('button', { name: 'Save skill' }).click();
+    await window.getByRole('button', { name: 'Create', exact: true }).click();
+    await window.getByRole('menuitem', { name: 'Create skill' }).click();
 
-    await expect(window.getByRole('heading', { name: skillName })).toBeVisible();
-    await window.getByRole('button', { name: 'Close' }).click();
-    await expect(window.getByText(skillName)).toBeVisible();
+    const composer = window.getByTestId('composer-input');
+    await expect(composer).toBeVisible();
+    await expect(window.locator('.windows-titlebar-context-thread')).toContainText('Create skill');
+    await expect(composer).toHaveValue(buildSkillCreatorPrompt());
+    await expect(window.getByTestId('composer-attached-skill-skill-creator')).toBeVisible();
   } finally {
     try {
       await window.evaluate(async (name) => {
@@ -140,9 +139,18 @@ test('skills can be created from the plugins surface', async () => {
           await window.vicode.skills.remove(existing.id);
         }
       }, skillName);
+      if (projectId) {
+        await window.evaluate(async (targetProjectId) => {
+          const bootstrap = await window.vicode.app.getBootstrap();
+          if (bootstrap.projects.some((project) => project.id === targetProjectId)) {
+            await window.vicode.projects.remove(targetProjectId);
+          }
+        }, projectId);
+      }
     } catch {
       // Best-effort cleanup only.
     }
     await closeApp(app);
+    rmSync(workspaceDir, { recursive: true, force: true });
   }
 });

@@ -666,7 +666,7 @@ export const officialMcpCatalog: CuratedMcpCatalogEntry[] = [
     transport: 'stdio',
     envVars: [],
     setupNotes: [
-      'Project-scoped setup that binds to the selected trusted workspace root.',
+      'Project-scoped setup that binds to the selected workspace root.',
       'Exposes engineering docs, build-control summary, and bounded source inspection for autonomous analysis.'
     ]
   },

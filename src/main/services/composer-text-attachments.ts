@@ -22,9 +22,6 @@ function assertProjectWorkspace(project: Pick<Project, 'folderPath' | 'trusted'>
   if (!project.folderPath) {
     throw new Error('Text attachments require a project folder.');
   }
-  if (!project.trusted) {
-    throw new Error('Text attachments require a trusted workspace.');
-  }
   return resolve(project.folderPath);
 }
 
@@ -49,7 +46,7 @@ export class ComposerTextAttachmentService {
     const relativePath = normalizeRelativePath(`${COMPOSER_ATTACHMENT_ROOT}/${fileName}`);
     const absolutePath = resolve(workspaceRoot, relativePath);
     if (!isPathInside(workspaceRoot, absolutePath)) {
-      throw new Error('Text attachment path escaped the trusted workspace.');
+      throw new Error('Text attachment path escaped the workspace.');
     }
 
     mkdirSync(dirname(absolutePath), { recursive: true });
@@ -76,7 +73,7 @@ export class ComposerTextAttachmentService {
       throw new Error('Text attachment path is outside the composer attachment directory.');
     }
     if (!isPathInside(workspaceRoot, absolutePath)) {
-      throw new Error('Text attachment path escaped the trusted workspace.');
+      throw new Error('Text attachment path escaped the workspace.');
     }
     if (!existsSync(absolutePath)) {
       return;

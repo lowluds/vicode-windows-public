@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ImageAttachment, RunEvent, TextAttachment, ThreadDetail, ThreadSummary } from '../../shared/domain';
+import type { ImageAttachment, ProviderDescriptor, ProviderId, RunEvent, TextAttachment, ThreadDetail, ThreadSummary } from '../../shared/domain';
 import {
   appendRunEvent,
   deriveRecentThreads,
@@ -9,6 +9,7 @@ import {
   hasAssistantTurnForRun,
   isVisiblePlannerPlanTurn,
   isVisibleTranscriptTurn,
+  surfaceProviders,
   upsertRecentThread
 } from './thread-presentation';
 
@@ -53,7 +54,51 @@ function createThreadDetail(overrides: Partial<ThreadDetail> = {}): ThreadDetail
   };
 }
 
+function createProviderDescriptor(id: ProviderId): ProviderDescriptor {
+  return {
+    id,
+    label: id,
+    authState: 'connected',
+    authMode: null,
+    installed: true,
+    models: [],
+    modelSource: 'runtime',
+    modelsUpdatedAt: null,
+    canLiveDiscoverModels: true,
+    cliPath: `${id}.cmd`,
+    capabilities: {
+      supportsThinkingToggle: false,
+      supportsRuntimeSkillResources: false,
+      supportsNativeRunProgress: false,
+      executionAuthority: 'provider_cli',
+      approvalAuthority: 'provider_cli',
+      sandboxAuthority: 'provider_cli',
+      requiresTrustedWorkspace: true,
+      requiresFullAccessForAppRuns: false,
+      workspaceInstructionFileName: `${id}.md`
+    },
+    plannerPolicy: {
+      supported: true,
+      executionMode: 'workspace-write',
+      enforcement: 'hard-enforced'
+    },
+    quota: null
+  };
+}
+
 describe('thread-presentation helpers', () => {
+  it('surfaces the release-facing providers while keeping Qwen and Kimi out of primary chrome', () => {
+    expect(
+      surfaceProviders([
+        createProviderDescriptor('openai'),
+        createProviderDescriptor('gemini'),
+        createProviderDescriptor('qwen'),
+        createProviderDescriptor('ollama'),
+        createProviderDescriptor('kimi')
+      ]).map((provider) => provider.id)
+    ).toEqual(['openai', 'gemini', 'ollama']);
+  });
+
   it('keeps recent threads sorted by latest activity across projects', () => {
     const recent = deriveRecentThreads({
       a: [

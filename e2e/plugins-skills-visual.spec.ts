@@ -1,17 +1,93 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { closeApp, launchApp } from './helpers/electron';
+import { closeApp, launchApp, openTitlebarSurface, waitForBridge, waitForThreadSurfaceReady } from './helpers/electron';
+
+async function openCatalogTab(window: Page, tab: 'plugins' | 'skills') {
+  const tabButton = window.getByTestId(`skills-tab-${tab}`);
+  if (!(await tabButton.isVisible().catch(() => false))) {
+    await openTitlebarSurface(window, 'nav-plugins', tabButton);
+  }
+  await expect(tabButton).toBeVisible();
+  if ((await tabButton.getAttribute('aria-selected')) !== 'true') {
+    await tabButton.click();
+  }
+}
+
+async function seedProject(window: Page, workspaceDir: string) {
+  return await window.evaluate(async ({ workspaceDir }) => {
+    const bootstrap = await window.vicode.app.getBootstrap();
+    const provider =
+      bootstrap.providers.find((entry) => entry.id === 'openai') ??
+      bootstrap.providers.find((entry) => entry.id === 'gemini') ??
+      bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+      null;
+    if (!provider) {
+      throw new Error('Expected a release-facing provider for visual coverage.');
+    }
+    const project = await window.vicode.projects.create({
+      name: `Visual surface ${Date.now()}`,
+      folderPath: workspaceDir,
+      trusted: true
+    });
+    const modelId =
+      project.defaultModelByProvider[provider.id] ??
+      bootstrap.preferences.defaultModelByProvider[provider.id] ??
+      provider.models[0]?.id ??
+      'gpt-5';
+    const thread = await window.vicode.threads.create({
+      projectId: project.id,
+      providerId: provider.id,
+      modelId,
+      executionPermission: 'default'
+    });
+    await window.vicode.settings.save({
+      selectedProjectId: project.id,
+      lastOpenedThreadId: thread.id
+    });
+    return project.id;
+  }, { workspaceDir });
+}
+
+async function removeProject(window: Page, projectId: string | null) {
+  if (!projectId) {
+    return;
+  }
+  await window.evaluate(async (targetProjectId) => {
+    const bootstrap = await window.vicode.app.getBootstrap();
+    if (bootstrap.projects.some((project) => project.id === targetProjectId)) {
+      await window.vicode.projects.remove(targetProjectId);
+    }
+  }, projectId).catch(() => {});
+}
 
 async function openPlugins(window: Page) {
-  await window.getByTestId('nav-plugins').click();
-  await window.getByTestId('skills-tab-plugins').click();
+  await openCatalogTab(window, 'plugins');
 }
 
 async function openSkills(window: Page) {
-  await window.getByTestId('nav-plugins').click();
-  await window.getByTestId('skills-tab-skills').click();
+  await openCatalogTab(window, 'skills');
+}
+
+async function setAppearance(window: Page, mode: 'dark' | 'light') {
+  await window.evaluate(async (appearanceMode) => {
+    await window.vicode.settings.save({ appearanceMode });
+    document.documentElement.classList.toggle('dark', appearanceMode === 'dark');
+    document.documentElement.classList.toggle('light', appearanceMode === 'light');
+    document.documentElement.dataset.theme = appearanceMode;
+    document.documentElement.style.colorScheme = appearanceMode;
+  }, mode);
+
+  await expect
+    .poll(async () => window.evaluate(() => document.documentElement.dataset.theme))
+    .toBe(mode);
 }
 
 function widestChannelSpread(styleValue: string) {
+  if (styleValue === 'none') {
+    return 0;
+  }
   const triplets: number[][] = [];
 
   for (const match of styleValue.matchAll(/rgba?\(([^)]+)\)/g)) {
@@ -42,6 +118,9 @@ function widestChannelSpread(styleValue: string) {
 }
 
 function maxPixelValue(styleValue: string) {
+  if (styleValue === 'none') {
+    return 0;
+  }
   const matches = [...styleValue.matchAll(/(-?\d+(?:\.\d+)?)px/g)].map((match) => Math.abs(Number.parseFloat(match[1])));
   if (!matches.length) {
     throw new Error(`Expected pixel values in "${styleValue}".`);
@@ -49,94 +128,122 @@ function maxPixelValue(styleValue: string) {
   return Math.max(...matches);
 }
 
-test('plugins dialog keeps neutral controls and restrained shadows', async () => {
+test('titlebar surface buttons toggle closed when already open', async () => {
+  const workspaceDir = mkdtempSync(join(tmpdir(), 'vicode-titlebar-visual-'));
   const { app, window } = await launchApp({
-    bridgePaths: ['vicode.app', 'vicode.mcp']
+    bridgePaths: ['vicode.app', 'vicode.projects', 'vicode.threads', 'vicode.settings']
+  });
+  let projectId: string | null = null;
+
+  try {
+    projectId = await seedProject(window, workspaceDir);
+    await window.reload({ waitUntil: 'domcontentloaded' });
+    await waitForBridge(window, ['vicode.app', 'vicode.projects', 'vicode.threads', 'vicode.settings']);
+    await waitForThreadSurfaceReady(window);
+    await openTitlebarSurface(window, 'nav-plugins', window.getByTestId('skills-tab-plugins'));
+    await expect(window.getByTestId('skills-tab-plugins')).toBeVisible();
+    await window.getByTestId('nav-plugins').click();
+    await expect(window.getByTestId('skills-tab-plugins')).toHaveCount(0);
+
+    await window.getByTestId('nav-automations').click();
+    await expect(window.getByRole('heading', { name: 'Automations', exact: true })).toBeVisible();
+    await window.getByTestId('nav-automations').click();
+    await expect(window.getByRole('heading', { name: 'Automations', exact: true })).toHaveCount(0);
+  } finally {
+    await removeProject(window, projectId);
+    await closeApp(app);
+    rmSync(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test('plugins surface keeps neutral controls and restrained shadows', async () => {
+  const { app, window } = await launchApp({
+    bridgePaths: ['vicode.app', 'vicode.mcp', 'vicode.settings']
   });
 
   try {
-    await openPlugins(window);
-    await window.getByRole('button', { name: 'New plugin' }).click();
+    for (const mode of ['dark', 'light'] as const) {
+      await setAppearance(window, mode);
+      await openPlugins(window);
+      const pageShell = window.locator('.skills-page-shell');
+      const createButton = window.getByRole('button', { name: 'Create', exact: true });
+      const refreshButton = window.getByRole('button', { name: 'Manage' }).first();
+      const addButton = window.getByTestId('mcp-official-add-shadcn');
+      const firstRow = window.locator('.skills-list-item').first();
 
-    const dialog = window.locator('.skills-plugin-dialog');
-    const nameInput = window.getByTestId('plugin-dialog-name');
-    const saveButton = window.getByRole('button', { name: 'Save plugin' });
-    const activeToggle = window.getByRole('button', { name: 'Approval required' });
-    const scopeRow = window.getByTestId('plugin-dialog-scope-row');
-    const modeRow = window.getByTestId('plugin-dialog-mode-row');
+      await expect(pageShell).toBeVisible();
+      await expect(createButton).toBeVisible();
+      await expect(refreshButton).toBeVisible();
+      await expect(addButton).toBeVisible();
+      await firstRow.hover();
+      await createButton.hover();
+      await addButton.hover();
+      await createButton.click();
+      await expect(window.getByRole('menuitem', { name: 'Create plugin' })).toBeVisible();
+      await expect(window.getByRole('menuitem', { name: 'Create skill' })).toBeVisible();
+      await window.keyboard.press('Escape');
 
-    await expect(dialog).toBeVisible();
-    await expect(nameInput).toBeVisible();
-    await expect(scopeRow).toBeVisible();
-    await expect(modeRow).toBeVisible();
-    await nameInput.focus();
+      const pageShadow = await pageShell.evaluate((element) => getComputedStyle(element).boxShadow);
+      const createButtonStyles = await createButton.evaluate((element) => ({
+        backgroundImage: getComputedStyle(element).backgroundImage,
+        boxShadow: getComputedStyle(element).boxShadow
+      }));
+      const addButtonStyles = await addButton.evaluate((element) => ({
+        backgroundColor: getComputedStyle(element).backgroundColor,
+        borderColor: getComputedStyle(element).borderColor
+      }));
+      const rowHeight = await firstRow.evaluate((element) => element.getBoundingClientRect().height);
 
-    const dialogShadow = await dialog.evaluate((element) => getComputedStyle(element).boxShadow);
-    const saveButtonStyles = await saveButton.evaluate((element) => ({
-      backgroundImage: getComputedStyle(element).backgroundImage,
-      boxShadow: getComputedStyle(element).boxShadow
-    }));
-    const activeToggleStyles = await activeToggle.evaluate((element) => ({
-      backgroundColor: getComputedStyle(element).backgroundColor,
-      borderColor: getComputedStyle(element).borderColor
-    }));
-    const focusedInputShadow = await nameInput.evaluate((element) => getComputedStyle(element).boxShadow);
-    const scopeRowHeight = await scopeRow.evaluate((element) => element.getBoundingClientRect().height);
-    const modeRowHeight = await modeRow.evaluate((element) => element.getBoundingClientRect().height);
-
-    expect(maxPixelValue(dialogShadow)).toBeLessThanOrEqual(16);
-    expect(dialogShadow).not.toContain('64px');
-    expect(maxPixelValue(saveButtonStyles.boxShadow)).toBeLessThanOrEqual(16);
-    expect(widestChannelSpread(saveButtonStyles.backgroundImage)).toBeLessThanOrEqual(18);
-    expect(widestChannelSpread(activeToggleStyles.backgroundColor)).toBeLessThanOrEqual(12);
-    expect(widestChannelSpread(activeToggleStyles.borderColor)).toBeLessThanOrEqual(12);
-    expect(widestChannelSpread(focusedInputShadow)).toBeLessThanOrEqual(12);
-    expect(scopeRowHeight).toBeLessThan(96);
-    expect(modeRowHeight).toBeLessThan(96);
+      expect(rowHeight).toBeLessThanOrEqual(70);
+      expect(maxPixelValue(pageShadow)).toBeLessThanOrEqual(16);
+      expect(pageShadow).not.toContain('64px');
+      expect(maxPixelValue(createButtonStyles.boxShadow)).toBeLessThanOrEqual(16);
+      expect(widestChannelSpread(createButtonStyles.backgroundImage)).toBeLessThanOrEqual(18);
+      expect(widestChannelSpread(addButtonStyles.backgroundColor)).toBeLessThanOrEqual(12);
+      expect(widestChannelSpread(addButtonStyles.borderColor)).toBeLessThanOrEqual(12);
+    }
   } finally {
     await closeApp(app);
   }
 });
 
-test('skills catalog and dialog stay neutral without brand-purple accents', async () => {
+test('skills catalog and create action stay neutral without brand-purple accents', async () => {
   const { app, window } = await launchApp({
-    bridgePaths: ['vicode.app', 'vicode.skills']
+    bridgePaths: ['vicode.app', 'vicode.skills', 'vicode.settings']
   });
 
   try {
-    await openSkills(window);
+    for (const mode of ['dark', 'light'] as const) {
+      await setAppearance(window, mode);
+      await openSkills(window);
 
-    const avatar = window.locator('.skills-avatar.is-openai').first();
-    await expect(avatar).toBeVisible();
+      const avatar = window.locator('.skills-avatar.is-openai').first();
+      await expect(avatar).toBeVisible();
 
-    const avatarBackground = await avatar.evaluate((element) => getComputedStyle(element).backgroundImage);
-    expect(widestChannelSpread(avatarBackground)).toBeLessThanOrEqual(18);
+      const avatarBackground = await avatar.evaluate((element) => getComputedStyle(element).backgroundImage);
+      expect(widestChannelSpread(avatarBackground)).toBeLessThanOrEqual(18);
 
-    await window.getByRole('button', { name: 'New skill' }).click();
+      const pageShell = window.locator('.skills-page-shell');
+      const createButton = window.getByRole('button', { name: 'Create', exact: true });
+      const firstRow = window.locator('.skills-list-item').first();
+      await expect(pageShell).toBeVisible();
+      await expect(createButton).toBeVisible();
+      await firstRow.hover();
+      await createButton.hover();
 
-    const dialog = window.locator('.skills-editor-dialog');
-    const saveButton = window.getByRole('button', { name: 'Save skill' });
-    const providerToggle = dialog.locator('.skills-toggle-button.is-active').first();
+      const pageShadow = await pageShell.evaluate((element) => getComputedStyle(element).boxShadow);
+      const createButtonStyles = await createButton.evaluate((element) => ({
+        backgroundImage: getComputedStyle(element).backgroundImage,
+        boxShadow: getComputedStyle(element).boxShadow
+      }));
+      const rowHeight = await firstRow.evaluate((element) => element.getBoundingClientRect().height);
 
-    await expect(dialog).toBeVisible();
-    await expect(providerToggle).toBeVisible();
-
-    const dialogShadow = await dialog.evaluate((element) => getComputedStyle(element).boxShadow);
-    const saveButtonStyles = await saveButton.evaluate((element) => ({
-      backgroundImage: getComputedStyle(element).backgroundImage,
-      boxShadow: getComputedStyle(element).boxShadow
-    }));
-    const providerToggleStyles = await providerToggle.evaluate((element) => ({
-      backgroundColor: getComputedStyle(element).backgroundColor,
-      borderColor: getComputedStyle(element).borderColor
-    }));
-
-    expect(maxPixelValue(dialogShadow)).toBeLessThanOrEqual(16);
-    expect(dialogShadow).not.toContain('64px');
-    expect(maxPixelValue(saveButtonStyles.boxShadow)).toBeLessThanOrEqual(16);
-    expect(widestChannelSpread(saveButtonStyles.backgroundImage)).toBeLessThanOrEqual(18);
-    expect(widestChannelSpread(providerToggleStyles.backgroundColor)).toBeLessThanOrEqual(12);
-    expect(widestChannelSpread(providerToggleStyles.borderColor)).toBeLessThanOrEqual(12);
+      expect(rowHeight).toBeLessThanOrEqual(70);
+      expect(maxPixelValue(pageShadow)).toBeLessThanOrEqual(16);
+      expect(pageShadow).not.toContain('64px');
+      expect(maxPixelValue(createButtonStyles.boxShadow)).toBeLessThanOrEqual(16);
+      expect(widestChannelSpread(createButtonStyles.backgroundImage)).toBeLessThanOrEqual(18);
+    }
   } finally {
     await closeApp(app);
   }

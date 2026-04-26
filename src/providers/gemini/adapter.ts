@@ -754,7 +754,7 @@ export class GeminiAdapter implements ProviderAdapter {
         })
         .filter((value): value is ProviderModel => Boolean(value));
 
-      return sanitizeDiscoveredModels(this.id, discovered);
+      return sanitizeDiscoveredModels(this.id, discovered, { preserveInputOrder: true });
     } catch {
       return null;
     } finally {
@@ -1032,14 +1032,7 @@ export class GeminiAdapter implements ProviderAdapter {
     return discovered.filter((value): value is NonNullable<(typeof discovered)[number]> => Boolean(value));
   }
 
-  validateProjectContext(folderPath: string | null, trusted: boolean) {
-    if (folderPath && !trusted) {
-      return {
-        valid: false,
-        message: 'Trust the project before running Gemini against this workspace.'
-      };
-    }
-
+  validateProjectContext(_folderPath: string | null, _trusted: boolean) {
     return { valid: true };
   }
 

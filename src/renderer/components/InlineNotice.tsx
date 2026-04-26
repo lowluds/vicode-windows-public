@@ -17,17 +17,37 @@ interface InlineNoticeProps {
 }
 
 export function InlineNotice({ actions, level, message, onDismiss, title }: InlineNoticeProps) {
+  const levelClass = {
+    info: 'border-[color:var(--ui-success-border)]',
+    warning: 'border-[color:var(--ui-warning-border)]',
+    error: 'border-[color:var(--ui-danger-border)]'
+  }[level];
+  const markerClass = {
+    info: 'bg-[color:var(--ui-success)]',
+    warning: 'bg-[color:var(--ui-warning)]',
+    error: 'bg-[color:var(--ui-danger)]'
+  }[level];
+  const titleClass = {
+    info: 'text-[color:var(--ui-success-text-strong)]',
+    warning: 'text-[color:var(--ui-warning-text-strong)]',
+    error: 'text-[color:var(--ui-danger-text-strong)]'
+  }[level];
+
   return (
     <div
       data-testid="app-inline-notice"
       data-level={level}
       role={level === 'error' ? 'alert' : 'status'}
-      className="mx-7 mt-2 rounded-[16px] border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-surface-2)] px-3 py-2"
+      className={cx(
+        'fixed left-1/2 top-12 z-[60] w-[min(calc(100vw-56px),1040px)] -translate-x-1/2 rounded-[var(--ui-radius-lg)] border bg-[color:var(--ui-surface-2)] px-3 py-2 shadow-[var(--ui-shadow-apple)]',
+        levelClass
+      )}
     >
       <div className="flex items-start gap-2.5">
+        <span className={cx('mt-1.5 size-1.5 shrink-0 rounded-full', markerClass)} aria-hidden="true" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] leading-4">
-            {title ? <span className="shrink-0 font-medium text-[color:var(--ui-text-title)]">{title}</span> : null}
+            {title ? <span className={cx('shrink-0 font-medium', titleClass)}>{title}</span> : null}
             <span className="text-[color:var(--ui-text-muted)]">{message}</span>
             {actions && actions.length > 0 ? (
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

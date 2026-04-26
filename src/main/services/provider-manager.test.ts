@@ -18,6 +18,7 @@ import { ProviderManager } from './provider-manager';
 import { AgentRuntimeService } from './agent-runtime';
 import { getProviderFallbackModels } from '../../providers/catalog';
 import type { WorkspaceContextResult } from './workspace-context';
+import { promptRequiresAttachedWorkspace } from '../../shared/workspace-run-guard';
 
 vi.mock('electron', () => ({
   safeStorage: {
@@ -462,6 +463,44 @@ describe('ProviderManager', () => {
 
     return dir;
   }
+
+  it('blocks folder-dependent default runs when the project has no workspace folder', async () => {
+    const startRun = vi.fn(async () => ({
+      runId: 'run-1',
+      cancel: async () => {}
+    }));
+    const db = createDb({
+      getProject: vi.fn(() =>
+        createProject({
+          folderPath: null,
+          trusted: false
+        })
+      )
+    });
+    const manager = new ProviderManager(db as never, {
+      openai: createAdapter({
+        startRun
+      }),
+      gemini: createAdapter({ id: 'gemini', label: 'Gemini' })
+    });
+
+    await expect(
+      manager.submitComposer({
+        projectId: 'project-1',
+        threadId: 'thread-1',
+        prompt: 'give me full path',
+        providerId: 'openai',
+        modelId: 'gpt-5',
+        executionPermission: 'default',
+        skillIds: []
+      })
+    ).rejects.toThrow(
+      'This project does not have a workspace folder yet. Attach a folder before asking Vicode to inspect files, write files, run commands, or answer workspace path questions.'
+    );
+
+    expect(startRun).not.toHaveBeenCalled();
+    expect(promptRequiresAttachedWorkspace('give me full path')).toBe(true);
+  });
 
   it('prefers OAuth/CLI auth over a stored API key and clears stale model cache when auth mode changes', async () => {
     const db = createDb({
@@ -1072,6 +1111,11 @@ describe('ProviderManager', () => {
     );
     const prompt = startRun.mock.calls[0]?.[0]?.prompt as string;
     expect(prompt).not.toContain('Workspace AGENTS.md');
+    expect(prompt).toContain('Vicode guidance wiki:');
+    expect(prompt).toContain('Using: Source-Backed Workflow, Execution Discipline, Verification Standards');
+    expect(prompt).not.toContain('Using: Vicode Guidance');
+    expect(prompt).not.toContain('Using: Task Routing');
+    expect(prompt).toContain('### Vicode Guidance (VICODE.md):');
     expect(startRun).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: expect.stringContaining('Workspace SOUL.md:\nYou are the workspace agent.')
@@ -1315,7 +1359,7 @@ describe('ProviderManager', () => {
   it.each([
     ['openai', 'gpt-5'],
     ['gemini', 'gemini-2.5-pro']
-  ] as const)('blocks %s execution for untrusted workspaces before provider start', async (providerId, modelId) => {
+  ] as const)('blocks %s execution when project trust is false', async (providerId, modelId) => {
     const workspace = createWorkspace({
       'AGENTS.md': 'Use small diffs.'
     });
@@ -1345,7 +1389,11 @@ describe('ProviderManager', () => {
         executionPermission: 'default',
         skillIds: []
       })
-    ).rejects.toThrow(/cannot run against an untrusted workspace/u);
+    ).rejects.toThrow(
+      providerId === 'openai'
+        ? 'Codex cannot run against an untrusted workspace. Trust the project and retry.'
+        : 'Gemini cannot run against an untrusted workspace. Trust the project and retry.'
+    );
 
     expect(startRun).not.toHaveBeenCalled();
   });
@@ -1353,7 +1401,7 @@ describe('ProviderManager', () => {
   it.each([
     ['openai', 'gpt-5'],
     ['gemini', 'gemini-2.5-pro']
-  ] as const)('blocks %s planner runs for untrusted workspaces before provider start', async (providerId, modelId) => {
+  ] as const)('blocks %s planner runs when project trust is false', async (providerId, modelId) => {
     const workspace = createWorkspace({
       'AGENTS.md': 'Use small diffs.'
     });
@@ -1383,7 +1431,11 @@ describe('ProviderManager', () => {
         executionPermission: 'default',
         skillIds: []
       })
-    ).rejects.toThrow(/cannot run against an untrusted workspace/u);
+    ).rejects.toThrow(
+      providerId === 'openai'
+        ? 'Codex cannot run against an untrusted workspace. Trust the project and retry.'
+        : 'Gemini cannot run against an untrusted workspace. Trust the project and retry.'
+    );
 
     expect(startRun).not.toHaveBeenCalled();
   });
@@ -1929,8 +1981,14 @@ describe('ProviderManager', () => {
     );
   });
 
-  it('uses runtime discovery when CLI auth is active and the provider exposes live models', async () => {
-    const discovered = [createProviderModel('gpt-5.4', 'GPT-5.4')];
+  it('uses runtime discovery when CLI auth is active and orders merged Codex models newest-first', async () => {
+    const discovered = [
+      { ...createProviderModel('gpt-5.4', 'GPT-5.4'), recommendation: 'recommended' as const },
+      { ...createProviderModel('gpt-5.4-mini', 'GPT-5.4-Mini'), recommendation: 'fast' as const },
+      createProviderModel('gpt-5.3-codex', 'GPT-5.3-Codex'),
+      createProviderModel('gpt-5.3-codex-spark', 'GPT-5.3-Codex-Spark'),
+      createProviderModel('gpt-5.2', 'GPT-5.2')
+    ];
     const db = createDb({
       getProviderAccount: vi.fn(() => ({
         providerId: 'openai',
@@ -1951,7 +2009,20 @@ describe('ProviderManager', () => {
     expect(provider.modelSource).toBe('runtime');
     expect(provider.canLiveDiscoverModels).toBe(true);
     expect(db.replaceProviderModels).toHaveBeenCalledWith('openai', discovered, 'runtime');
-    expect(provider.models.map((model) => model.id)).toEqual(['gpt-5.4']);
+    expect(provider.models.map((model) => model.id).slice(0, 6)).toEqual([
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.3-codex',
+      'gpt-5.3-codex-spark',
+      'gpt-5.2'
+    ]);
+    expect(provider.models).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'gpt-5.5', label: 'GPT-5.5' }),
+        expect.objectContaining({ id: 'gpt-5.4', label: 'GPT-5.4', recommendation: undefined })
+      ])
+    );
   });
 
   it('uses runtime discovery for Ollama even without a CLI auth mode', async () => {
@@ -2637,13 +2708,20 @@ describe('ProviderManager', () => {
     expect(startRun).toHaveBeenCalledOnce();
   });
 
-  it('temporarily switches Ollama image runs onto a vision-capable model and leaves the thread model unchanged', async () => {
+  it('reviews Ollama image attachments with a vision model while keeping the selected coding model in charge', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'vicode-provider-manager-ollama-vision-'));
     tempDirs.push(workspace);
-    const startRun = vi.fn(async (context) => {
-      expect(context.modelId).toBe('qwen2.5vl:7b');
+    const startRun = vi.fn(async (context, callbacks: ProviderRunCallbacks) => {
+      if (String(context.runId).endsWith(':image-review')) {
+        expect(context.modelId).toBe('qwen2.5vl:7b');
+        expect(context.folderPath).toBeNull();
+        expect(context.trusted).toBe(false);
+        expect(context.skipFinalAnswerRewrite).toBe(true);
+        expect(context.imageAttachments).toHaveLength(1);
+        callbacks.onComplete('The screenshot shows a dark SaaS pricing page with four pricing cards.');
+      }
       return {
-        runId: 'run-1',
+        runId: context.runId,
         cancel: async () => {}
       } satisfies ProviderRunHandle;
     });
@@ -2701,7 +2779,22 @@ describe('ProviderManager', () => {
       ]
     });
 
-    expect(startRun).toHaveBeenCalledOnce();
+    expect(startRun).toHaveBeenCalledTimes(2);
+    const mainContext = startRun.mock.calls[1]?.[0] as Record<string, unknown>;
+    expect(mainContext.modelId).toBe('qwen3-coder:30b');
+    expect(mainContext.imageAttachments).toEqual([]);
+    expect(String(mainContext.prompt)).toContain('Attached image review:');
+    expect(String(mainContext.prompt)).toContain('dark SaaS pricing page with four pricing cards');
+    expect(db.addRunEvent).not.toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      'info',
+      expect.objectContaining({
+        activity: expect.objectContaining({
+          providerEventType: 'ollama_image_model_route'
+        })
+      })
+    );
     expect(result.thread.modelId).toBe('qwen3-coder:30b');
   });
 
@@ -3140,6 +3233,7 @@ describe('ProviderManager', () => {
   });
 
   it('cancels pending tool approvals when a run is stopped', async () => {
+    const workspace = createWorkspace({});
     let callbacks: ProviderRunCallbacks | null = null;
     const cancel = vi.fn(async () => {});
     const startRun = vi.fn(async (_context, nextCallbacks) => {
@@ -3149,7 +3243,16 @@ describe('ProviderManager', () => {
         cancel
       } satisfies ProviderRunHandle;
     });
-    const manager = new ProviderManager(createDb() as never, {
+    const manager = new ProviderManager(
+      createDb({
+        getProject: vi.fn(() =>
+          createProject({
+            folderPath: workspace,
+            trusted: true
+          })
+        )
+      }) as never,
+      {
       ollama: createAdapter({
         id: 'ollama',
         label: 'Ollama',
@@ -3157,7 +3260,8 @@ describe('ProviderManager', () => {
         startRun
       }),
       gemini: createAdapter({ id: 'gemini', label: 'Gemini' })
-    });
+      }
+    );
 
     await manager.submitComposer({
       projectId: 'project-1',
@@ -3188,6 +3292,7 @@ describe('ProviderManager', () => {
   });
 
   it('rejects pending tool approvals when a thread is downgraded to default permissions', async () => {
+    const workspace = createWorkspace({});
     let callbacks: ProviderRunCallbacks | null = null;
     const events: AppEvent[] = [];
     const startRun = vi.fn(async (_context, nextCallbacks) => {
@@ -3197,7 +3302,16 @@ describe('ProviderManager', () => {
         cancel: async () => {}
       } satisfies ProviderRunHandle;
     });
-    const manager = new ProviderManager(createDb() as never, {
+    const manager = new ProviderManager(
+      createDb({
+        getProject: vi.fn(() =>
+          createProject({
+            folderPath: workspace,
+            trusted: true
+          })
+        )
+      }) as never,
+      {
       ollama: createAdapter({
         id: 'ollama',
         label: 'Ollama',
@@ -3209,7 +3323,8 @@ describe('ProviderManager', () => {
         startRun
       }),
       gemini: createAdapter({ id: 'gemini', label: 'Gemini' })
-    });
+      }
+    );
     manager.onEvent((event) => {
       events.push(event);
     });
@@ -3445,7 +3560,7 @@ describe('ProviderManager', () => {
 
     expect(provider.authState).toBe('detected');
     expect(provider.authMode).toBe('cli');
-    expect(provider.message).toContain('Nothing is imported automatically');
+    expect(provider.message).toContain('Choose Connect');
   });
 
   it('adopts machine-local auth inside Vicode without launching a new login', async () => {
@@ -3515,15 +3630,11 @@ describe('ProviderManager', () => {
       gemini: createAdapter({ id: 'gemini', label: 'Gemini' })
     });
 
-    (
-      manager as unknown as {
-        pendingAuth: Map<ProviderId, number>;
-      }
-    ).pendingAuth.set('openai', Date.now());
+    await manager.startAuth('openai', 'cli');
 
     await manager.startAuth('openai', 'cli', { force: true });
 
-    expect(startAuth).toHaveBeenCalledOnce();
+    expect(startAuth).toHaveBeenCalledTimes(2);
   });
 
   it('starts Gemini planner runs in native plan mode', async () => {
@@ -3571,7 +3682,7 @@ describe('ProviderManager', () => {
     expect(startRun).toHaveBeenCalledWith(
       expect.objectContaining({
         runMode: 'plan',
-        prompt: 'Plan a hacker-themed hero section.',
+        prompt: expect.stringContaining('User request:\nPlan a hacker-themed hero section.'),
         modelId: 'gemini-2.5-pro',
         resumeSessionId: null,
         runtimeSkillResources: []
@@ -3621,7 +3732,9 @@ describe('ProviderManager', () => {
     expect(startRun).toHaveBeenCalledWith(
       expect.objectContaining({
         runMode: 'plan',
-        prompt: 'Shape the next bounded implementation slice.'
+        prompt: expect.stringContaining(
+          'User request:\nShape the next bounded implementation slice.'
+        )
       }),
       expect.any(Object)
     );
@@ -3688,6 +3801,8 @@ describe('ProviderManager', () => {
 
     const prompt = startRun.mock.calls[0]?.[0]?.prompt as string;
     expect(prompt).not.toContain('Workspace SOUL.md:\nStay sharp and practical.');
+    expect(prompt).toContain('Vicode guidance wiki:');
+    expect(prompt).toMatch(/Using: .*Planner Helper/u);
     expect(prompt).toContain('Attached skills:\nThese instructions are already attached to this run.');
     expect(prompt).toContain('## Planner Helper ($planner-helper)');
     expect(prompt).toContain('User request:\nPlan a landing page refresh.');
@@ -3983,7 +4098,8 @@ describe('ProviderManager', () => {
         reasoningEffort: 'low',
         executionConstraints: expect.objectContaining({
           toolPolicy: expect.objectContaining({
-            preset: 'subagent'
+            preset: 'default',
+            disallowedToolCallNames: ['spawn_subagents']
           }),
           maxDelegationDepth: 0,
           maxSiblingDelegates: 0
@@ -4492,7 +4608,7 @@ describe('ProviderManager', () => {
 
     expect(startRun).toHaveBeenCalledWith(
       expect.objectContaining({
-        prompt: 'Use the helper',
+        prompt: expect.stringContaining('User request:\nUse the helper'),
         runtimeSkillResources: []
       }),
       expect.any(Object)
@@ -4771,7 +4887,7 @@ describe('ProviderManager', () => {
     expect(startRun).toHaveBeenCalledWith(
       expect.objectContaining({
         runMode: 'plan',
-        prompt: 'Plan the implementation.',
+        prompt: expect.stringContaining('User request:\nPlan the implementation.'),
         modelId: 'gpt-5',
         resumeSessionId: null
       }),
@@ -4816,7 +4932,7 @@ describe('ProviderManager', () => {
     expect(startRun).toHaveBeenCalledWith(
       expect.objectContaining({
         runMode: 'plan',
-        prompt: 'Plan the implementation.',
+        prompt: expect.stringContaining('User request:\nPlan the implementation.'),
         modelId: 'qwen3-coder'
       }),
       expect.any(Object)
@@ -5040,6 +5156,55 @@ describe('ProviderManager', () => {
     callbacks?.onInfo('Running npm test');
 
     expect(db.addRunEvent).not.toHaveBeenCalled();
+  });
+
+  it('ignores late provider callbacks after abort', async () => {
+    const db = createDb();
+    let callbacks: ProviderRunCallbacks | null = null;
+    const cancel = vi.fn(async () => {
+      callbacks?.onAbort('Run stopped by user.');
+    });
+    const adapter = createAdapter({
+      startRun: async (_context, nextCallbacks) => {
+        callbacks = nextCallbacks;
+        callbacks.onStart();
+        return {
+          runId: 'run-1',
+          cancel
+        };
+      }
+    });
+    const manager = new ProviderManager(db as never, {
+      openai: adapter,
+      gemini: createAdapter({ id: 'gemini', label: 'Gemini' })
+    });
+
+    const result = await manager.submitComposer({
+      projectId: 'project-1',
+      prompt: 'hello',
+      providerId: 'openai',
+      modelId: 'gpt-5',
+      executionPermission: 'default',
+      skillIds: [],
+      imageAttachments: []
+    });
+
+    await manager.stopRun(result.runId);
+    expect(cancel).toHaveBeenCalledWith('Run stopped by user.');
+
+    vi.mocked(db.addRunEvent).mockClear();
+    vi.mocked(db.updateAssistantTurn).mockClear();
+    vi.mocked(db.updateThreadStatus).mockClear();
+
+    callbacks?.onInfo('late info');
+    callbacks?.onDelta('late delta');
+    callbacks?.onAssistantSnapshot('late snapshot');
+    callbacks?.onComplete('late complete');
+    callbacks?.onError('late error');
+
+    expect(db.addRunEvent).not.toHaveBeenCalled();
+    expect(db.updateAssistantTurn).not.toHaveBeenCalled();
+    expect(db.updateThreadStatus).not.toHaveBeenCalled();
   });
 
   it('marks a thread as stopping before provider cancellation resolves', async () => {

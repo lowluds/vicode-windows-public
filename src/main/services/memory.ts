@@ -118,7 +118,7 @@ export class WorkspaceMemoryService {
       return [];
     }
 
-    this.refreshWorkspaceMemory(input.projectId, input.folderPath, input.trusted);
+    this.indexWorkspaceMemory(input.projectId, input.folderPath);
 
     const ranked = this.db
       .listWorkspaceMemoryChunks(input.projectId)
@@ -158,6 +158,33 @@ export class WorkspaceMemoryService {
 
     for (const file of files) {
       const checksum = createHash('sha1').update(file.content).digest('hex');
+      const existing =
+        typeof (this.db as DatabaseService & {
+          getWorkspaceMemoryFile?: (projectId: string, path: string) => {
+            id: string;
+            checksum: string | null;
+            lastIndexedAt: string | null;
+            updatedAt: string;
+          } | null;
+        }).getWorkspaceMemoryFile === 'function'
+          ? (this.db as DatabaseService & {
+              getWorkspaceMemoryFile: (projectId: string, path: string) => {
+                id: string;
+                checksum: string | null;
+                lastIndexedAt: string | null;
+                updatedAt: string;
+              } | null;
+            }).getWorkspaceMemoryFile(projectId, file.path)
+          : null;
+
+      if (
+        existing &&
+        existing.checksum === checksum &&
+        existing.updatedAt === file.sourceUpdatedAt
+      ) {
+        continue;
+      }
+
       const memoryFileId = this.db.upsertWorkspaceMemoryFile({
         projectId,
         kind: file.kind,

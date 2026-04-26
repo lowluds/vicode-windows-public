@@ -22,7 +22,7 @@ export const PROJECT_RUNTIME_COMMAND_POLICY_OPTIONS = [
     value: 'disabled' as const,
     label: 'Disable commands',
     description:
-      'Keep the runtime on trusted-workspace file tools only, even under Full access.'
+      'Keep the runtime on workspace file tools only, even under Full access.'
   }
 ];
 
@@ -411,7 +411,7 @@ export function deriveRuntimePolicy(
       commandAccess: 'blocked',
       networkAccess: 'web_tools',
       summary:
-        'Trusted-workspace file tools and app-owned web research stay available, but this workspace disables local shell commands even under Full access.',
+        'Workspace file tools and app-owned web research stay available, but this workspace disables local shell commands even under Full access.',
       commandSummary:
         'Update the workspace runtime policy before the runtime can request host-local shell commands here.',
       networkSummary:
@@ -420,8 +420,8 @@ export function deriveRuntimePolicy(
           : 'App-owned web research tools can still reach the public web in this workspace, but approved shell commands cannot use host network access here.',
       modelInstruction:
         runtimeNetworkPolicy === 'enabled'
-          ? 'Shell commands are disabled for this workspace. Trusted-workspace file tools stay available, and app-owned web research tools can reach the public web when current or external information is needed.'
-          : 'Shell commands are disabled for this workspace. Stay within trusted-workspace file tools for workspace edits, and use app-owned web research tools when the user asks for online research or when current or external facts are needed.',
+          ? 'Shell commands are disabled for this workspace. Workspace file tools stay available, and app-owned web research tools can reach the public web when current or external information is needed.'
+          : 'Shell commands are disabled for this workspace. Stay within workspace file tools for workspace edits, and use app-owned web research tools when the user asks for online research or when current or external facts are needed.',
       commandDeniedMessage:
         'run_command is disabled for this workspace. Update the workspace runtime policy to allow approval-gated local shell commands.'
     };
@@ -437,7 +437,7 @@ export function deriveRuntimePolicy(
       commandAccess: 'auto_approve',
       networkAccess: runtimeNetworkPolicy === 'enabled' ? 'host_local' : 'web_tools',
       summary:
-        'Trusted-workspace file tools stay available, and local shell commands can start immediately under Full access.',
+        'Workspace file tools stay available, and local shell commands can start immediately under Full access.',
       commandSummary:
         'Commands start in the workspace, run on the local host, and use isolated temp home/appdata directories by default, but they are not sandboxed to it.',
       networkSummary:
@@ -462,7 +462,7 @@ export function deriveRuntimePolicy(
       commandAccess: 'approval_required',
       networkAccess: runtimeNetworkPolicy === 'enabled' ? 'host_local' : 'web_tools',
       summary:
-        'Trusted-workspace file tools stay available, and local shell commands can run after per-command approval.',
+        'Workspace file tools stay available, and local shell commands can run after per-command approval.',
       commandSummary:
         'Approved commands start in the workspace, run on the local host, and use isolated temp home/appdata directories by default, but they are not sandboxed to it.',
       networkSummary:
@@ -486,7 +486,7 @@ export function deriveRuntimePolicy(
     commandAccess: 'blocked',
     networkAccess: 'web_tools',
     summary:
-      'The runtime stays on trusted-workspace file tools plus app-owned web research. Local shell commands are blocked under Default permissions.',
+      'The runtime stays on workspace file tools plus app-owned web research. Local shell commands are blocked under Default permissions.',
     commandSummary:
       'Use list_directory, search_text, read_file, mkdir, and apply_patch for workspace work.',
     networkSummary:
@@ -495,8 +495,8 @@ export function deriveRuntimePolicy(
         : 'App-owned web research tools can still reach the public web in this workspace, but clearly network-oriented shell commands stay blocked here.',
     modelInstruction:
       runtimeNetworkPolicy === 'enabled'
-        ? 'Shell commands are unavailable in this run. Stay within trusted-workspace file tools for workspace edits, and use app-owned web research tools when the user asks for online research or when current or external facts are needed.'
-        : 'Shell commands are unavailable in this run. Stay within trusted-workspace file tools for workspace edits, and use app-owned web research tools when the user asks for online research or when current or external facts are needed.',
+        ? 'Shell commands are unavailable in this run. Stay within workspace file tools for workspace edits, and use app-owned web research tools when the user asks for online research or when current or external facts are needed.'
+        : 'Shell commands are unavailable in this run. Stay within workspace file tools for workspace edits, and use app-owned web research tools when the user asks for online research or when current or external facts are needed.',
     commandDeniedMessage:
       'run_command requires Full access. Approved commands start in the workspace, run on the local host, and use isolated temp home/appdata directories by default, but they are not sandboxed to it.'
   };
@@ -726,9 +726,9 @@ export function evaluateRuntimeCommandExecution(
       : null;
   const pathDeniedReason =
     pathClassification?.access === 'blocked_outside_workspace_absolute_path'
-      ? `run_command is blocked by runtime path policy. The command references an absolute path outside the trusted workspace (${pathClassification.matchedToken ?? pathClassification.resolvedPath ?? 'unknown path'}).`
+      ? `run_command is blocked by runtime path policy. The command references an absolute path outside the workspace (${pathClassification.matchedToken ?? pathClassification.resolvedPath ?? 'unknown path'}).`
       : pathClassification?.access === 'blocked_outside_workspace_relative_path'
-        ? `run_command is blocked by runtime path policy. The command references a relative path that resolves outside the trusted workspace (${pathClassification.matchedToken ?? pathClassification.resolvedPath ?? 'unknown path'}).`
+        ? `run_command is blocked by runtime path policy. The command references a relative path that resolves outside the workspace (${pathClassification.matchedToken ?? pathClassification.resolvedPath ?? 'unknown path'}).`
         : null;
 
   return {

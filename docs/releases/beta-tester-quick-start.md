@@ -14,10 +14,13 @@ Use the source mirror only if you want to build Vicode from source:
 
 ## 2. Install And Launch
 
-1. Download `Vicode-Setup-0.2.1.exe`.
+1. Download `Vicode-Setup-0.2.6.exe`.
 2. Run the installer.
 3. Launch Vicode.
-4. Open a project folder and trust that workspace when prompted.
+4. Open a project folder to begin.
+
+If you already downloaded `Vicode-Setup-0.2.5.exe`, discard it and use the
+`0.2.6` installer instead.
 
 ## 3. Connect A Provider
 
@@ -30,7 +33,7 @@ Supported secondary lane:
 
 - `Ollama`
 
-Compatibility-only lanes:
+Parked compatibility lanes not currently surfaced in the beta UI:
 
 - `Qwen`
 - `Kimi`
@@ -41,7 +44,7 @@ Provider setup instructions:
 
 ## 4. Run A First Test
 
-Start with a small trusted project and ask Vicode to:
+Start with a small local project folder and ask Vicode to:
 
 - explain a file
 - make a small docs or UI change
@@ -52,10 +55,14 @@ Start with a small trusted project and ask Vicode to:
 - Installed Windows builds check for updates on launch.
 - Update status also appears in `Settings > General`.
 - When an update is ready, Vicode shows a visible update action in the titlebar.
-- If a run is active when you click update, Vicode queues the install and waits
-  for that run to finish before restarting.
+- Clicking the update action restarts Vicode immediately and installs the new build, even if that interrupts the current run.
 
-## 6. Current Beta Limits
+## 6. How To Report Bugs
+
+- Use [GitHub Issues](https://github.com/lowluds/vicode-windows/issues) for bug reports and reproducible beta feedback.
+- Pull requests are for code changes, not for reporting a broken workflow.
+
+## 7. Current Beta Limits
 
 These are not the main beta promise yet:
 
@@ -63,8 +70,17 @@ These are not the main beta promise yet:
 - broad collaboration claims
 - full autonomous-builder claims
 
+## 8. App Data Safety
+
+Vicode and the OpenAI Codex app are separate applications.
+
+- Vicode keeps its own local app state.
+- Vicode can detect provider CLI setup when needed.
+- Vicode should not write, delete, sync, install, uninstall, or clean files
+  inside your real Codex app folders under `~/.codex`.
+
 ## Related Docs
 
 - [README.md](../../README.md)
-- [0.2.1 reviewer guide](./0.2.1-reviewer-guide.md)
-- [0.2.1 release notes](./0.2.1.md)
+- [0.2.6 reviewer guide](./0.2.6-reviewer-guide.md)
+- [0.2.6 release notes](./0.2.6.md)

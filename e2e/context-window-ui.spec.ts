@@ -7,10 +7,14 @@ import { closeApp, launchApp as launchElectronApp, waitForBridge } from './helpe
 async function seedContextFixture(window: Page, workspaceDir: string) {
   return await window.evaluate(async ({ workspaceDir }) => {
     const bootstrap = await window.vicode.app.getBootstrap();
-    const provider = bootstrap.providers.find((entry) => entry.installed) ?? bootstrap.providers[0] ?? null;
+    const provider =
+      bootstrap.providers.find((entry) => entry.id === 'openai') ??
+      bootstrap.providers.find((entry) => entry.id === 'gemini') ??
+      bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+      null;
 
     if (!provider) {
-      throw new Error('Expected at least one provider for the context window fixture.');
+      throw new Error('Expected a release-facing provider for the context window fixture.');
     }
 
     const project = await window.vicode.projects.create({

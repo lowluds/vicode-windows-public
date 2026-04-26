@@ -8,6 +8,7 @@ import {
   Brush,
   Camera,
   CheckCircle2,
+  ChevronsDownUp,
   ChevronDown,
   ChevronRight,
   CircleUserRound,
@@ -17,6 +18,8 @@ import {
   Copy,
   Cpu,
   Download,
+  Eye,
+  EyeOff,
   Ellipsis,
   FileText,
   Figma,
@@ -94,6 +97,7 @@ export const FolderOpenIcon = iconFactory(FolderOpen);
 export const RoomsIcon = iconFactory(LayoutGrid);
 export const ThreadDotIcon = iconFactory(MessageSquareText);
 export const NewThreadIcon = iconFactory(PencilLine);
+export const CollapseAllIcon = iconFactory(ChevronsDownUp, 16);
 export const AutomationIcon = iconFactory(Bot);
 export const SkillsIcon = iconFactory(SquareTerminal);
 export const SettingsIcon = iconFactory(Settings);
@@ -120,6 +124,8 @@ export const CloseIcon = iconFactory(X, 16);
 export const TaskIcon = iconFactory(ListChecks, 16);
 export const PlayIcon = iconFactory(PlayCircle, 16);
 export const MoreIcon = iconFactory(Ellipsis, 16);
+export const EyeIcon = iconFactory(Eye, 16);
+export const EyeOffIcon = iconFactory(EyeOff, 16);
 export const DocumentIcon = iconFactory(FileText, 16);
 export const BookIcon = iconFactory(BookOpen, 16);
 export const BrushIcon = iconFactory(Brush, 16);

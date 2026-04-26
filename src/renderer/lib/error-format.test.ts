@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatUserErrorMessage, parseWorkspaceUnavailableError } from './error-format';
+import { formatRunFailureToastMessage, formatUserErrorMessage, parseWorkspaceUnavailableError } from './error-format';
 
 describe('formatUserErrorMessage', () => {
   it('unwraps Electron invoke prefixes and maps untrusted workspace errors', () => {
@@ -8,7 +8,7 @@ describe('formatUserErrorMessage', () => {
     );
 
     expect(formatUserErrorMessage(error, 'fallback')).toBe(
-      'This workspace is not trusted yet. Click Enable workspace in the header before running Codex.'
+      'This workspace was blocked by an older access rule. Re-open the folder and retry Codex.'
     );
   });
 
@@ -38,5 +38,32 @@ describe('formatUserErrorMessage', () => {
     expect(formatUserErrorMessage(error, 'fallback')).toBe(
       'Gemini finished the run without returning a reply. Retry once. If it keeps happening, switch the model to Auto Gemini 2.5 or Gemini 2.5 Flash.'
     );
+  });
+
+  it('uses the action fallback for generic fetch failures', () => {
+    const error = new Error("Error invoking remote method 'settings:refreshProvider': TypeError: fetch failed");
+
+    expect(formatUserErrorMessage(error, 'Unable to refresh provider models.')).toBe('Unable to refresh provider models.');
+  });
+});
+
+describe('formatRunFailureToastMessage', () => {
+  it('maps patch hunk failures to a clear run failure toast', () => {
+    expect(formatRunFailureToastMessage('error on hunk 3')).toBe(
+      'Patch could not be applied. The file likely changed or the generated patch was stale; details are in the thread.'
+    );
+    expect(formatRunFailureToastMessage('Added line count did not match for hunk at line 3')).toBe(
+      'Patch could not be applied. The file likely changed or the generated patch was stale; details are in the thread.'
+    );
+  });
+
+  it('maps generic fetch failures to a provider reachability toast', () => {
+    expect(formatRunFailureToastMessage('fetch failed')).toBe(
+      'A provider request failed. Check that the selected provider is reachable, then retry. Details are in the thread.'
+    );
+  });
+
+  it('preserves non-patch run failures', () => {
+    expect(formatRunFailureToastMessage('Gemini CLI failed.')).toBe('Gemini CLI failed.');
   });
 });

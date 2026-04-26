@@ -1,21 +1,21 @@
 import { ActionButton, PrimaryButton, SelectField, StatusPill, TextInput } from '../ui';
-import { RefreshIcon } from '../icons';
-import { deriveUpdateInstallActionLabel, isQueuedUpdateInstall } from '../../lib/app-update';
+import { deriveUpdateInstallActionLabel } from '../../lib/app-update';
 import { normalizeHexColor } from '../../lib/theme';
 import type { SettingsViewProps } from './types';
+import type { WorkspaceContractFileStatus } from '../../../shared/ipc';
 import {
   accentModeOptions,
   appearanceModeOptions,
-  followUpBehaviorOptions,
-  formatStorageAmount
+  followUpBehaviorOptions
 } from './support';
 import {
-  SETTINGS_INLINE_ACTIONS_CLASS,
   SETTINGS_SECTION_CLASS,
   SettingsPanel,
   SettingsRow,
   SettingsSectionHeader
 } from './shared';
+
+const GITHUB_BUG_REPORT_URL = 'https://github.com/lowluds/vicode-windows/issues/new?template=bug-report.yml';
 
 function formatUpdateTime(value: string | null) {
   if (!value) {
@@ -61,48 +61,181 @@ function updateStatusLabel(state: SettingsViewProps['appUpdateState']) {
   }
 }
 
+const fallbackContractFiles: WorkspaceContractFileStatus[] = [
+  {
+    kind: 'agents',
+    label: 'Operating guide',
+    fileName: 'AGENTS.md',
+    relativePath: 'AGENTS.md',
+    purpose: 'Stable repo rules and working standards.',
+    exists: false,
+    required: true,
+    loadMode: 'direct_prompt'
+  },
+  {
+    kind: 'soul',
+    label: 'Agent identity',
+    fileName: 'SOUL.md',
+    relativePath: 'SOUL.md',
+    purpose: 'Optional workspace tone and collaborator posture.',
+    exists: false,
+    required: false,
+    loadMode: 'direct_prompt'
+  },
+  {
+    kind: 'user',
+    label: 'User preferences',
+    fileName: 'USER.md',
+    relativePath: 'USER.md',
+    purpose: 'Durable communication and approval preferences.',
+    exists: false,
+    required: false,
+    loadMode: 'direct_prompt'
+  },
+  {
+    kind: 'memory',
+    label: 'Long-term memory',
+    fileName: 'MEMORY.md',
+    relativePath: 'MEMORY.md',
+    purpose: 'Curated facts and decisions that survive threads.',
+    exists: false,
+    required: false,
+    loadMode: 'memory_retrieval'
+  },
+  {
+    kind: 'daily_note',
+    label: 'Recent notes',
+    fileName: 'memory/YYYY-MM-DD.md',
+    relativePath: 'memory/YYYY-MM-DD.md',
+    purpose: 'Rolling workspace notes promoted through review.',
+    exists: false,
+    required: false,
+    loadMode: 'memory_retrieval'
+  }
+];
+
+function getWorkspaceContractFiles(status: SettingsViewProps['workspaceBootstrapStatus']) {
+  if (status?.contractFiles?.length) {
+    return status.contractFiles;
+  }
+
+  const existing = new Set(status?.existingFiles ?? []);
+  return fallbackContractFiles.map((file) => ({
+    ...file,
+    exists: existing.has(file.relativePath)
+  }));
+}
+
+function workspaceProfileTone(settings: SettingsViewProps) {
+  if (!settings.selectedProject) {
+    return 'detected';
+  }
+  if (!settings.selectedProject.trusted || settings.workspaceBootstrapStatus?.needsBootstrap) {
+    return 'checking';
+  }
+  return settings.workspaceBootstrapStatus?.eligible ? 'connected' : 'detected';
+}
+
+function workspaceProfileLabel(settings: SettingsViewProps) {
+  if (!settings.selectedProject) {
+    return 'No project';
+  }
+  if (!settings.selectedProject.trusted) {
+    return 'Not trusted';
+  }
+  if (!settings.workspaceBootstrapStatus?.eligible) {
+    return 'Unavailable';
+  }
+  return settings.workspaceBootstrapStatus.needsBootstrap ? 'Setup needed' : 'Active';
+}
+
+function fileStatusTone(file: WorkspaceContractFileStatus) {
+  if (file.exists) {
+    return 'connected';
+  }
+  return file.required ? 'checking' : 'detected';
+}
+
+function fileStatusLabel(file: WorkspaceContractFileStatus) {
+  if (file.exists) {
+    return 'Present';
+  }
+  return file.required ? 'Needed' : 'Optional';
+}
+
+function formatLoadMode(file: WorkspaceContractFileStatus) {
+  switch (file.loadMode) {
+    case 'direct_prompt':
+      return 'Prompt';
+    case 'memory_retrieval':
+      return 'Recall';
+    default:
+      return 'Draft only';
+  }
+}
+
+function workspaceSetupDescription(settings: SettingsViewProps) {
+  if (!settings.selectedProject) {
+    return 'Select a project before setting up workspace files.';
+  }
+  if (!settings.selectedProject.trusted) {
+    return 'Trust this workspace before providers can use project files.';
+  }
+  if (!settings.workspaceBootstrapStatus?.eligible) {
+    return settings.workspaceBootstrapStatus?.reason ?? 'Workspace setup is unavailable for this project.';
+  }
+  if (settings.workspaceBootstrapStatus.needsBootstrap) {
+    const missing = settings.workspaceBootstrapStatus.missingFiles.join(', ');
+    return missing ? `Missing: ${missing}` : 'Required workspace files are not ready yet.';
+  }
+  return 'Project files and memory are ready for trusted runs.';
+}
+
+function formatActiveThreadReviewDescription(settings: SettingsViewProps) {
+  if (!settings.selectedProject?.trusted) {
+    return 'Trust the current workspace before saving notes from a thread.';
+  }
+  if (!settings.activeThreadTitle) {
+    return 'Open a thread to create a review draft before saving.';
+  }
+  const title =
+    settings.activeThreadTitle.length > 72
+      ? `${settings.activeThreadTitle.slice(0, 69).trim()}...`
+      : settings.activeThreadTitle;
+  return `Creates a review draft from "${title}" before saving.`;
+}
+
 interface GeneralSettingsSectionProps {
   settings: SettingsViewProps;
   defaultAccentColor: string;
   currentAccentColor: string;
-  onOpenCompactRunEvents: () => void;
-  onOpenVacuumStorage: () => void;
 }
 
 export function GeneralSettingsSection({
   settings,
   defaultAccentColor,
-  currentAccentColor,
-  onOpenCompactRunEvents,
-  onOpenVacuumStorage
+  currentAccentColor
 }: GeneralSettingsSectionProps) {
-  const updateInstallQueued = isQueuedUpdateInstall(settings.appUpdateState, settings.queuedUpdateInstallKey);
-  const updateInstallLabel = deriveUpdateInstallActionLabel({
-    appUpdateState: settings.appUpdateState,
-    hasActiveRun: settings.hasActiveRun,
-    queuedUpdateInstallKey: settings.queuedUpdateInstallKey
-  });
-  const updateDescription = updateInstallQueued
-    ? settings.appUpdateState?.availableVersion
-      ? `Version ${settings.appUpdateState.availableVersion} is queued and will install when the current run finishes.`
-      : 'The downloaded desktop update is queued and will install when the current run finishes.'
-    : settings.appUpdateState?.status === 'downloaded' && settings.hasActiveRun
-      ? settings.appUpdateState.availableVersion
-        ? `Version ${settings.appUpdateState.availableVersion} is ready. Installing it will wait until the current run finishes.`
-        : 'The downloaded desktop update is ready. Installing it will wait until the current run finishes.'
-      : settings.appUpdateState?.message ?? 'Installed Windows builds check GitHub Releases on launch. npm installs remain manual-update only.';
+  const workspaceContractFiles = getWorkspaceContractFiles(settings.workspaceBootstrapStatus);
+  const canCreateThreadMemoryReviews = Boolean(settings.activeThreadTitle && settings.selectedProject?.trusted);
+  const updateInstallLabel = deriveUpdateInstallActionLabel();
+  const updateDescription = settings.appUpdateState?.status === 'downloaded'
+    ? settings.appUpdateState.availableVersion
+      ? `Version ${settings.appUpdateState.availableVersion} is ready. Restarting now installs it immediately and stops the current run if one is active.`
+      : 'The downloaded desktop update is ready. Restarting now installs it immediately and stops the current run if one is active.'
+    : settings.appUpdateState?.message ?? 'Installed Windows builds check GitHub Releases on launch. npm installs remain manual-update only.';
 
   return (
     <div className={`${SETTINGS_SECTION_CLASS} settings-general-section`}>
       <SettingsSectionHeader
-        title="General"
-        description="Configure the desktop shell, workspace defaults, and local housekeeping without leaving the current machine."
+        title="App"
+        description="Keep routine behavior, workspace setup, and desktop updates predictable."
       />
 
-      <SettingsPanel title="Desktop behavior" description="Keep the shell predictable and low-noise.">
+      <SettingsPanel title="Behavior" description="Controls that change how the app responds while you work.">
         <SettingsRow
           label="Follow-up behavior"
-          description="Choose what Send does while a thread is already running."
+          description="When a run is active, choose whether new text queues or steers."
         >
           <SelectField
             className="settings-row-select"
@@ -123,7 +256,7 @@ export function GeneralSettingsSection({
         </SettingsRow>
         <SettingsRow
           label="Theme mode"
-          description="Follow the system theme or force a consistent app shell."
+          description="Use system, dark, or light mode."
         >
           <SelectField
             className="settings-row-select"
@@ -144,7 +277,7 @@ export function GeneralSettingsSection({
         </SettingsRow>
         <SettingsRow
           label="Accent source"
-          description="Use the current Windows accent or pin a Vicode-specific accent."
+          description="Use the Windows accent or choose one for Vicode."
         >
           <SelectField
             className="settings-row-select"
@@ -168,7 +301,7 @@ export function GeneralSettingsSection({
         {(settings.preferences?.accentMode ?? 'system') === 'custom' ? (
           <SettingsRow
             label="Custom accent"
-            description="Applied immediately across the renderer shell."
+            description="Applies immediately."
             className="is-compact"
           >
             <div className="settings-accent-row">
@@ -190,60 +323,88 @@ export function GeneralSettingsSection({
       </SettingsPanel>
 
       <SettingsPanel
-        title="Generated memory"
-        description="Control the derived Codex-style memory lane separately from canonical workspace files."
+        title="Workspace"
+        description="What Vicode can use when trusted runs work in this project."
+        className="settings-workspace-agent-panel"
       >
         <SettingsRow
-          label="Use generated recall"
-          description="Allow bounded derived recall from prior trusted threads in the same workspace. Canonical workspace files still win."
+          label="Project setup"
+          description={workspaceSetupDescription(settings)}
+          className="settings-workspace-project-row"
         >
-          <SelectField
-            className="settings-row-select"
-            menuClassName="settings-general-select-menu"
-            value={settings.preferences?.generatedMemoryUseEnabled ? 'enabled' : 'disabled'}
-            onChange={(event) =>
-              void settings.savePreferences({
-                generatedMemoryUseEnabled: event.target.value === 'enabled'
-              })
-            }
-          >
-            <option value="disabled">Disabled</option>
-            <option value="enabled">Enabled</option>
-          </SelectField>
+          <div className="settings-row-actions">
+            <StatusPill tone={workspaceProfileTone(settings)}>{workspaceProfileLabel(settings)}</StatusPill>
+            <PrimaryButton
+              size="compact"
+              onClick={() => void settings.openWorkspaceBootstrap()}
+              disabled={!settings.workspaceBootstrapStatus?.eligible}
+            >
+              {settings.workspaceBootstrapStatus?.needsBootstrap ? 'Set up' : 'Review files'}
+            </PrimaryButton>
+          </div>
         </SettingsRow>
+        <div className="settings-workspace-project-path">
+          {settings.selectedProject
+            ? `${settings.selectedProject.name}${settings.selectedProject.folderPath ? ` - ${settings.selectedProject.folderPath}` : ''}`
+            : 'No project selected'}
+        </div>
+        <div className="settings-workspace-file-list" aria-label="Workspace files">
+          {workspaceContractFiles.map((file) => (
+            <div key={file.kind} className="settings-workspace-file-row">
+              <div className="settings-workspace-agent-file-copy">
+                <strong>{file.fileName}</strong>
+                <span>{file.label}</span>
+              </div>
+              <div className="settings-workspace-agent-file-meta">
+                <StatusPill tone={fileStatusTone(file)}>{fileStatusLabel(file)}</StatusPill>
+                <span>{formatLoadMode(file)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="settings-stat-grid settings-workspace-agent-context">
+          <span>Context files: {settings.personalization.useWorkspaceInstructions ? 'on' : 'off'}</span>
+          <span>Memory recall: when relevant</span>
+        </div>
         <SettingsRow
-          label="Generate derived memory"
-          description="Capture conservative derived memory from completed trusted threads into the shadow memory lane."
+          label="Save from this thread"
+          description={formatActiveThreadReviewDescription(settings)}
+          className="settings-memory-save-row"
         >
-          <SelectField
-            className="settings-row-select"
-            menuClassName="settings-general-select-menu"
-            value={settings.preferences?.generatedMemoryGenerationEnabled === false ? 'disabled' : 'enabled'}
-            onChange={(event) =>
-              void settings.savePreferences({
-                generatedMemoryGenerationEnabled: event.target.value === 'enabled'
-              })
-            }
-          >
-            <option value="enabled">Enabled</option>
-            <option value="disabled">Disabled</option>
-          </SelectField>
+          <div className="settings-row-actions">
+            <ActionButton
+              size="compact"
+              tone="quiet"
+              onClick={() => void settings.captureDailyNoteFromThread()}
+              disabled={!canCreateThreadMemoryReviews}
+            >
+              Daily note
+            </ActionButton>
+            <ActionButton
+              size="compact"
+              tone="quiet"
+              onClick={() => void settings.promoteThreadToMemory()}
+              disabled={!canCreateThreadMemoryReviews}
+            >
+              Project fact
+            </ActionButton>
+            <ActionButton
+              size="compact"
+              tone="quiet"
+              onClick={() => void settings.suggestUserPreferenceFromThread()}
+              disabled={!canCreateThreadMemoryReviews}
+            >
+              User preference
+            </ActionButton>
+          </div>
         </SettingsRow>
       </SettingsPanel>
 
       <SettingsPanel
-        title="Workspace overview"
-        description="Current app and workspace state on this machine."
+        title="Updates"
+        description="Current desktop build and update channel."
       >
-        <SettingsRow
-          label="Current project"
-          description={settings.selectedProject?.folderPath ?? 'No workspace folder attached yet.'}
-        >
-          <span className="settings-row-value">
-            {settings.selectedProject?.name ?? 'No project selected'}
-          </span>
-        </SettingsRow>
-        <SettingsRow label="App version" description="Desktop build currently running.">
+        <SettingsRow label="App version" description="Current desktop build.">
           <span className="settings-row-value">{settings.appMeta?.version ?? 'Unknown'}</span>
         </SettingsRow>
         <SettingsRow
@@ -283,131 +444,28 @@ export function GeneralSettingsSection({
         </SettingsRow>
         <SettingsRow
           label="Last checked"
-          description={settings.appUpdateState?.availableVersion ? 'Newest available desktop build detected for this install channel.' : 'Last successful desktop update check for this app install.'}
+          description={settings.appUpdateState?.availableVersion ? 'Newest desktop build found for this channel.' : 'Last successful desktop update check.'}
         >
           <span className="settings-row-value">{formatUpdateTime(settings.appUpdateState?.lastCheckedAt ?? null)}</span>
         </SettingsRow>
       </SettingsPanel>
 
       <SettingsPanel
-        title="Storage and cleanup"
-        description="Local thread storage, maintenance, and compaction."
+        title="Support and feedback"
+        description="Public beta reporting and follow-up."
       >
         <SettingsRow
-          label="Thread storage"
-          description="Refresh the current SQLite footprint and local counts."
+          label="Bug reports"
+          description="Open the public GitHub Issues form to report a bug or track known fixes."
         >
-          <div className="settings-row-actions">
-            <span className="settings-row-value">
-              {formatStorageAmount(settings.storageDiagnostics?.totalStorageBytes)}
-            </span>
-            <ActionButton
-              size="compact"
-              tone="quiet"
-              onClick={() => void settings.refreshStorageDiagnostics()}
-              leadingIcon={<RefreshIcon />}
-            >
-              Refresh
-            </ActionButton>
-          </div>
+          <ActionButton
+            size="compact"
+            tone="quiet"
+            onClick={() => void window.vicode.app.openExternal(GITHUB_BUG_REPORT_URL)}
+          >
+            Open GitHub Issues
+          </ActionButton>
         </SettingsRow>
-        <div className="settings-stat-grid">
-          <span>Database: {formatStorageAmount(settings.storageDiagnostics?.databaseSizeBytes)}</span>
-          <span>WAL: {formatStorageAmount(settings.storageDiagnostics?.walSizeBytes)}</span>
-          <span>Projects: {settings.storageDiagnostics?.projectCount ?? 'Unavailable'}</span>
-          <span>Threads: {settings.storageDiagnostics?.threadCount ?? 'Unavailable'}</span>
-          <span>Archived: {settings.storageDiagnostics?.archivedThreadCount ?? 'Unavailable'}</span>
-          <span>Run events: {settings.storageDiagnostics?.runEventCount ?? 'Unavailable'}</span>
-        </div>
-        <div className="settings-inline-note">
-          Archived terminal runs older than {settings.storageDiagnostics?.compactionCutoffDays ?? 30} days
-          are the only runs eligible for compaction. WAL checkpointing reclaims lagging write-ahead
-          storage, and vacuum is available for deeper cleanup.
-        </div>
-        <div className={SETTINGS_INLINE_ACTIONS_CLASS}>
-          <ActionButton
-            size="compact"
-            tone="quiet"
-            onClick={onOpenCompactRunEvents}
-            disabled={!settings.storageDiagnostics?.compactableDeltaEventCount}
-          >
-            Compact + checkpoint
-          </ActionButton>
-          <ActionButton
-            size="compact"
-            tone="quiet"
-            onClick={onOpenVacuumStorage}
-            disabled={!settings.storageDiagnostics}
-          >
-            Deep cleanup
-          </ActionButton>
-        </div>
-      </SettingsPanel>
-
-      <SettingsPanel
-        title="Current workspace bootstrap"
-        description="Review or bootstrap durable workspace files for the selected project."
-      >
-        <div className="settings-workspace-bootstrap-copy flex items-start justify-between gap-4">
-          <div className="settings-inline-note">
-            {settings.selectedProject
-              ? `Project: ${settings.selectedProject.name}`
-              : 'Select a project with a real workspace folder.'}
-            {settings.selectedProject?.folderPath ? ` ${settings.selectedProject.folderPath}` : ''}
-          </div>
-          <StatusPill
-            tone={
-              settings.workspaceBootstrapStatus?.eligible
-                ? settings.workspaceBootstrapStatus.needsBootstrap
-                  ? 'checking'
-                  : 'connected'
-                : 'detected'
-            }
-          >
-            {!settings.selectedProject
-              ? 'No project'
-              : !settings.workspaceBootstrapStatus?.eligible
-                ? 'Unavailable'
-                : settings.workspaceBootstrapStatus.dismissed &&
-                    settings.workspaceBootstrapStatus.needsBootstrap
-                  ? 'Dismissed'
-                  : settings.workspaceBootstrapStatus.needsBootstrap
-                    ? 'Ready'
-                    : 'Complete'}
-          </StatusPill>
-        </div>
-        <div className="settings-stat-grid">
-          <span>
-            {settings.workspaceBootstrapStatus?.reason ??
-              settings.workspaceBootstrapStatus?.folderPath ??
-              'Select a project with a real workspace folder.'}
-          </span>
-          {settings.selectedProject ? (
-            <span>
-              {settings.selectedProject.trusted ? 'Workspace access: trusted for this project' : 'Workspace access: not trusted yet'}
-            </span>
-          ) : null}
-          {settings.workspaceBootstrapStatus?.missingFiles.length ? (
-            <span>Missing: {settings.workspaceBootstrapStatus.missingFiles.join(', ')}</span>
-          ) : settings.workspaceBootstrapStatus?.dismissed ? (
-            <span>
-              The project-level suggestion is dismissed for this workspace, but you can still manage
-              its files here.
-            </span>
-          ) : settings.workspaceBootstrapStatus?.eligible ? (
-            <span>Core workspace files already exist for this project.</span>
-          ) : null}
-        </div>
-        <div className={SETTINGS_INLINE_ACTIONS_CLASS}>
-          <PrimaryButton
-            onClick={() => void settings.openWorkspaceBootstrap()}
-            disabled={!settings.workspaceBootstrapStatus?.eligible}
-          >
-            {settings.workspaceBootstrapStatus?.needsBootstrap
-              ? 'Set up current workspace'
-              : 'Review current workspace files'}
-          </PrimaryButton>
-        </div>
       </SettingsPanel>
     </div>
   );

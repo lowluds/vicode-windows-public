@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Dispatch, SetStateAction } from 'react';
-import { ActionButton, ConfirmDialog, IconButton, PrimaryButton, SelectField, StatusPill, TextInput } from './ui';
+import type { Dispatch, ReactNode, SetStateAction } from 'react';
+import { ActionButton, ConfirmDialog, IconButton, Menu, MenuContent, MenuItem, MenuItemLabel, MenuTrigger, PrimaryButton, SelectField, StatusPill, TextInput } from './ui';
 import type {
   AppMeta,
   AppUpdateState,
@@ -23,6 +23,7 @@ import {
   PROJECT_RUNTIME_NETWORK_POLICY_OPTIONS
 } from '../../shared/runtime-policy';
 import {
+  createProviderRecord,
   providerDisplayName,
   providerModelRecommendationLabel,
   providerRecommendedRouteSummary,
@@ -33,15 +34,28 @@ import {
   providerSettingsStatusSummary,
   providerUsesHostedApi
 } from '../../shared/providers';
-import { ChevronRightIcon, CloseIcon, LogoutIcon } from './icons';
+import {
+  AccountIcon,
+  ArchiveIcon,
+  ChevronRightIcon,
+  ClipboardIcon,
+  CloseIcon,
+  CpuIcon,
+  EyeIcon,
+  EyeOffIcon,
+  FolderIcon,
+  LogoutIcon,
+  MoreIcon,
+  SettingsIcon
+} from './icons';
 import { normalizeHexColor } from '../lib/theme';
+import { normalizeProviderApiKeyDraft, resolveProviderApiKeyFieldValue } from '../lib/provider-api-key';
 import { GeneralSettingsSection } from './settings/GeneralSettingsSection';
 import { ProviderAuthActions } from './settings/ProviderAuthActions';
 import {
+  AdvancedSettingsSection,
   ArchivedThreadsSection,
-  DiagnosticsSettingsSection,
-  PersonalizationSettingsSection,
-  StorageSettingsSection
+  PersonalizationSettingsSection
 } from './settings/SecondarySettingsSections';
 import { settingsSections } from './settings/support';
 
@@ -177,6 +191,15 @@ const ollamaTransportModeOptions: Array<{ value: OllamaTransportMode; label: str
   }
 ];
 
+const settingsSectionIcons: Record<SettingsSection, ReactNode> = {
+  general: <SettingsIcon />,
+  providers: <CpuIcon />,
+  personalization: <AccountIcon />,
+  diagnostics: <ClipboardIcon />,
+  storage: <FolderIcon />,
+  archived_threads: <ArchiveIcon />
+};
+
 
 interface SettingsViewProps {
   section: SettingsSection;
@@ -205,8 +228,6 @@ interface SettingsViewProps {
   clearAllProviderAuth: () => Promise<void>;
   appMeta: AppMeta | null;
   appUpdateState: AppUpdateState | null;
-  hasActiveRun: boolean;
-  queuedUpdateInstallKey: string | null;
   checkForAppUpdates: () => Promise<void>;
   restartToUpdate: () => Promise<void>;
   storageDiagnostics: StorageDiagnostics | null;
@@ -224,6 +245,10 @@ interface SettingsViewProps {
   ) => Promise<void>;
   workspaceBootstrapStatus: WorkspaceBootstrapStatus | null;
   openWorkspaceBootstrap: () => Promise<void>;
+  activeThreadTitle: string | null;
+  captureDailyNoteFromThread: () => Promise<void>;
+  promoteThreadToMemory: () => Promise<void>;
+  suggestUserPreferenceFromThread: () => Promise<void>;
   archivedThreads: ThreadSummary[];
   projects: Project[];
   restoreArchivedThread: (threadId: string) => Promise<void>;
@@ -238,6 +263,9 @@ export function SettingsView(props: SettingsViewProps) {
   const [personalizationDraft, setPersonalizationDraft] = useState(props.personalization);
   const [ollamaModelDraft, setOllamaModelDraft] = useState('');
   const [ollamaBusyAction, setOllamaBusyAction] = useState<'pull' | `delete:${string}` | null>(null);
+  const [revealedApiKeys, setRevealedApiKeys] = useState<Record<ProviderId, boolean>>(() =>
+    createProviderRecord(() => false)
+  );
   const selectedProjectRuntimeCommandPolicy =
     props.selectedProject?.runtimeCommandPolicy ?? 'approval_required';
   const selectedProjectRuntimeNetworkPolicy =
@@ -262,6 +290,34 @@ export function SettingsView(props: SettingsViewProps) {
   );
 
   useEffect(() => {
+    setRevealedApiKeys((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const provider of props.providers) {
+        if (props.apiKeys[provider.id].length === 0 && next[provider.id]) {
+          next[provider.id] = false;
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [props.apiKeys, props.providers]);
+
+  useEffect(() => {
+    setRevealedApiKeys((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const provider of props.providers) {
+        if (props.apiKeys[provider.id].length === 0 && next[provider.id]) {
+          next[provider.id] = false;
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [props.apiKeys, props.providers]);
+
+  useEffect(() => {
     setPersonalizationDraft(props.personalization);
   }, [props.personalization]);
 
@@ -279,7 +335,7 @@ export function SettingsView(props: SettingsViewProps) {
     }));
   };
 
-  const settingsRootClass = 'settings-root settings-content settings-content-standalone ui-stable-scroll flex min-h-0 w-full max-w-[1180px] flex-1 flex-col px-6 py-5';
+  const settingsRootClass = 'settings-root settings-content settings-content-standalone ui-stable-scroll flex min-h-0 w-full flex-1 flex-col';
   const providersSectionClass = 'settings-section-stack settings-section-stack-compact flex flex-col gap-5';
   const settingsInlineActionsClass = 'settings-inline-actions flex flex-wrap items-center gap-3';
   const providerStackClass = 'settings-provider-stack flex flex-col gap-4';
@@ -292,7 +348,7 @@ export function SettingsView(props: SettingsViewProps) {
   const detailBlockClass = 'settings-detail-block flex flex-col gap-4 rounded-[24px] border border-transparent bg-transparent p-5';
   const defaultAccentColor = getComputedStyle(document.documentElement).getPropertyValue('--ui-default-accent').trim();
   const currentAccentColor = normalizeHexColor(props.preferences?.accentColor) ?? defaultAccentColor;
-  const activeSettingsSection = props.section;
+  const activeSettingsSection = props.section === 'storage' ? 'diagnostics' : props.section;
 
   return (
     <section className={settingsRootClass}>
@@ -312,10 +368,11 @@ export function SettingsView(props: SettingsViewProps) {
               {settingsSections.map((entry) => (
                 <ActionButton
                   key={entry.value}
-                  tone={props.section === entry.value ? 'default' : 'quiet'}
+                  tone={activeSettingsSection === entry.value ? 'default' : 'quiet'}
                   size="compact"
                   className="settings-shell-tab settings-nav-item"
-                  data-active={props.section === entry.value ? 'true' : 'false'}
+                  leadingIcon={settingsSectionIcons[entry.value]}
+                  data-active={activeSettingsSection === entry.value ? 'true' : 'false'}
                   onClick={() => props.setSection(entry.value)}
                 >
                   {entry.label}
@@ -330,8 +387,6 @@ export function SettingsView(props: SettingsViewProps) {
             settings={props}
             defaultAccentColor={defaultAccentColor}
             currentAccentColor={currentAccentColor}
-            onOpenCompactRunEvents={() => setCompactRunEventsDialogOpen(true)}
-            onOpenVacuumStorage={() => setVacuumStorageDialogOpen(true)}
           />
         ) : null}
 
@@ -342,9 +397,8 @@ export function SettingsView(props: SettingsViewProps) {
                 Providers
               </h2>
               <p className="max-w-4xl text-[14px] leading-6 text-[color:var(--ui-text-muted)]">
-                Set up each provider here. Existing CLI sign-ins stay machine-local until you connect
-                them explicitly in Vicode. Ollama works with cloud models through an API key or local
-                models on this PC.
+                Connect the CLIs and keys Vicode can run. CLI sign-ins stay on this PC until
+                you choose Connect. Ollama can use a cloud API key or a local runtime.
               </p>
             </header>
             <div className={providerStackClass}>
@@ -362,13 +416,13 @@ export function SettingsView(props: SettingsViewProps) {
                     <span>{providerStatusSummary(provider, props.ollamaRuntimeStatus)}</span>
                   </div>
                   <div className={providerSummaryClass}>
-                    <strong>Best route in Vicode</strong>
+                    <strong>Default model</strong>
                     <span>{providerRecommendedRouteSummary(provider.id, { hosted: isOllamaCloudProvider(provider) })}</span>
                   </div>
                   {provider.id === 'ollama' ? (
                     <div className={providerSummaryClass}>
-                      <strong>How Ollama works in Vicode</strong>
-                      <span>Use Ollama two ways: cloud models with an API key, or local models by installing Ollama on this PC.</span>
+                      <strong>Ollama mode</strong>
+                      <span>Use cloud models with an API key, or local models from this PC.</span>
                     </div>
                   ) : null}
                   <div className={providerActionsClass}>
@@ -387,50 +441,83 @@ export function SettingsView(props: SettingsViewProps) {
                   {provider.id !== 'qwen' ? (
                   <details className="settings-provider-advanced">
                     <summary>
-                      <span>{provider.id === 'ollama' ? 'Cloud models key' : 'API key instead of CLI sign-in (optional)'}</span>
+                      <span>{provider.id === 'ollama' ? 'Cloud API key' : 'Use an API key instead'}</span>
                       <ChevronRightIcon />
                     </summary>
-                    <p>{provider.id === 'ollama' ? 'Add an Ollama API key to use cloud models in Vicode.' : 'Use this only if you want to connect by API key instead of CLI sign-in.'}</p>
-                    {provider.id === 'ollama' ? (
-                      <div className={providerActionGroupClass}>
-                        <ActionButton
-                          className="settings-provider-link"
-                          size="compact"
-                          tone="quiet"
-                          onClick={() => void window.vicode.app.openExternal(OLLAMA_API_KEY_DOCS_URL)}
-                        >
-                          Get API key
-                        </ActionButton>
-                        <ActionButton
-                          className="settings-provider-link"
-                          size="compact"
-                          tone="quiet"
-                          onClick={() => void window.vicode.app.openExternal(OLLAMA_ACCOUNT_URL)}
-                        >
-                          Open Ollama
-                        </ActionButton>
-                      </div>
-                    ) : null}
+                    <p>{provider.id === 'ollama' ? 'Save an Ollama API key to use cloud models.' : 'Save a key only if you do not want to use the CLI sign-in.'}</p>
                     <div className="settings-provider-key grid grid-cols-[minmax(0,1fr)_auto] gap-3">
-                      <TextInput
-                        className="settings-provider-input"
-                        placeholder={provider.id === 'gemini' ? 'Paste Gemini API key' : provider.id === 'ollama' ? 'Paste Ollama API key' : 'Paste OpenAI API key'}
-                        value={props.apiKeys[provider.id]}
-                        onChange={(event) => props.setApiKeys((current) => ({ ...current, [provider.id]: event.target.value }))}
-                      />
-                      <PrimaryButton className="settings-provider-save" size="compact" onClick={() => void props.saveProviderApiKey(provider.id)}>
-                        Save key
-                      </PrimaryButton>
+                      <div className="settings-provider-input-shell">
+                        <TextInput
+                          className="settings-provider-input"
+                          type={revealedApiKeys[provider.id] && props.apiKeys[provider.id].length > 0 ? 'text' : 'password'}
+                          autoComplete="off"
+                          spellCheck={false}
+                          placeholder={provider.id === 'gemini' ? 'Paste Gemini API key' : provider.id === 'ollama' ? 'Paste Ollama API key' : 'Paste OpenAI API key'}
+                          value={resolveProviderApiKeyFieldValue(provider, props.apiKeys[provider.id])}
+                          onChange={(event) =>
+                            props.setApiKeys((current) => ({
+                              ...current,
+                              [provider.id]: normalizeProviderApiKeyDraft(
+                                provider,
+                                current[provider.id],
+                                event.target.value
+                              )
+                            }))
+                          }
+                        />
+                        {resolveProviderApiKeyFieldValue(provider, props.apiKeys[provider.id]).length > 0 ? (
+                          <IconButton
+                            className="settings-provider-visibility"
+                            size="compact"
+                            label={`${revealedApiKeys[provider.id] ? 'Hide' : 'Show'} ${providerDisplayName(provider.id)} API key`}
+                            disabled={props.apiKeys[provider.id].length === 0}
+                            onClick={() =>
+                              setRevealedApiKeys((current) => ({
+                                ...current,
+                                [provider.id]: !current[provider.id]
+                              }))
+                            }
+                          >
+                            {revealedApiKeys[provider.id] ? <EyeOffIcon /> : <EyeIcon />}
+                          </IconButton>
+                        ) : null}
+                      </div>
+                      <div className="settings-provider-key-actions">
+                        <PrimaryButton className="settings-provider-save" size="compact" onClick={() => void props.saveProviderApiKey(provider.id)}>
+                          Save key
+                        </PrimaryButton>
+                        {provider.id === 'ollama' ? (
+                          <Menu>
+                            <MenuTrigger asChild>
+                              <IconButton
+                                className="settings-provider-menu-trigger"
+                                size="compact"
+                                label="Ollama cloud key actions"
+                              >
+                                <MoreIcon />
+                              </IconButton>
+                            </MenuTrigger>
+                            <MenuContent className="settings-provider-menu" align="end" sideOffset={8}>
+                              <MenuItem onSelect={() => void window.vicode.app.openExternal(OLLAMA_API_KEY_DOCS_URL)}>
+                                <MenuItemLabel>Get API key</MenuItemLabel>
+                              </MenuItem>
+                              <MenuItem onSelect={() => void window.vicode.app.openExternal(OLLAMA_ACCOUNT_URL)}>
+                                <MenuItemLabel>Open Ollama</MenuItemLabel>
+                              </MenuItem>
+                            </MenuContent>
+                          </Menu>
+                        ) : null}
+                      </div>
                     </div>
                   </details>
                   ) : provider.id === 'qwen' ? (
                     <div className={providerSummaryClass}>
-                      <strong>Sign-in only for now</strong>
-                      <span>Qwen is a compatibility lane in Vicode right now. It keeps its normal sign-in flow, but it is not part of the active production-hardening track.</span>
+                      <strong>CLI sign-in only</strong>
+                      <span>Qwen uses its normal sign-in flow in this build. API keys are not supported here yet.</span>
                     </div>
                   ) : (
                     <div className={providerSummaryClass}>
-                      <strong>Local runtime or cloud API</strong>
+                      <strong>Cloud or local</strong>
                         <span>Use an API key for hosted Ollama, or install Ollama for local models.</span>
                     </div>
                   )}
@@ -442,9 +529,9 @@ export function SettingsView(props: SettingsViewProps) {
                       </summary>
                     <div className={detailBlockClass}>
                       <div className="settings-provider-copy">
-                        <strong>Local Ollama settings</strong>
-                        <p>These settings only affect models running on this PC. Hosted Ollama does not use this section.</p>
-                        <p>They also do not control provider-owned approval or sandbox behavior for Codex or Gemini. Those lanes keep their own execution boundary.</p>
+                        <strong>Local Ollama</strong>
+                        <p>These controls only affect Ollama models running on this PC.</p>
+                        <p>Codex and Gemini keep their own CLI approval and sandbox behavior.</p>
                       </div>
                       {props.selectedProject ? (
                         <div className="settings-quota-row flex flex-col gap-3 rounded-2xl border border-transparent bg-transparent p-4">
@@ -452,7 +539,7 @@ export function SettingsView(props: SettingsViewProps) {
                             <strong>Command access</strong>
                             <span>{props.selectedProject.name}</span>
                             <p>
-                              Decide whether Full access requires per-command approval, auto-runs commands, or blocks them in this workspace.
+                              Choose how local Ollama handles commands in this workspace.
                             </p>
                           </div>
                           <SelectField
@@ -481,7 +568,7 @@ export function SettingsView(props: SettingsViewProps) {
                           <div className="settings-provider-copy pt-2">
                             <strong>Internet access</strong>
                             <p>
-                              Decide whether allowed commands can use internet-style access in this workspace.
+                              Choose whether approved local commands can use the internet.
                             </p>
                           </div>
                           <SelectField
@@ -511,7 +598,7 @@ export function SettingsView(props: SettingsViewProps) {
                       ) : (
                         <div className={providerSummaryClass}>
                           <strong>No active workspace</strong>
-                          <span>Select a workspace if you want to change how local Ollama shell commands behave there.</span>
+                          <span>Select a workspace to change local Ollama command access.</span>
                         </div>
                       )}
                       {isOllamaCloudProvider(provider) ? (
@@ -519,7 +606,7 @@ export function SettingsView(props: SettingsViewProps) {
                           <div className="settings-provider-copy">
                             <strong>Cloud models</strong>
                             <span>Cloud models are active</span>
-                            <p>You can ignore the local settings here unless you also want local Ollama models on this machine.</p>
+                            <p>Ignore local settings unless you also want models on this PC.</p>
                           </div>
                         </div>
                       ) : (
@@ -541,7 +628,7 @@ export function SettingsView(props: SettingsViewProps) {
                           <div className="settings-provider-copy">
                             <strong>Transport</strong>
                             <span>{props.preferences?.ollamaTransportMode === 'responses' ? 'Experimental OpenAI-compatible responses transport' : 'Default Ollama chat transport'}</span>
-                            <p>Choose which Ollama HTTP surface Vicode should use for this provider.</p>
+                            <p>Choose which Ollama HTTP API Vicode should use.</p>
                           </div>
                           <SelectField
                             menuClassName="settings-select-menu"
@@ -575,8 +662,8 @@ export function SettingsView(props: SettingsViewProps) {
                             </span>
                             <p>
                               {selectedProjectRuntimeNetworkPolicy === 'enabled'
-                                ? 'Workspace file tools stay available, and native web research can reach the public web. No command access.'
-                                : 'Files only. No command access.'}
+                                ? 'Workspace file tools stay available. Native web research can reach the public web. Commands stay off.'
+                                : 'Workspace files only. Commands stay off.'}
                             </p>
                           </div>
                         </div>
@@ -587,12 +674,12 @@ export function SettingsView(props: SettingsViewProps) {
                             <p>
                               {selectedProjectRuntimeCommandPolicy === 'disabled'
                                 ? 'This workspace keeps commands off, even with Full access.'
-                                : 'Commands need approval before they run on this machine.'}
+                                : 'Commands need approval before they run.'}
                             </p>
                             <p>
                               {selectedProjectRuntimeNetworkPolicy === 'enabled'
-                                ? 'Approved commands can use internet access here.'
-                                : 'Internet-style commands stay blocked here unless you allow them.'}
+                                ? 'Approved commands can use internet access.'
+                                : 'Internet access stays blocked unless you allow it.'}
                             </p>
                           </div>
                         </div>
@@ -601,7 +688,7 @@ export function SettingsView(props: SettingsViewProps) {
                         <>
                           <div className="settings-provider-copy">
                             <strong>Cloud models</strong>
-                            <p>Cloud models come from your Ollama account. Refresh the provider to reload the cloud model list.</p>
+                            <p>Cloud models come from your Ollama account. Refresh to reload the list.</p>
                             <p>{providerRecommendedRouteSummary(provider.id, { hosted: true })}</p>
                           </div>
                           {provider.models.length > 0 ? (
@@ -627,7 +714,7 @@ export function SettingsView(props: SettingsViewProps) {
                           ) : (
                             <div className={providerSummaryClass}>
                               <strong>No cloud models</strong>
-                              <span>Refresh the provider after saving your Ollama API key to load your cloud models from Ollama.</span>
+                              <span>Save your API key, then refresh Ollama.</span>
                             </div>
                           )}
                         </>
@@ -635,7 +722,7 @@ export function SettingsView(props: SettingsViewProps) {
                         <>
                           <div className="settings-provider-copy">
                             <strong>Local models</strong>
-                            <p>Pull or remove Ollama models from Vicode. Provider state refreshes automatically so the composer model list stays current.</p>
+                            <p>Pull or remove local models. Vicode refreshes the composer model list after changes.</p>
                             <p>{providerRecommendedRouteSummary(provider.id, { hosted: false })}</p>
                           </div>
                           <div className="settings-provider-key grid grid-cols-[minmax(0,1fr)_auto] gap-3">
@@ -737,7 +824,7 @@ export function SettingsView(props: SettingsViewProps) {
                           ) : (
                             <div className={providerSummaryClass}>
                               <strong>No local models</strong>
-                              <span>Pull a model above or run `ollama pull qwen3-coder` outside Vicode. Vicode will pick it up on the next refresh.</span>
+                              <span>Pull a model here, or run `ollama pull qwen3-coder` outside Vicode and refresh.</span>
                             </div>
                           )}
                         </>
@@ -798,8 +885,8 @@ export function SettingsView(props: SettingsViewProps) {
                     <div className="settings-detail-block settings-quota-block flex flex-col gap-4 rounded-2xl border border-transparent bg-transparent p-4">
                         <div className="settings-quota-header flex items-start justify-between gap-4">
                           <div>
-                            <strong>Rate limits</strong>
-                            <span>{provider.quota?.tierName ?? 'Quota details unavailable'}</span>
+                          <strong>Rate limits</strong>
+                          <span>{provider.quota?.tierName ?? 'Quota details unavailable'}</span>
                           </div>
                           {provider.quota?.note ? <p>{provider.quota.note}</p> : null}
                         </div>
@@ -846,7 +933,7 @@ export function SettingsView(props: SettingsViewProps) {
                       ) : (
                         <div className={`${providerSummaryClass} settings-quota-empty`}>
                           <strong>Quota details unavailable</strong>
-                          <span>Gemini is ready, but quota details are not available right now. You can still try a run. Refresh to check again.</span>
+                          <span>Gemini is ready. Refresh to check quota details again.</span>
                         </div>
                       )}
                     </div>
@@ -875,9 +962,13 @@ export function SettingsView(props: SettingsViewProps) {
           />
         ) : null}
 
-        {props.section === 'diagnostics' ? <DiagnosticsSettingsSection settings={props} /> : null}
-
-        {props.section === 'storage' ? <StorageSettingsSection settings={props} /> : null}
+        {props.section === 'diagnostics' || props.section === 'storage' ? (
+          <AdvancedSettingsSection
+            settings={props}
+            onOpenCompactRunEvents={() => setCompactRunEventsDialogOpen(true)}
+            onOpenVacuumStorage={() => setVacuumStorageDialogOpen(true)}
+          />
+        ) : null}
 
         {props.section === 'archived_threads' ? (
           <ArchivedThreadsSection

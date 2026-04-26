@@ -98,6 +98,7 @@ describe('WorkspaceMemoryService', () => {
     };
     const service = new WorkspaceMemoryService(db as never);
 
+    service.refreshWorkspaceMemory('project-1', workspace, true);
     const results = service.retrieveRelevantMemory({
       projectId: 'project-1',
       folderPath: workspace,
@@ -176,6 +177,7 @@ describe('WorkspaceMemoryService', () => {
     };
     const service = new WorkspaceMemoryService(db as never);
 
+    service.refreshWorkspaceMemory('project-1', workspace, true);
     const results = service.retrieveRelevantMemory({
       projectId: 'project-1',
       folderPath: workspace,
@@ -254,6 +256,7 @@ describe('WorkspaceMemoryService', () => {
     };
     const service = new WorkspaceMemoryService(db as never);
 
+    service.refreshWorkspaceMemory('project-1', workspace, true);
     const results = service.retrieveRelevantMemory({
       projectId: 'project-1',
       folderPath: workspace,
@@ -279,12 +282,7 @@ describe('WorkspaceMemoryService', () => {
     };
     const service = new WorkspaceMemoryService(db as never);
 
-    service.retrieveRelevantMemory({
-      projectId: 'project-1',
-      folderPath: workspace,
-      trusted: true,
-      query: 'Today note'
-    });
+    service.refreshWorkspaceMemory('project-1', workspace, true);
 
     expect(upsertWorkspaceMemoryFile).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -303,7 +301,7 @@ describe('WorkspaceMemoryService', () => {
     );
   });
 
-  it('refreshes canonical files on repeated retrieval so updated daily-note indexing rules take effect', () => {
+  it('indexes canonical files on retrieval and skips unchanged files on repeated retrieval', () => {
     const workspace = createWorkspace({
       'MEMORY.md': '# Stack\nThe app uses React, Vite, and TypeScript.'
     });
@@ -316,21 +314,50 @@ describe('WorkspaceMemoryService', () => {
       content: string;
       updatedAt: string;
     }> = [];
-    const fileMap = new Map<string, { id: string; kind: 'memory' | 'daily_note'; path: string; fileName: string }>();
+    const fileMap = new Map<string, {
+      id: string;
+      kind: 'memory' | 'daily_note';
+      path: string;
+      fileName: string;
+      checksum: string | null;
+      updatedAt: string;
+    }>();
     const db = {
       deleteWorkspaceMemoryFilesNotInPaths: vi.fn(),
+      getWorkspaceMemoryFile: vi.fn((_projectId: string, path: string) => {
+        const current = fileMap.get(path);
+        if (!current) {
+          return null;
+        }
+        return {
+          id: current.id,
+          checksum: current.checksum,
+          lastIndexedAt: current.updatedAt,
+          updatedAt: current.updatedAt
+        };
+      }),
       upsertWorkspaceMemoryFile: vi.fn((input: {
         projectId: string;
         kind: 'memory' | 'daily_note';
         path: string;
         fileName: string;
+        checksum: string;
+        updatedAt: string;
       }) => {
         const existing = fileMap.get(input.path);
         if (existing) {
+          fileMap.set(input.path, { ...existing, checksum: input.checksum, updatedAt: input.updatedAt });
           return existing.id;
         }
         const id = `memory-file-${fileMap.size + 1}`;
-        fileMap.set(input.path, { id, kind: input.kind, path: input.path, fileName: input.fileName });
+        fileMap.set(input.path, {
+          id,
+          kind: input.kind,
+          path: input.path,
+          fileName: input.fileName,
+          checksum: input.checksum,
+          updatedAt: input.updatedAt
+        });
         return id;
       }),
       replaceWorkspaceMemoryChunks: vi.fn(
@@ -361,21 +388,117 @@ describe('WorkspaceMemoryService', () => {
     };
     const service = new WorkspaceMemoryService(db as never);
 
-    service.retrieveRelevantMemory({
+    const firstResults = service.retrieveRelevantMemory({
       projectId: 'project-1',
       folderPath: workspace,
       trusted: true,
       query: 'What stack does the app use?'
     });
-    service.retrieveRelevantMemory({
+    const secondResults = service.retrieveRelevantMemory({
       projectId: 'project-1',
       folderPath: workspace,
       trusted: true,
       query: 'Which stack is used here?'
     });
 
-    expect(db.upsertWorkspaceMemoryFile).toHaveBeenCalledTimes(2);
-    expect(db.replaceWorkspaceMemoryChunks).toHaveBeenCalledTimes(2);
+    expect(firstResults[0]?.content).toContain('React, Vite, and TypeScript');
+    expect(secondResults[0]?.content).toContain('React, Vite, and TypeScript');
+    expect(db.upsertWorkspaceMemoryFile).toHaveBeenCalledTimes(1);
+    expect(db.replaceWorkspaceMemoryChunks).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips reindexing unchanged files on repeated explicit refresh', () => {
+    const workspace = createWorkspace({
+      'MEMORY.md': '# Stack\nThe app uses React, Vite, and TypeScript.'
+    });
+    const chunksStore: Array<{
+      id: string;
+      kind: 'memory' | 'daily_note';
+      path: string;
+      fileName: string;
+      heading: string | null;
+      content: string;
+      updatedAt: string;
+    }> = [];
+    const fileMap = new Map<string, {
+      id: string;
+      kind: 'memory' | 'daily_note';
+      path: string;
+      fileName: string;
+      checksum: string | null;
+      updatedAt: string;
+    }>();
+    const db = {
+      deleteWorkspaceMemoryFilesNotInPaths: vi.fn(),
+      getWorkspaceMemoryFile: vi.fn((projectId: string, path: string) => {
+        const current = fileMap.get(path);
+        if (!current) {
+          return null;
+        }
+        return {
+          id: current.id,
+          checksum: current.checksum,
+          lastIndexedAt: current.updatedAt,
+          updatedAt: current.updatedAt
+        };
+      }),
+      upsertWorkspaceMemoryFile: vi.fn((input: {
+        projectId: string;
+        kind: 'memory' | 'daily_note';
+        path: string;
+        fileName: string;
+        checksum: string;
+        updatedAt: string;
+      }) => {
+        const existing = fileMap.get(input.path);
+        if (existing) {
+          fileMap.set(input.path, { ...existing, checksum: input.checksum, updatedAt: input.updatedAt });
+          return existing.id;
+        }
+        const id = `memory-file-${fileMap.size + 1}`;
+        fileMap.set(input.path, {
+          id,
+          kind: input.kind,
+          path: input.path,
+          fileName: input.fileName,
+          checksum: input.checksum,
+          updatedAt: input.updatedAt
+        });
+        return id;
+      }),
+      replaceWorkspaceMemoryChunks: vi.fn(
+        (memoryFileId: string, _projectId: string, chunks: Array<{ ordinal: number; heading: string | null; content: string; updatedAt: string }>) => {
+          for (let index = chunksStore.length - 1; index >= 0; index -= 1) {
+            if (chunksStore[index]?.id.startsWith(`${memoryFileId}:`)) {
+              chunksStore.splice(index, 1);
+            }
+          }
+          const file = [...fileMap.values()].find((value) => value.id === memoryFileId);
+          if (!file) {
+            return;
+          }
+          for (const chunk of chunks) {
+            chunksStore.push({
+              id: `${memoryFileId}:${chunk.ordinal}`,
+              kind: file.kind,
+              path: file.path,
+              fileName: file.fileName,
+              heading: chunk.heading,
+              content: chunk.content,
+              updatedAt: chunk.updatedAt
+            });
+          }
+        }
+      ),
+      listWorkspaceMemoryChunks: vi.fn(() => chunksStore)
+    };
+    const service = new WorkspaceMemoryService(db as never);
+
+    service.refreshWorkspaceMemory('project-1', workspace, true);
+    service.refreshWorkspaceMemory('project-1', workspace, true);
+
+    expect(db.upsertWorkspaceMemoryFile).toHaveBeenCalledTimes(1);
+    expect(db.replaceWorkspaceMemoryChunks).toHaveBeenCalledTimes(1);
   });
 
   it('drops deleted MEMORY.md content after an explicit workspace refresh', () => {

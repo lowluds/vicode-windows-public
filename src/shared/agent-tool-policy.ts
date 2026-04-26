@@ -32,7 +32,7 @@ const AGENT_TOOL_POLICIES: AgentToolPolicy[] = [
   {
     name: 'list_directory',
     label: 'List directories',
-    description: 'Inspect folders inside the trusted workspace.',
+    description: 'Inspect folders inside the workspace.',
     category: 'read',
     minimumPermission: 'default',
     workspaceBounded: true
@@ -40,7 +40,7 @@ const AGENT_TOOL_POLICIES: AgentToolPolicy[] = [
   {
     name: 'read_file',
     label: 'Read files',
-    description: 'Open text files inside the trusted workspace.',
+    description: 'Open text files inside the workspace.',
     category: 'read',
     minimumPermission: 'default',
     workspaceBounded: true
@@ -48,7 +48,7 @@ const AGENT_TOOL_POLICIES: AgentToolPolicy[] = [
   {
     name: 'search_text',
     label: 'Search text',
-    description: 'Search file contents inside the trusted workspace.',
+    description: 'Search file contents inside the workspace.',
     category: 'read',
     minimumPermission: 'default',
     workspaceBounded: true
@@ -96,7 +96,7 @@ const AGENT_TOOL_POLICIES: AgentToolPolicy[] = [
   {
     name: 'mkdir',
     label: 'Create folders',
-    description: 'Create directories inside the trusted workspace.',
+    description: 'Create directories inside the workspace.',
     category: 'write',
     minimumPermission: 'default',
     workspaceBounded: true
@@ -104,7 +104,7 @@ const AGENT_TOOL_POLICIES: AgentToolPolicy[] = [
   {
     name: 'write_file',
     label: 'Write files',
-    description: 'Create or replace UTF-8 text files inside the trusted workspace.',
+    description: 'Create or replace UTF-8 text files inside the workspace.',
     category: 'write',
     minimumPermission: 'default',
     workspaceBounded: true
@@ -112,7 +112,7 @@ const AGENT_TOOL_POLICIES: AgentToolPolicy[] = [
   {
     name: 'apply_patch',
     label: 'Apply patches',
-    description: 'Apply unified diff patches inside the trusted workspace.',
+    description: 'Apply unified diff patches inside the workspace.',
     category: 'write',
     minimumPermission: 'default',
     workspaceBounded: true
@@ -120,7 +120,7 @@ const AGENT_TOOL_POLICIES: AgentToolPolicy[] = [
   {
     name: 'run_command',
     label: 'Run shell commands',
-    description: 'Execute local shell commands starting from the trusted workspace root or a nested workspace path.',
+    description: 'Execute local shell commands starting from the workspace root or a nested workspace path.',
     category: 'command',
     minimumPermission: 'full_access',
     workspaceBounded: true

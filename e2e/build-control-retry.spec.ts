@@ -33,7 +33,7 @@ test.afterAll(async () => {
   await rm(workspaceRoot, { recursive: true, force: true });
 });
 
-test('retries a stalled planner lane through the live Build Control bridge', async () => {
+test('retries a stalled planner lane through the live Build Control bridge @live-provider', async () => {
   const { app, window: launchedWindow } = await launchApp({
     bridgePaths: ['vicode.app', 'vicode.projects', 'vicode.threads', 'vicode.settings', 'vicode.vicodeBuild']
   });

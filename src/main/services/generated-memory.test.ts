@@ -91,7 +91,7 @@ describe('GeneratedMemoryService', () => {
     expect(existsSync(join(workspaceDir, 'USER.md'))).toBe(false);
   });
 
-  it('skips untrusted or too-short threads', () => {
+  it('captures legacy false-trust projects but still skips too-short threads', () => {
     const { db, dir } = createDb();
     const untrustedWorkspaceDir = join(dir, 'workspace-untrusted');
     const trustedWorkspaceDir = join(dir, 'workspace-trusted');
@@ -123,7 +123,12 @@ describe('GeneratedMemoryService', () => {
 
     const service = new GeneratedMemoryService(db);
 
-    expect(service.captureThreadCandidates(untrustedThread.id, 'run-untrusted')).toEqual([]);
+    expect(service.captureThreadCandidates(untrustedThread.id, 'run-untrusted')).toEqual([
+      expect.objectContaining({
+        kind: 'user_preference_workspace_scoped',
+        detail: 'Keep answers concise.'
+      })
+    ]);
     expect(service.captureThreadCandidates(shortTrustedThread.id, 'run-short')).toEqual([]);
   });
 

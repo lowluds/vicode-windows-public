@@ -2235,7 +2235,7 @@ async function openThreadInUi(window: Page, projectId: string, threadId: string,
     'vicode.settings'
   ]);
   await dismissWelcomeIfVisible(window);
-  await expect(window.locator('.thread-title-row h2')).toHaveText(threadTitle, { timeout: 30_000 });
+  await expect(window.locator('.windows-titlebar-context-thread')).toHaveText(threadTitle, { timeout: 30_000 });
 }
 
 async function waitForThreadCompletion(window: Page, threadId: string, timeoutMs = 90_000) {
@@ -3081,7 +3081,7 @@ test.describe.serial('@live-provider live provider flows', () => {
       const thread = await createThread(window, project.id, 'openai', fallbackModelId);
       await closeApp(app, { cleanupState: false });
       ({ app, window } = await launchApp(statePaths));
-      await expect(window.locator('.thread-title-row h2')).toHaveText(thread.title, { timeout: 30_000 });
+      await expect(window.locator('.windows-titlebar-context-thread')).toHaveText(thread.title, { timeout: 30_000 });
 
       await maybeSwitchComposerModel(
         window,
@@ -3099,12 +3099,12 @@ test.describe.serial('@live-provider live provider flows', () => {
       const completedThread = await waitForThreadCompletion(window, thread.id);
       expect(completedThread.turns.some((turn) => turn.role === 'assistant' && turn.content.trim().length > 0)).toBeTruthy();
 
-      const headerText = await window.locator('.thread-title-row h2').textContent();
+      const headerText = await window.locator('.windows-titlebar-context-thread').textContent();
       await closeApp(app, { cleanupState: false });
 
       const relaunched = await launchApp(statePaths);
       try {
-        await expect(relaunched.window.locator('.thread-title-row h2')).toHaveText(headerText ?? '', { timeout: 30_000 });
+        await expect(relaunched.window.locator('.windows-titlebar-context-thread')).toHaveText(headerText ?? '', { timeout: 30_000 });
         await expect(relaunched.window.getByText('Reply with exactly: Vicode live test passed.', { exact: false })).toBeVisible({
           timeout: 30_000
         });
@@ -3826,7 +3826,7 @@ test.describe.serial('@live-provider live provider flows', () => {
       const thread = await createThread(window, project.id, 'gemini', modelId);
       await closeApp(app, { cleanupState: false });
       ({ app, window } = await launchApp(statePaths));
-      await expect(window.locator('.thread-title-row h2')).toHaveText(thread.title, { timeout: 30_000 });
+      await expect(window.locator('.windows-titlebar-context-thread')).toHaveText(thread.title, { timeout: 30_000 });
 
       await expect(
         await chooseComposerModel(
@@ -4623,7 +4623,7 @@ test.describe.serial('@live-provider live provider flows', () => {
       const thread = await createThread(window, project.id, 'openai', modelId);
       await closeApp(app, { cleanupState: false });
       ({ app, window } = await launchApp(statePaths));
-      await expect(window.locator('.thread-title-row h2')).toHaveText(thread.title, { timeout: 30_000 });
+      await expect(window.locator('.windows-titlebar-context-thread')).toHaveText(thread.title, { timeout: 30_000 });
       console.log('[codex-plan] thread opened', thread.id);
 
       await chooseComposerModel(
@@ -6205,7 +6205,10 @@ test.describe.serial('@live-provider live provider flows', () => {
 
       expect(submitted.disposition).toBe('started');
       const completedThread = await waitForThreadCompletion(window, thread.id, 180_000);
-      expect(JSON.stringify(completedThread.rawOutput ?? [])).toContain('mcp:hello-world');
+      const rawOutputText = JSON.stringify(completedThread.rawOutput ?? []);
+      expect(rawOutputText).toContain('"toolName":"use_mcp_tool"');
+      expect(rawOutputText).toContain('Completed MCP tool echo');
+      expect(rawOutputText.replace(/\s+/g, '')).toContain('mcp:hello-world');
       const assistantTurn = [...completedThread.turns].reverse().find((turn) => turn.role === 'assistant' && turn.content.trim().length > 0);
       expect((assistantTurn?.content ?? '').toLowerCase()).toContain('hello-world');
     } finally {

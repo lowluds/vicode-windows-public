@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { SurfaceCard } from '../ui';
 
-export const SETTINGS_SECTION_CLASS = 'settings-section-stack flex flex-1 flex-col gap-6 min-h-0';
+export const SETTINGS_SECTION_CLASS = 'settings-section-stack flex flex-col gap-6';
 export const SETTINGS_COMPACT_SECTION_CLASS =
   'settings-section-stack settings-section-stack-compact flex flex-col gap-5';
 export const SETTINGS_INLINE_ACTIONS_CLASS = 'settings-inline-actions flex flex-wrap items-center gap-3';
@@ -35,15 +35,17 @@ export function SettingsPanel({
   className?: string;
 }) {
   return (
-    <SurfaceCard className={`settings-panel ${className}`}>
+    <section className={`settings-panel ${className}`}>
       <div className="settings-panel-header">
         <div>
           <h3>{title}</h3>
           {description ? <p>{description}</p> : null}
         </div>
       </div>
-      <div className="settings-panel-body">{children}</div>
-    </SurfaceCard>
+      <SurfaceCard className="settings-panel-card">
+        <div className="settings-panel-body">{children}</div>
+      </SurfaceCard>
+    </section>
   );
 }
 

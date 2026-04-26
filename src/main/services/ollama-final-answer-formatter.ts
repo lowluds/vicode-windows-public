@@ -28,6 +28,7 @@ const WRAP_UP_CLOSING_PROMPT_PATTERN =
   /([.?!])\s+(Let me know if|If you'd like|If you want|Tell me if|I can also)\b/gu;
 const DENSE_MARKDOWN_BLOCK_LANGUAGES =
   'bash|sh|shell|cmd|powershell|pwsh|python|json|yaml|yml|ts|tsx|js|jsx|sql';
+const STANDALONE_LIST_SEPARATOR_LINE_PATTERN = /^\s*(?:[-*+•●▪◦])\s*$/u;
 const JSON_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -64,6 +65,23 @@ const JSON_SCHEMA = {
   },
   required: ['lead', 'sections', 'closing']
 } as const;
+
+function stripStandaloneListSeparatorLines(source: string) {
+  return source
+    .split(/(```[\s\S]*?```)/gu)
+    .map((segment) => {
+      if (segment.startsWith('```')) {
+        return segment;
+      }
+
+      return segment
+        .split('\n')
+        .filter((line) => !STANDALONE_LIST_SEPARATOR_LINE_PATTERN.test(line))
+        .join('\n');
+    })
+    .join('')
+    .replace(/\n{3,}/gu, '\n\n');
+}
 
 function isDenseWrapUp(text: string) {
   const trimmed = text.trim();
@@ -236,8 +254,8 @@ function normalizeWrapUpHeadingBreaksLegacy(source: string) {
 function shouldRecoverDenseWrapUp(source: string) {
   return (
     /(?:^|[^#\n])#{2,6}\s/u.test(source)
-    || /(?:[:.!?]|[)\]}])\s*[-•●▪◦]\s+(?=(?:\*\*|[A-Z0-9]|\p{Extended_Pictographic}))/u.test(source)
-    || /\s+[-•●▪◦]\s+(?=(?:\*\*|[A-Z0-9]|\p{Extended_Pictographic}))/u.test(source)
+    || /(?:[:.!?]|[)\]}])[ \t]*[-•●▪◦][ \t]+(?=(?:\*\*|[A-Z0-9]|\p{Extended_Pictographic}))/u.test(source)
+    || /(?<=\S)[ \t]+[-•●▪◦][ \t]+(?=(?:\*\*|[A-Z0-9]|\p{Extended_Pictographic}))/u.test(source)
   );
 }
 
@@ -245,14 +263,14 @@ function normalizeListLikeWrapUp(source: string) {
   let text = source;
 
   text = text.replace(/^(#{2,6}\s[^\n]+?)-\s*(?=[A-Z0-9])/gmu, '$1\n- ');
-  text = text.replace(new RegExp(`([:!?])\\s*[-•●▪◦]\\s+(?=${WRAP_UP_LIST_ITEM_LEAD})`, 'gu'), '$1\n- ');
-  text = text.replace(new RegExp(`([.])\\s*[-•●▪◦]\\s+(?=${WRAP_UP_LIST_ITEM_LEAD})`, 'gu'), '$1\n\n- ');
-  text = text.replace(new RegExp(`([)\\]}])\\s*[-•●▪◦]\\s+(?=${WRAP_UP_LIST_ITEM_LEAD})`, 'gu'), '$1\n- ');
+  text = text.replace(new RegExp(`([:!?])[ \\t]*[-•●▪◦][ \\t]+(?=${WRAP_UP_LIST_ITEM_LEAD})`, 'gu'), '$1\n- ');
+  text = text.replace(new RegExp(`([.])[ \\t]*[-•●▪◦][ \\t]+(?=${WRAP_UP_LIST_ITEM_LEAD})`, 'gu'), '$1\n\n- ');
+  text = text.replace(new RegExp(`([)\\]}])[ \\t]*[-•●▪◦][ \\t]+(?=${WRAP_UP_LIST_ITEM_LEAD})`, 'gu'), '$1\n- ');
   text = text.replace(
-    /([A-Za-z0-9)])-(?=\s+[A-Z][A-Za-z0-9-]{2,}:)/gu,
+    /([A-Za-z0-9)])-(?=[ \t]+[A-Z][A-Za-z0-9-]{2,}:)/gu,
     '$1\n- '
   );
-  text = text.replace(new RegExp(`\\s+[-•●▪◦]\\s+(?=${WRAP_UP_LIST_ITEM_LEAD})`, 'gu'), '\n- ');
+  text = text.replace(new RegExp(`(?<=\\S)[ \\t]+[-•●▪◦][ \\t]+(?=${WRAP_UP_LIST_ITEM_LEAD})`, 'gu'), '\n- ');
   text = text.replace(/([a-z0-9])-(?=[A-Z][A-Za-z0-9]{2,}(?:-|Let me know if|If you'd like|If you want|Tell me if|I can also|Want me to|Would you like me to|Need me to|Should I|Can I))/gu, '$1\n- ');
   text = text.replace(/(?<!\n)(\*\*[^*\n]{2,60}:\*\*)/gu, '\n- $1');
   text = text.replace(/^- \s*\n-\s+(\*\*[^*\n]{2,60}:\*\*)/gmu, '- $1');
@@ -317,6 +335,7 @@ export function formatOllamaFinalAnswerFallback(source: string) {
   );
   text = text.replace(WRAP_UP_CLOSING_PROMPT_PATTERN, '$1\n\n$2');
   text = normalizeReadablePromptSpacing(text, 'paragraph');
+  text = stripStandaloneListSeparatorLines(text);
   text = text.replace(/\n{3,}/gu, '\n\n');
 
   return normalizeWrapUpMarkdown(text.trim());

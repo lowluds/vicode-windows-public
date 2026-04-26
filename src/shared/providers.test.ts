@@ -114,7 +114,7 @@ describe('shared provider helpers', () => {
     ).toEqual({ id: 'qwen3-coder-next' });
   });
 
-  it('prefers the highest-quality Ollama vision model when available', () => {
+  it('prefers a practical high-quality Ollama vision model when available', () => {
     expect(
       selectPreferredOllamaVisionModel([
         { id: 'llava:13b', supportsVision: true },
@@ -123,6 +123,17 @@ describe('shared provider helpers', () => {
         { id: 'qwen3-coder:30b', supportsVision: false }
       ])
     ).toEqual({ id: 'qwen2.5vl:7b', supportsVision: true });
+  });
+
+  it('avoids very large Ollama vision models when a practical image reader is available', () => {
+    expect(
+      selectPreferredOllamaVisionModel([
+        { id: 'qwen3-vl:235b-instruct', supportsVision: true },
+        { id: 'gemma3:12b', supportsVision: true },
+        { id: 'gemma3:4b', supportsVision: true },
+        { id: 'deepseek-v3.1:671b', supportsVision: false }
+      ])
+    ).toEqual({ id: 'gemma3:4b', supportsVision: true });
   });
 
   it('returns a primary and alternate hosted Ollama validation set', () => {
@@ -176,7 +187,7 @@ describe('shared provider helpers', () => {
   });
 
   it('returns provider-specific serious-coding guidance', () => {
-    expect(providerRecommendedRouteSummary('openai')).toContain('GPT-5.4');
+    expect(providerRecommendedRouteSummary('openai')).toContain('Newest available');
     expect(providerRecommendedRouteSummary('gemini')).toContain('Auto Gemini 2.5');
     expect(providerRecommendedRouteSummary('ollama', { hosted: true })).toMatch(/cloud/i);
     expect(providerRecommendedRouteSummary('ollama', { hosted: false })).toMatch(/local/i);
@@ -230,7 +241,7 @@ describe('shared provider helpers', () => {
         authMode: 'cli',
         message: undefined
       })
-    ).toContain('Nothing is imported automatically');
+    ).toContain('Choose Connect');
     expect(providerSettingsConnectLabel({ id: 'openai', authState: 'disconnected', authMode: null })).toBe('Connect');
     expect(providerSettingsConnectLabel({ id: 'openai', authState: 'disconnected', authMode: 'cli' })).toBe('Connect');
     expect(providerSettingsInstallActionLabel({ id: 'openai', authMode: 'cli' })).toBe('Install Codex CLI');
@@ -286,7 +297,7 @@ describe('shared provider helpers', () => {
   });
 
   it('aligns the main provider defaults with the benchmark-backed starting routes', () => {
-    expect(getProviderMetadata('openai').defaultModelId).toBe('gpt-5.4');
+    expect(getProviderMetadata('openai').defaultModelId).toBe('gpt-5.5');
     expect(getProviderMetadata('gemini').defaultModelId).toBe('auto-gemini-2.5');
     expect(getProviderMetadata('ollama').defaultModelId).toBe('qwen3-coder');
   });

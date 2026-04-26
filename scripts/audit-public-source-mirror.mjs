@@ -7,6 +7,8 @@ const mirrorDir = path.join(root, '.tmp', 'public-source-mirror');
 const forbiddenPaths = [
   '.vicode',
   'AGENTS.md',
+  'CLAUDE.md',
+  'GEMINI.md',
   'HEARTBEAT.md',
   'docs/agent-system',
   'docs/collaboration',
@@ -17,8 +19,8 @@ const requiredPaths = [
   'CHANGELOG.md',
   'CONTRIBUTING.md',
   'LICENSE',
-  'docs/releases/0.2.1.md',
-  'docs/releases/0.2.1-reviewer-guide.md',
+  'docs/releases/0.2.6.md',
+  'docs/releases/0.2.6-reviewer-guide.md',
   'docs/releases/beta-tester-quick-start.md',
   'docs/setup/windows-provider-setup.md',
   'package.json'
@@ -114,7 +116,7 @@ function main() {
 
   const sensitiveTokens = collectSensitiveTokens();
   const secretPatterns = [
-    /sk-[A-Za-z0-9]{10,}/gu,
+    /(?<![A-Za-z0-9])sk-[A-Za-z0-9]{10,}/gu,
     /ghp_[A-Za-z0-9]{10,}/gu,
     /AKIA[0-9A-Z]{16}/gu,
     /AIza[0-9A-Za-z_-]{10,}/gu

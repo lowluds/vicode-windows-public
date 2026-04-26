@@ -5,7 +5,14 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      lib: {
+        entry: 'src/main/entry.ts',
+        formats: ['es'],
+        fileName: () => 'index.js'
+      }
+    }
   },
   preload: {
     plugins: [externalizeDepsPlugin()],

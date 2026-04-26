@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, BrowserWindow, Menu, nativeTheme } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
@@ -33,24 +33,24 @@ let deferredCleanup: (() => void) | null = null;
 const WINDOWS_APP_ID = 'com.vicode.windows';
 const WINDOWS_APP_NAME = 'Vicode';
 const HEARTBEAT_AUTONOMY_ENABLED = process.env.VICODE_ENABLE_HEARTBEAT_AUTONOMY === '1';
+const STARTUP_DEBUG_ENABLED = process.env.VICODE_STARTUP_DEBUG === '1';
+const STARTUP_DEBUG_LOG_PATH = process.env.VICODE_STARTUP_DEBUG_LOG_PATH?.trim() || null;
 const APP_ZOOM_STEP = 0.1;
 const APP_ZOOM_MIN = 0.75;
 const APP_ZOOM_MAX = 1.6;
-const userDataOverridePath = process.env.VICODE_USER_DATA_PATH?.trim() || null;
-if (userDataOverridePath) {
-  mkdirSync(userDataOverridePath, { recursive: true });
-  app.setPath('userData', userDataOverridePath);
+
+function writeStartupDebugEntry(step: string) {
+  if (!STARTUP_DEBUG_ENABLED || !STARTUP_DEBUG_LOG_PATH) {
+    return;
+  }
+  appendFileSync(
+    STARTUP_DEBUG_LOG_PATH,
+    `[startup:window] ${new Date().toISOString()} ${step}\n`,
+    'utf8'
+  );
 }
 
-const localAppDataPath =
-  process.env.LOCALAPPDATA ??
-  join(process.env.USERPROFILE ?? app.getPath('home'), 'AppData', 'Local');
-const sessionDataPath =
-  process.env.VICODE_SESSION_DATA_PATH?.trim() ||
-  (userDataOverridePath ? join(userDataOverridePath, 'session') : join(localAppDataPath, 'vicode-windows', 'session'));
-
-mkdirSync(sessionDataPath, { recursive: true });
-app.setPath('sessionData', sessionDataPath);
+writeStartupDebugEntry('module-loaded');
 
 function installEditableContextMenu(window: BrowserWindow) {
   window.webContents.on('context-menu', (_event, params) => {
@@ -127,6 +127,22 @@ function clampAppZoomFactor(value: number) {
   return Math.round(bounded * 100) / 100;
 }
 
+function logStartupStep(step: string) {
+  if (!STARTUP_DEBUG_ENABLED) {
+    return;
+  }
+  const message = `[startup:window] ${new Date().toISOString()} ${step}`;
+  if (STARTUP_DEBUG_LOG_PATH) {
+    try {
+      appendFileSync(STARTUP_DEBUG_LOG_PATH, `${message}\n`, 'utf8');
+      return;
+    } catch (error) {
+      console.error('[startup] Failed to write startup debug log.', error);
+    }
+  }
+  console.info(message);
+}
+
 function applyBrowserWindowZoom(window: BrowserWindow, action: 'in' | 'out' | 'reset') {
   const currentFactor = window.webContents.getZoomFactor();
   const nextFactor =
@@ -166,6 +182,7 @@ function installZoomShortcuts(window: BrowserWindow) {
 }
 
 async function createWindow() {
+  logStartupStep('begin');
   nativeTheme.themeSource = 'dark';
   const iconPath = resolveAppIconPath();
   const windowOptions: Electron.BrowserWindowConstructorOptions = {
@@ -197,7 +214,9 @@ async function createWindow() {
     }
   };
 
+  logStartupStep('construct-browser-window');
   mainWindow = new BrowserWindow(windowOptions);
+  logStartupStep('browser-window-created');
   mainWindow.setHasShadow(false);
   installZoomShortcuts(mainWindow);
 
@@ -251,12 +270,14 @@ async function createWindow() {
 
   const stateDir = join(app.getPath('userData'), 'state');
   mkdirSync(stateDir, { recursive: true });
+  logStartupStep(`state-dir-ready:${stateDir}`);
   const services =
     appServices ??
     createAppServices({
       stateDir,
       heartbeatAutonomyEnabled: HEARTBEAT_AUTONOMY_ENABLED
     });
+  logStartupStep('services-created');
   appServices = services;
   db = services.db;
   updater = services.updater;
@@ -289,12 +310,16 @@ async function createWindow() {
       composerTextAttachments: services.composerTextAttachments
     });
   }
+  logStartupStep('ipc-registered');
 
   if (process.env.ELECTRON_RENDERER_URL) {
+    logStartupStep(`load-url:${process.env.ELECTRON_RENDERER_URL}`);
     await mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
+    logStartupStep(`load-file:${join(__dirname, '../renderer/index.html')}`);
     await mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
   }
+  logStartupStep('renderer-loaded');
 
   if (!deferredCleanup) {
     deferredCleanup = startDeferredAppServices(services, {
@@ -306,18 +331,24 @@ async function createWindow() {
       }
     });
   }
+  logStartupStep('deferred-startup-scheduled');
 }
 
-app.whenReady().then(async () => {
-  app.setName(WINDOWS_APP_NAME);
-  app.setAppUserModelId(WINDOWS_APP_ID);
-  await createWindow();
-  app.on('activate', async () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      await createWindow();
-    }
+app.whenReady()
+  .then(async () => {
+    app.setName(WINDOWS_APP_NAME);
+    app.setAppUserModelId(WINDOWS_APP_ID);
+    await createWindow();
+    app.on('activate', async () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        await createWindow();
+      }
+    });
+  })
+  .catch((error) => {
+    console.error('[startup] Failed to create the main window.', error);
+    app.quit();
   });
-});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

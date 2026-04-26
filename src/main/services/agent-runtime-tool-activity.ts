@@ -22,12 +22,44 @@ function toPatchTargetPath(fileName: string) {
   return fileName === '/dev/null' ? fileName : fileName.replace(/^[ab]\//u, '');
 }
 
+function describePatchTargetFromHeaders(patch: string) {
+  const targets: string[] = [];
+  const lines = patch.split(/\r?\n/u);
+
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    const oldHeader = lines[index];
+    const newHeader = lines[index + 1];
+    if (!oldHeader?.startsWith('--- ') || !newHeader?.startsWith('+++ ')) {
+      continue;
+    }
+
+    const oldFileName = toPatchTargetPath(oldHeader.slice(4).trim().split(/\s+/u)[0] ?? '');
+    const newFileName = toPatchTargetPath(newHeader.slice(4).trim().split(/\s+/u)[0] ?? '');
+    const target = newFileName !== '/dev/null' ? newFileName : oldFileName;
+    if (target && !targets.includes(target)) {
+      targets.push(target);
+    }
+  }
+
+  if (targets.length === 1) {
+    return targets[0];
+  }
+
+  return targets.length > 1 ? `${targets.length} files` : null;
+}
+
 function describePatchTargetCount(patch: string | null) {
   if (!patch) {
     return null;
   }
 
-  const parsed = parsePatch(patch);
+  let parsed: ReturnType<typeof parsePatch>;
+  try {
+    parsed = parsePatch(patch);
+  } catch {
+    return describePatchTargetFromHeaders(patch);
+  }
+
   if (parsed.length === 0) {
     return null;
   }
@@ -133,6 +165,21 @@ function describeToolArguments(call: AgentToolCall) {
       const path = readTelemetryString(call.arguments, 'path');
       return path ? `path: ${path}` : null;
     }
+    case 'create_skill_bundle':
+    case 'create_plugin_bundle': {
+      const scope = readTelemetryString(call.arguments, 'scope');
+      const projectId = readTelemetryString(call.arguments, 'project_id');
+      const folderName = readTelemetryString(call.arguments, 'folder_name');
+      return (
+        [
+          scope ? `scope: ${scope}` : null,
+          projectId ? `project id: ${projectId}` : null,
+          folderName ? `folder: ${folderName}` : null
+        ]
+          .filter((value): value is string => Boolean(value))
+          .join('\n') || null
+      );
+    }
     case 'write_file': {
       const path = readTelemetryString(call.arguments, 'path');
       return path ? `path: ${path}` : null;
@@ -185,6 +232,10 @@ function summarizeToolCall(call: AgentToolCall) {
       return 'Crawling a site';
     case 'map_site':
       return 'Mapping a site';
+    case 'create_skill_bundle':
+      return 'Creating a Vicode skill bundle';
+    case 'create_plugin_bundle':
+      return 'Creating a Vicode plugin bundle';
     default:
       return `Calling ${call.name}`;
   }
@@ -208,6 +259,10 @@ function summarizeToolResult(call: AgentToolCall, result: AgentToolExecutionResu
       return result.isError ? 'Site crawl failed' : 'Crawled the site';
     case 'map_site':
       return result.isError ? 'Site map failed' : 'Mapped the site';
+    case 'create_skill_bundle':
+      return result.isError ? 'Skill bundle creation failed' : 'Created the skill bundle';
+    case 'create_plugin_bundle':
+      return result.isError ? 'Plugin bundle creation failed' : 'Created the plugin bundle';
     default:
       return result.isError ? `Failed ${call.name}` : `Completed ${call.name}`;
   }

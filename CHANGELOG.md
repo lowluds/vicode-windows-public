@@ -4,9 +4,82 @@ All notable user-facing changes to Vicode are recorded here.
 
 ## Unreleased
 
+## 0.2.6 - 2026-04-26
+
+### Fixed
+- Vicode now treats the OpenAI Codex app's local home as a separate application boundary. Vicode no longer writes, deletes, syncs, installs, or cleans files inside the operator's real `~/.codex` app folders.
+- Build Control and repo-local automation helpers no longer default to the operator's real Codex SQLite database, automation folders, worktrees, or skill folders. Persistent Codex-backed validation must use an explicit isolated Codex home.
+
+### Documentation
+- Beta and engineering docs now explain the Codex/Vicode storage boundary so testers know Vicode should not mutate their Codex app state.
+- Public source mirror scripts now include the current release notes and reviewer guide for the active beta line.
+
+### Packaging
+- App version updated to `0.2.6`.
+- `0.2.6` is the next patch line for public-beta safety hardening before broader tester handoff.
+
+## 0.2.5 - 2026-04-25
+
 ### Improved
-- Downloaded desktop updates now surface as a visible titlebar action, and choosing the update during an active run queues installation until the run finishes instead of restarting immediately.
-- Public beta docs now include a quick-start path, and source distribution is moving through a curated public mirror instead of the internal working repo.
+- Downloaded desktop updates now restart Vicode immediately when the user clicks the titlebar or Settings action, instead of waiting for the current run to finish.
+- Settings now includes a direct GitHub Issues link so beta testers can file bug reports from inside the app.
+
+### Packaging
+- App version updated to `0.2.5`.
+- `0.2.5` is the next patch line for public-beta update and feedback polish.
+
+## 0.2.4 - 2026-04-21
+
+### Improved
+- Windows installed-app listings now keep the product name as `Vicode` instead of appending the version to the visible app title.
+- Workspace bootstrap, attachment, runtime-policy, and tool-copy surfaces now talk about the workspace directly instead of exposing the old trust terminology.
+- Legacy projects with a stale `trusted = false` flag are automatically normalized during migration so upgraded installs behave like fresh installs.
+
+### Fixed
+- All attached project folders now behave as ready-to-use workspaces by default; OpenAI, Gemini, Ollama, Qwen, and Kimi no longer block runs behind a separate workspace-trust toggle.
+- Workspace bootstrap is now available whenever a real folder is attached, without a separate trust step in the header or sidebar.
+- Installed fresh starts remain completely empty until the user opens a folder, with no seeded `My Project` placeholder and no pre-created left-rail thread state.
+- NSIS install metadata now removes the Windows Apps `DisplayVersion` entry so the Settings Apps surface no longer shows the build number as part of the installed-app listing.
+
+### Packaging
+- App version updated to `0.2.4`.
+- The Windows installer artifact for this line is `Vicode-Setup-0.2.4.exe`.
+- `0.2.4` replaces the earlier `0.2.3` beta build as the current Windows tester line.
+
+## 0.2.3 - 2026-04-21
+
+### Improved
+- Brand-new installs now open directly into the shell with an empty project rail and the empty thread hero ready to open a local folder.
+- The titlebar `Plugins` and `Settings` buttons now behave as true toggles and switch cleanly between surfaces instead of layering stale views.
+- The left-sidebar project overflow menu now keeps only the thread-management actions that still earn space during beta.
+
+### Fixed
+- Folderless placeholder projects can no longer route workspace-dependent prompts into fake `/workspace` path answers; Vicode now blocks those runs and tells the user to attach a real folder first.
+- Legacy seeded `My Project` placeholders with no folder and no saved chats are removed during migration so upgraded installs can recover into the clean shell.
+- Packaged Windows builds now boot through a guarded Electron entrypoint and ship the missing startup dependency that previously left `0.2.2` hanging without a window.
+- The Electron smoke gate now validates the actual blank-shell beta startup plus the updated Settings/Plugins toggle behavior.
+
+### Packaging
+- App version updated to `0.2.3`.
+- Windows installer and unpacked release artifacts were rebuilt and revalidated for the `0.2.3` corrective beta line.
+- `0.2.3` replaces the broken `0.2.2` tester build.
+
+## 0.2.2 - 2026-04-21
+
+### Improved
+- Composer height now stays compact for short prompts and expands only when the draft actually needs more space.
+- Provider API key settings now keep trimmed saved values, clear local drafts when auth is removed, and add explicit show/hide handling with Ollama helper actions.
+- The current beta UI now consistently surfaces only the release-blocking provider set plus the supported Ollama lane.
+- Public beta docs now point testers at the corrected `0.2.2` installer line in the release-only repo.
+
+### Fixed
+- Windows release packaging now audits the shipped `better_sqlite3.node` against the prepared Electron-target binary so a Node ABI artifact cannot ship unnoticed.
+- `npm run release:win` now runs the same native Electron prep/build path as `npm run dist:win`, which prevents the black-screen startup failure caused by the withdrawn `0.2.1` installer.
+
+### Packaging
+- App version updated to `0.2.2`.
+- Windows installer and unpacked release artifacts were rebuilt for the `0.2.2` testing line.
+- `0.2.2` replaces the withdrawn `0.2.1` Windows installer release.
 
 ## 0.2.1 - 2026-04-18
 
@@ -17,6 +90,7 @@ All notable user-facing changes to Vicode are recorded here.
 ### Improved
 - Windows release validation now includes a packaged-app smoke path that launches the built `win-unpacked` executable and verifies startup, trusted-project creation, thread restore, archive/restore, and Integrations navigation before release.
 - Installed Windows builds now check GitHub Releases for updates on launch and from `Settings > General`.
+- The public Windows release feed now passes a real installed-app `0.2.0 -> 0.2.1` desktop update drill.
 - Live-provider certification failures now include the last raw provider events in Playwright output, which makes OpenAI and Gemini release-gate failures easier to diagnose.
 - Collaboration verification now includes deterministic direct-chat coverage in service, storage, and Electron UI tests, plus explicit manual certification expectations for direct-message creation.
 

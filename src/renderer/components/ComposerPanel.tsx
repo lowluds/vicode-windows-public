@@ -28,7 +28,12 @@ import {
   type SkillDefinition,
   type TextAttachment
 } from '../../shared/domain';
-import { nativeComposerCommands, searchNativeComposerCommands, type NativeComposerCommand } from '../../shared/nativeCommands';
+import {
+  buildNativeComposerCommandPrompt,
+  nativeComposerCommands,
+  searchNativeComposerCommands,
+  type NativeComposerCommand
+} from '../../shared/nativeCommands';
 import {
   providerCanRunInComposer,
   providerCapabilities,
@@ -40,6 +45,7 @@ import {
   providerUsesHostedApi
 } from '../../shared/providers';
 import { resolvePreferredProviderModel } from '../lib/provider-defaults';
+import { resolveComposerMinHeight, shouldExpandComposerPrompt } from '../lib/composer-layout';
 import type { VoiceState } from '../lib/voice-dictation';
 import { getSkillCommandToken, getSkillProviderOrigin } from '../../shared/skills';
 import { getLastSkillMentionState, getSkillMentionState, getSlashCommandState, replaceMentionWithToken } from '../lib/composer-input';
@@ -142,7 +148,7 @@ interface ComposerPanelProps {
   selectProviderThinking: (thinkingEnabled: boolean) => void;
   refreshProvider: (providerId: ProviderId) => Promise<void>;
   openProviderSettings: () => void;
-  toggleComposerMode: () => Promise<void>;
+  toggleComposerMode: () => Promise<ComposerMode>;
   handleComposerVoice: () => void;
   voiceState: VoiceState;
   voiceAvailable: boolean;
@@ -154,7 +160,10 @@ interface ComposerPanelProps {
   enhancePrompt: () => Promise<void>;
   enhancingPrompt: boolean;
   submittingPrompt: boolean;
-  submitPrompt: (promptOverride?: string) => Promise<void>;
+  submitPrompt: (
+    promptOverride?: string,
+    nativeCommandIdOverride?: NativeComposerCommand['id'] | null
+  ) => Promise<boolean>;
   activeRunId: string | null;
   showToast: (level: 'info' | 'warning' | 'error', message: string) => void;
 }
@@ -223,11 +232,14 @@ export function ComposerPanel({
     return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' });
   }
 
-  const minComposerHeight = 56;
-  const maxComposerHeight = 220;
   const [localPrompt, setLocalPrompt] = useState(prompt);
+  const minComposerHeight = resolveComposerMinHeight(localPrompt);
+  const maxComposerHeight = 220;
   const promptSyncTimeoutRef = useRef<number | null>(null);
   const lastDispatchedPromptRef = useRef(prompt);
+  const latestLocalPromptRef = useRef(prompt);
+  const pendingDispatchedPromptsRef = useRef(new Set<string>());
+  const preservedLocalRewritePromptRef = useRef<string | null>(null);
   const [mentionCaret, setMentionCaret] = useState(0);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [slashCommandIndex, setSlashCommandIndex] = useState(0);
@@ -278,6 +290,24 @@ export function ComposerPanel({
     () => sortedSkills.filter((skill) => skill.providerTargets.includes(providerId)),
     [providerId, sortedSkills]
   );
+  const attachedComposerSkills = useMemo(
+    () => attachedSkillIds
+      .map((skillId) => installedSkills.find((skill) => skill.id === skillId) ?? null)
+      .filter((skill): skill is SkillDefinition => Boolean(skill)),
+    [attachedSkillIds, installedSkills]
+  );
+  latestLocalPromptRef.current = localPrompt;
+
+  function rememberDispatchedPrompt(nextPrompt: string) {
+    const pending = pendingDispatchedPromptsRef.current;
+    pending.add(nextPrompt);
+    if (pending.size > 8) {
+      const oldest = pending.values().next().value as string | undefined;
+      if (oldest !== undefined) {
+        pending.delete(oldest);
+      }
+    }
+  }
 
   function dismissComposerTriggerOverlays() {
     const activeElement = document.activeElement;
@@ -292,9 +322,26 @@ export function ComposerPanel({
   }
 
   useEffect(() => {
-    if (prompt !== lastDispatchedPromptRef.current) {
+    if (
+      preservedLocalRewritePromptRef.current &&
+      prompt === '' &&
+      latestLocalPromptRef.current === preservedLocalRewritePromptRef.current
+    ) {
+      return;
+    }
+
+    const pending = pendingDispatchedPromptsRef.current;
+    const isComposerEcho = pending.delete(prompt) || prompt === lastDispatchedPromptRef.current;
+    if (isComposerEcho) {
+      return;
+    }
+
+    if (prompt !== latestLocalPromptRef.current) {
       setLocalPrompt(prompt);
-      lastDispatchedPromptRef.current = prompt;
+    }
+    lastDispatchedPromptRef.current = prompt;
+    if (preservedLocalRewritePromptRef.current && prompt !== preservedLocalRewritePromptRef.current) {
+      preservedLocalRewritePromptRef.current = null;
     }
   }, [prompt]);
 
@@ -309,6 +356,7 @@ export function ComposerPanel({
 
     promptSyncTimeoutRef.current = window.setTimeout(() => {
       lastDispatchedPromptRef.current = localPrompt;
+      rememberDispatchedPrompt(localPrompt);
       startTransition(() => {
         setPrompt(localPrompt);
       });
@@ -329,12 +377,73 @@ export function ComposerPanel({
       promptSyncTimeoutRef.current = null;
     }
     lastDispatchedPromptRef.current = nextPrompt;
+    rememberDispatchedPrompt(nextPrompt);
     flushSync(() => {
       setPrompt(nextPrompt);
     });
   }
 
+  function clearSubmittedPromptDraft(submittedPrompt: string) {
+    if (promptSyncTimeoutRef.current !== null) {
+      window.clearTimeout(promptSyncTimeoutRef.current);
+      promptSyncTimeoutRef.current = null;
+    }
+
+    preservedLocalRewritePromptRef.current = null;
+    lastDispatchedPromptRef.current = '';
+    rememberDispatchedPrompt(submittedPrompt);
+    rememberDispatchedPrompt('');
+    pendingSelectionRef.current = 0;
+    flushSync(() => {
+      setLocalPrompt('');
+      setPrompt('');
+      setMentionCaret(0);
+      setMentionAutocompleteSuppressed(false);
+    });
+  }
+
+  function restoreSubmittedPromptDraft(submittedPrompt: string) {
+    if (latestLocalPromptRef.current !== '') {
+      return;
+    }
+
+    if (promptSyncTimeoutRef.current !== null) {
+      window.clearTimeout(promptSyncTimeoutRef.current);
+      promptSyncTimeoutRef.current = null;
+    }
+
+    lastDispatchedPromptRef.current = submittedPrompt;
+    rememberDispatchedPrompt(submittedPrompt);
+    pendingSelectionRef.current = submittedPrompt.length;
+    flushSync(() => {
+      setLocalPrompt(submittedPrompt);
+      setPrompt(submittedPrompt);
+      setMentionCaret(submittedPrompt.length);
+    });
+  }
+
+  function submitPromptFromComposer(submittedPrompt: string) {
+    const shouldClearOptimistically =
+      pendingNativeCommandId === null && !submittedPrompt.trimStart().startsWith('/');
+
+    if (shouldClearOptimistically) {
+      clearSubmittedPromptDraft(submittedPrompt);
+    }
+
+    void submitPrompt(submittedPrompt, pendingNativeCommandId).then((didSubmit) => {
+      if (!didSubmit && shouldClearOptimistically) {
+        restoreSubmittedPromptDraft(submittedPrompt);
+        return;
+      }
+
+      if (didSubmit && !shouldClearOptimistically) {
+        clearSubmittedPromptDraft(submittedPrompt);
+      }
+    });
+  }
+
   function updatePrompt(nextPrompt: string) {
+    preservedLocalRewritePromptRef.current = null;
     setLocalPrompt(nextPrompt);
   }
 
@@ -394,8 +503,9 @@ export function ComposerPanel({
     showEnhanceStatus && 'is-enhancing'
   );
   const composerInputWrapClass = cx(
-    'composer-input-wrap relative min-h-[56px] rounded-[20px] bg-transparent',
-    showEnhanceStatus && 'is-enhancing'
+    'composer-input-wrap relative rounded-[20px] bg-transparent',
+    showEnhanceStatus && 'is-enhancing',
+    attachedComposerSkills.length > 0 && 'has-attached-skills'
   );
   const suggestionPanelClassName = 'composer-skill-picker rounded-[22px] border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-surface-1)] p-2';
   const suggestionItemClassName = (active: boolean) =>
@@ -405,6 +515,8 @@ export function ComposerPanel({
       active ? 'bg-[color:var(--ui-alpha-08)] text-[color:var(--ui-text-title)]' : 'text-[color:var(--ui-text-muted)] hover:bg-[color:var(--ui-alpha-04)]'
     );
   const showInlineSuggestionPanel = Boolean(slashCommandState || mentionState);
+  const shouldExpandComposer = shouldExpandComposerPrompt(localPrompt);
+  const composerMinHeightStyle = { minHeight: `${minComposerHeight}px` };
 
   useLayoutEffect(() => {
     const element = composerRef.current;
@@ -412,10 +524,12 @@ export function ComposerPanel({
       return;
     }
     element.style.height = '0px';
-    const nextHeight = Math.min(maxComposerHeight, Math.max(minComposerHeight, element.scrollHeight));
+    const nextHeight = shouldExpandComposer
+      ? Math.min(maxComposerHeight, Math.max(minComposerHeight, element.scrollHeight))
+      : minComposerHeight;
     element.style.height = `${nextHeight}px`;
-    element.style.overflowY = element.scrollHeight > maxComposerHeight ? 'auto' : 'hidden';
-  }, [composerRef, localPrompt, maxComposerHeight, minComposerHeight]);
+    element.style.overflowY = shouldExpandComposer && element.scrollHeight > maxComposerHeight ? 'auto' : 'hidden';
+  }, [composerRef, localPrompt, maxComposerHeight, minComposerHeight, shouldExpandComposer]);
 
   useLayoutEffect(() => {
     const element = composerRef.current;
@@ -477,24 +591,52 @@ export function ComposerPanel({
     }
   }
 
+  function renderAttachedSkillChip(skill: SkillDefinition) {
+    const Icon = resolveSkillIcon(skill);
+
+    return (
+      <ActionButton
+        key={skill.id}
+        size="compact"
+        tone="quiet"
+        className="skill-pill skill-pill-removable composer-inline-skill-chip"
+        data-testid={`composer-attached-skill-${getSkillCommandToken(skill)}`}
+        leadingIcon={<Icon />}
+        trailingIcon={<CloseIcon size={12} />}
+        onClick={() => setSkillAttached(skill.id, false)}
+      >
+        {skill.name}
+      </ActionButton>
+    );
+  }
+
   function attachMentionSkill(skill: SkillDefinition) {
     if (!skill.providerTargets.includes(providerId)) {
       showToast('info', `${skill.name} is not available for the current ${providerDisplayName(providerId)} composer.`);
       return;
     }
 
+    const currentPrompt = composerRef.current?.value ?? localPrompt;
     const currentCaret = composerRef.current?.selectionStart ?? mentionCaret;
-    const activeMentionState = getSkillMentionState(localPrompt, currentCaret) ?? mentionState ?? getLastSkillMentionState(localPrompt);
+    const activeMentionState =
+      getSkillMentionState(currentPrompt, currentCaret) ??
+      mentionState ??
+      getLastSkillMentionState(currentPrompt);
     if (!activeMentionState) {
       return;
     }
 
-    const { nextPrompt, nextCaret } = replaceMentionWithToken(localPrompt, activeMentionState, getSkillCommandToken(skill));
+    const { nextPrompt, nextCaret } = replaceMentionWithToken(
+      currentPrompt,
+      activeMentionState,
+      getSkillCommandToken(skill)
+    );
     flushSync(() => {
       setLocalPrompt(nextPrompt);
       setMentionCaret(-1);
       setMentionAutocompleteSuppressed(true);
     });
+    preservedLocalRewritePromptRef.current = nextPrompt;
     commitPromptSync(nextPrompt);
     suppressMentionSyncRef.current = true;
     pendingSelectionRef.current = nextCaret;
@@ -574,6 +716,45 @@ export function ComposerPanel({
     event.target.value = '';
   }
 
+  function applyPendingLocalRewriteCommand(submittedPrompt: string) {
+    if (!pendingNativeCommand || ['autonomous-builds', 'enhance', 'plan'].includes(pendingNativeCommand.id)) {
+      return false;
+    }
+
+    const rewrittenPrompt = buildNativeComposerCommandPrompt(pendingNativeCommand.id, submittedPrompt);
+    flushSync(() => {
+      setLocalPrompt(rewrittenPrompt);
+      setPendingNativeCommandId(null);
+    });
+    commitPromptSync(rewrittenPrompt);
+    preservedLocalRewritePromptRef.current = rewrittenPrompt;
+    pendingSelectionRef.current = rewrittenPrompt.length;
+    composerRef.current?.focus();
+    composerRef.current?.setSelectionRange(rewrittenPrompt.length, rewrittenPrompt.length);
+    return true;
+  }
+
+  async function applyPendingPlanCommand(submittedPrompt: string) {
+    if (pendingNativeCommandId !== 'plan') {
+      return false;
+    }
+
+    const nextMode = await toggleComposerMode();
+    preservedLocalRewritePromptRef.current = submittedPrompt;
+    flushSync(() => {
+      setLocalPrompt(submittedPrompt);
+      setPendingNativeCommandId(null);
+    });
+    commitPromptSync(submittedPrompt);
+    pendingSelectionRef.current = submittedPrompt.length;
+    composerRef.current?.focus();
+    composerRef.current?.setSelectionRange(submittedPrompt.length, submittedPrompt.length);
+    if (nextMode !== composerMode) {
+      showToast('info', nextMode === 'plan' ? 'Plan mode enabled.' : 'Plan mode disabled.');
+    }
+    return true;
+  }
+
   function handlePromptKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.shiftKey && event.key === 'Tab') {
       event.preventDefault();
@@ -648,14 +829,21 @@ export function ComposerPanel({
 
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      if (localPrompt.trim()) {
-        const submittedPrompt = localPrompt;
-        commitPromptSync(submittedPrompt);
+      const submittedPrompt = event.currentTarget.value;
+      if (submittedPrompt.trim()) {
+        if (applyPendingLocalRewriteCommand(submittedPrompt)) {
+          return;
+        }
+        if (pendingNativeCommandId === 'plan') {
+          void applyPendingPlanCommand(submittedPrompt);
+          return;
+        }
         if (pendingNativeCommandId === 'enhance') {
+          commitPromptSync(submittedPrompt);
           void enhancePrompt();
           return;
         }
-        void submitPrompt(submittedPrompt);
+        submitPromptFromComposer(submittedPrompt);
       }
       return;
     }
@@ -668,13 +856,23 @@ export function ComposerPanel({
       return;
     }
 
-    const submittedPrompt = localPrompt;
-    commitPromptSync(submittedPrompt);
+    const submittedPrompt = composerRef.current?.value ?? localPrompt;
+    if (!submittedPrompt.trim()) {
+      return;
+    }
+    if (applyPendingLocalRewriteCommand(submittedPrompt)) {
+      return;
+    }
+    if (pendingNativeCommandId === 'plan') {
+      void applyPendingPlanCommand(submittedPrompt);
+      return;
+    }
     if (pendingNativeCommandId === 'enhance') {
+      commitPromptSync(submittedPrompt);
       void enhancePrompt();
       return;
     }
-    void submitPrompt(submittedPrompt);
+    submitPromptFromComposer(submittedPrompt);
   }
 
   return (
@@ -839,10 +1037,16 @@ export function ComposerPanel({
       ) : null}
       </PromptInputHeader>
       <PromptInputBody>
-      <div className={composerInputWrapClass}>
+      <div className={composerInputWrapClass} style={composerMinHeightStyle}>
+        {attachedComposerSkills.length > 0 ? (
+          <div className="composer-inline-skill-line" aria-label="Attached skills">
+            {attachedComposerSkills.map(renderAttachedSkillChip)}
+          </div>
+        ) : null}
         <PromptInputTextarea
           data-testid="composer-input"
           ref={composerRef}
+          style={composerMinHeightStyle}
           placeholder={composerMode === 'plan' ? 'Describe the plan you want to build' : 'Ask for follow-up changes'}
           maxLength={MAX_COMPOSER_PROMPT_CHARS}
           value={localPrompt}
@@ -922,15 +1126,12 @@ export function ComposerPanel({
                   <span
                     className={cx(
                       composerMode === 'plan' ? 'composer-inline-switch is-on' : 'composer-inline-switch',
-                      'relative inline-flex h-5 w-9 rounded-full border transition-colors'
+                      'relative inline-flex rounded-full transition-colors'
                     )}
                     aria-hidden="true"
                   >
                     <span
-                      className={cx(
-                        'composer-inline-switch-knob absolute top-0.5 size-4 rounded-full transition-transform',
-                        composerMode === 'plan' ? 'translate-x-4' : 'translate-x-0.5'
-                      )}
+                      className="composer-inline-switch-knob absolute rounded-full transition-transform"
                     />
                   </span>
                 </MenuItem>

@@ -12,8 +12,8 @@ const publicDocs = new Set([
   'CHANGELOG.md',
   'CONTRIBUTING.md',
   'LICENSE',
-  'docs/releases/0.2.1.md',
-  'docs/releases/0.2.1-reviewer-guide.md',
+  'docs/releases/0.2.6.md',
+  'docs/releases/0.2.6-reviewer-guide.md',
   'docs/releases/beta-tester-quick-start.md',
   'docs/setup/windows-provider-setup.md'
 ]);
@@ -31,6 +31,8 @@ const excludedPrefixes = [
 const excludedExactPaths = new Set([
   '.gitattributes',
   'AGENTS.md',
+  'CLAUDE.md',
+  'GEMINI.md',
   'HEARTBEAT.md',
   'vicode-windows-0.2.1.tgz'
 ]);

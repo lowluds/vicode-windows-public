@@ -24,7 +24,8 @@ function withKnownContextWindow(providerId: ProviderId, model: ProviderModel): P
 
 const FALLBACK_MODELS: Record<ProviderId, ProviderModel[]> = {
   openai: [
-    { id: 'gpt-5.4', label: 'GPT-5.4', description: 'Frontier coding and reasoning model available through Codex.', supportsVision: true, recommendation: 'recommended' },
+    { id: 'gpt-5.5', label: 'GPT-5.5', description: 'Latest frontier coding and reasoning model available through Codex.', supportsVision: true },
+    { id: 'gpt-5.4', label: 'GPT-5.4', description: 'Frontier coding and reasoning model available through Codex.', supportsVision: true },
     { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex', description: 'Agentic coding model verified to work with Codex CLI auth.', supportsVision: true },
     { id: 'gpt-5', label: 'GPT-5', description: 'Balanced coding model for day-to-day work.', supportsVision: true },
     { id: 'gpt-5-mini', label: 'GPT-5 Mini', description: 'Faster, cheaper model for lightweight tasks.', supportsVision: true, recommendation: 'fast' }
@@ -116,6 +117,7 @@ const ALLOWLIST_PATTERNS: Record<ProviderId, RegExp[]> = {
 };
 
 const PREFERRED_OPENAI_ORDER = [
+  'gpt-5.5',
   'gpt-5.4',
   'gpt-5.4-mini',
   'gpt-5.3-codex',
@@ -165,7 +167,15 @@ export function filterUnsupportedProviderModels(providerId: ProviderId, models: 
   return models.filter((model) => !unsupported.has(model.id));
 }
 
-export function sanitizeDiscoveredModels(providerId: ProviderId, models: ProviderModel[]): ProviderModel[] {
+interface SanitizeDiscoveredModelsOptions {
+  preserveInputOrder?: boolean;
+}
+
+export function sanitizeDiscoveredModels(
+  providerId: ProviderId,
+  models: ProviderModel[],
+  options: SanitizeDiscoveredModelsOptions = {}
+): ProviderModel[] {
   const allowlist = ALLOWLIST_PATTERNS[providerId];
   const deduped = new Map<string, ProviderModel>();
 
@@ -175,6 +185,11 @@ export function sanitizeDiscoveredModels(providerId: ProviderId, models: Provide
       continue;
     }
 
+    const recommendation =
+      providerId === 'openai' && model.recommendation === 'recommended'
+        ? defaultModelRecommendation(providerId, normalizedId)
+        : model.recommendation ?? defaultModelRecommendation(providerId, normalizedId);
+
     deduped.set(normalizedId, {
       id: normalizedId,
       label:
@@ -183,16 +198,17 @@ export function sanitizeDiscoveredModels(providerId: ProviderId, models: Provide
           : formatProviderModelLabel(providerId, normalizedId),
       description: model.description.trim() || defaultModelDescription(providerId, normalizedId),
       supportsVision: model.supportsVision ?? false,
-      recommendation: model.recommendation ?? defaultModelRecommendation(providerId, normalizedId),
+      recommendation,
       contextWindowTokens: model.contextWindowTokens ?? null,
       autoCompactTokenLimit: model.autoCompactTokenLimit ?? null,
       contextWindowSource: model.contextWindowSource
     });
   }
 
+  const visibleModels = [...deduped.values()].map((model) => withKnownContextWindow(providerId, model));
   return filterUnsupportedProviderModels(
     providerId,
-    sortModels(providerId, [...deduped.values()].map((model) => withKnownContextWindow(providerId, model)))
+    options.preserveInputOrder ? visibleModels : sortModels(providerId, visibleModels)
   );
 }
 
@@ -335,9 +351,6 @@ function defaultModelRecommendation(
   modelId: string
 ): ProviderModelRecommendation | undefined {
   if (providerId === 'openai') {
-    if (modelId === 'gpt-5.4') {
-      return 'recommended';
-    }
     if (modelId === 'gpt-5-mini' || modelId === 'gpt-5.4-mini') {
       return 'fast';
     }
@@ -367,6 +380,35 @@ function defaultModelRecommendation(
   return undefined;
 }
 
+function getOpenAIModelSortKey(modelId: string) {
+  const match = modelId.match(/^gpt-(\d+)(?:\.(\d+))?(?:-|$)/iu);
+  if (!match) {
+    return null;
+  }
+
+  const major = Number(match[1]);
+  const minor = Number(match[2] ?? '0');
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) {
+    return null;
+  }
+
+  const variantRank =
+    /^gpt-\d+(?:\.\d+)?$/iu.test(modelId)
+      ? 0
+      : /codex/iu.test(modelId)
+        ? 1
+        : /mini/iu.test(modelId)
+          ? 2
+          : /spark/iu.test(modelId)
+            ? 3
+            : 4;
+
+  return {
+    version: major * 100 + minor,
+    variantRank
+  };
+}
+
 function sortModels(providerId: ProviderId, models: ProviderModel[]) {
   const preferredOrder =
     providerId === 'openai'
@@ -380,6 +422,25 @@ function sortModels(providerId: ProviderId, models: ProviderModel[]) {
           : PREFERRED_KIMI_ORDER;
 
   return [...models].sort((left, right) => {
+    if (providerId === 'openai') {
+      const leftOpenAI = getOpenAIModelSortKey(left.id);
+      const rightOpenAI = getOpenAIModelSortKey(right.id);
+      if (leftOpenAI || rightOpenAI) {
+        if (!leftOpenAI) {
+          return 1;
+        }
+        if (!rightOpenAI) {
+          return -1;
+        }
+        if (leftOpenAI.version !== rightOpenAI.version) {
+          return rightOpenAI.version - leftOpenAI.version;
+        }
+        if (leftOpenAI.variantRank !== rightOpenAI.variantRank) {
+          return leftOpenAI.variantRank - rightOpenAI.variantRank;
+        }
+      }
+    }
+
     const leftRank = preferredOrder.indexOf(left.id);
     const rightRank = preferredOrder.indexOf(right.id);
 

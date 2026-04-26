@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { closeApp, launchApp, waitForBridge } from './helpers/electron';
 
-test('opens workspace bootstrap from the thread header and writes reviewed workspace files', async () => {
+test('opens workspace bootstrap from the title bar and writes reviewed workspace files', async () => {
   const workspaceDir = mkdtempSync(join(tmpdir(), 'vicode-workspace-bootstrap-e2e-'));
   writeFileSync(
     join(workspaceDir, 'package.json'),
@@ -37,28 +37,36 @@ test('opens workspace bootstrap from the thread header and writes reviewed works
   let window: Page | null = launchedWindow;
   let projectId: string | null = null;
   let threadId: string | null = null;
-  let originalFolderPath: string | null = null;
-  let originalTrusted = false;
 
   try {
     await window.setViewportSize({ width: 1600, height: 1400 });
 
     const seeded = await window.evaluate(async (targetWorkspaceDir) => {
       const bootstrap = await window.vicode.app.getBootstrap();
-      const project = bootstrap.projects.find((entry) => entry.id === bootstrap.preferences.selectedProjectId) ?? bootstrap.projects[0];
-      if (!project) {
-        throw new Error('Expected an existing project for the workspace bootstrap E2E.');
+      const provider =
+        bootstrap.providers.find((entry) => entry.id === 'openai') ??
+        bootstrap.providers.find((entry) => entry.id === 'gemini') ??
+        bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+        null;
+      if (!provider) {
+        throw new Error('Expected a release-facing provider for the workspace bootstrap E2E.');
       }
 
-      await window.vicode.projects.update({
-        id: project.id,
+      const project = await window.vicode.projects.create({
+        name: `Bootstrap flow ${Date.now()}`,
         folderPath: targetWorkspaceDir,
         trusted: true
       });
+      const providerId = provider.id;
+      const modelId =
+        project.defaultModelByProvider[providerId] ??
+        bootstrap.preferences.defaultModelByProvider[providerId] ??
+        provider.models[0]?.id ??
+        'gpt-5';
       const thread = await window.vicode.threads.create({
         projectId: project.id,
-        providerId: project.defaultProviderId,
-        modelId: project.defaultModelByProvider[project.defaultProviderId],
+        providerId,
+        modelId,
         executionPermission: 'default'
       });
       await window.vicode.settings.save({
@@ -67,16 +75,12 @@ test('opens workspace bootstrap from the thread header and writes reviewed works
       });
       return {
         projectId: project.id,
-        threadId: thread.id,
-        originalFolderPath: project.folderPath,
-        originalTrusted: project.trusted
+        threadId: thread.id
       };
     }, workspaceDir);
 
     projectId = seeded.projectId;
     threadId = seeded.threadId;
-    originalFolderPath = seeded.originalFolderPath;
-    originalTrusted = seeded.originalTrusted;
 
     await window.reload();
     await waitForBridge(window, ['vicode.app', 'vicode.workspaceBootstrap', 'vicode.projects', 'vicode.settings']);
@@ -85,8 +89,8 @@ test('opens workspace bootstrap from the thread header and writes reviewed works
     await window.getByTestId('workspace-bootstrap-open').click();
 
     const bootstrapDialog = window.getByTestId('workspace-bootstrap-dialog');
-    await expect(window.getByText('Set up workspace files')).toBeVisible();
-    await expect(bootstrapDialog).toContainText('How this works');
+    await expect(window.getByText('Set up project')).toBeVisible();
+    await expect(bootstrapDialog).toContainText('Review first');
 
     const projectIntentField = window
       .getByText('What are you building here?')
@@ -123,21 +127,17 @@ test('opens workspace bootstrap from the thread header and writes reviewed works
             if (targetThreadId) {
               await window.vicode.threads.remove(targetThreadId);
             }
-            await window.vicode.projects.update({
-              id: targetProjectId,
-              folderPath: targetFolderPath,
-              trusted: targetTrusted
-            });
+            await window.vicode.projects.remove(targetProjectId);
             await window.vicode.settings.save({
-              selectedProjectId: targetProjectId,
+              selectedProjectId: null,
               lastOpenedThreadId: null
             });
           },
           {
             targetProjectId: projectId,
             targetThreadId: threadId,
-            targetFolderPath: originalFolderPath,
-            targetTrusted: originalTrusted
+            targetFolderPath: null,
+            targetTrusted: false
           }
         );
       } catch {

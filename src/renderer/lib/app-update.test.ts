@@ -3,9 +3,7 @@ import type { AppUpdateState } from '../../shared/domain';
 import {
   deriveTitleBarUpdateActionState,
   deriveUpdateInstallActionLabel,
-  getDownloadedUpdateKey,
-  hasAnyActiveThreadRun,
-  isQueuedUpdateInstall
+  hasAnyActiveThreadRun
 } from './app-update';
 
 function createUpdateState(overrides: Partial<AppUpdateState> = {}): AppUpdateState {
@@ -54,52 +52,17 @@ describe('app-update helpers', () => {
     ).toBe(false);
   });
 
-  it('tracks queued installs against the current downloaded update', () => {
-    const state = createUpdateState({
-      status: 'downloaded',
-      availableVersion: '0.2.2'
-    });
-    const key = getDownloadedUpdateKey(state);
-
-    expect(key).toBe('0.2.2');
-    expect(isQueuedUpdateInstall(state, key)).toBe(true);
-    expect(isQueuedUpdateInstall(state, '0.2.3')).toBe(false);
-  });
-
-  it('describes the downloaded titlebar action for queued and idle installs', () => {
+  it('describes the downloaded titlebar action as an immediate restart', () => {
     const downloaded = createUpdateState({
       status: 'downloaded',
       availableVersion: '0.2.2'
     });
 
-    expect(
-      deriveTitleBarUpdateActionState({
-        appUpdateState: downloaded,
-        hasActiveRun: true,
-        queuedUpdateInstallKey: null
-      })
-    ).toMatchObject({
+    expect(deriveTitleBarUpdateActionState(downloaded)).toMatchObject({
       variant: 'downloaded',
-      label: 'Install update when idle'
+      label: 'Restart to update'
     });
 
-    expect(
-      deriveTitleBarUpdateActionState({
-        appUpdateState: downloaded,
-        hasActiveRun: true,
-        queuedUpdateInstallKey: '0.2.2'
-      })
-    ).toMatchObject({
-      variant: 'queued',
-      label: 'Update queued'
-    });
-
-    expect(
-      deriveUpdateInstallActionLabel({
-        appUpdateState: downloaded,
-        hasActiveRun: false,
-        queuedUpdateInstallKey: null
-      })
-    ).toBe('Restart to update');
+    expect(deriveUpdateInstallActionLabel()).toBe('Restart to update');
   });
 });

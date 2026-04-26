@@ -4,6 +4,13 @@
 
 Vicode is a Windows-first Electron app. Contributions should improve the coding product without turning the app into a generic IDE, admin panel, or plugin marketplace.
 
+## Bug Reports And Pull Requests
+
+For beta user feedback:
+
+- use [GitHub Issues](https://github.com/lowluds/vicode-windows/issues) for bug reports, crash notes, and reproducible user-facing problems
+- use pull requests for code changes, not for reporting that the app is broken
+
 Release-blocking providers:
 
 - `OpenAI`
@@ -13,7 +20,7 @@ Supported secondary lane:
 
 - `Ollama`
 
-Compatibility-only lanes:
+Temporarily hidden compatibility lanes in the current beta UI:
 
 - `Qwen`
 - `Kimi`

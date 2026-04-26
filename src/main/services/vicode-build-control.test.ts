@@ -1,14 +1,16 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppEvent } from '../../shared/events';
 import type { ComposerSubmitInput, ComposerSubmitResult } from '../../shared/domain';
+import { BUILD_CONTROL_ORCHESTRATION_ENABLED } from '../../shared/product-flags';
 import { DatabaseService } from '../../storage/database';
 import { VicodeBuildControlService } from './vicode-build-control';
 
 const tempDirs: string[] = [];
+const orchestrationEnabledIt = BUILD_CONTROL_ORCHESTRATION_ENABLED ? it : it.skip;
 
 function createTempDir(prefix: string) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -1581,7 +1583,7 @@ describe('VicodeBuildControlService', () => {
     appDb.close();
   });
 
-  it('surfaces overlap-held plans as waiting instead of generic paused', () => {
+  orchestrationEnabledIt('surfaces overlap-held plans as waiting instead of generic paused', () => {
     const projectRoot = createTempDir('vicode-build-project-');
     const codexHome = createTempDir('vicode-build-codex-');
     writeConfig(projectRoot);
@@ -1669,6 +1671,47 @@ describe('VicodeBuildControlService', () => {
     expect(snapshot.recentEvents[0]?.kind).toBe('config_mismatch');
     expect(snapshot.recentEvents[0]?.summary).toContain('Planner could not start');
     service.dispose();
+    appDb.close();
+  });
+
+  it('does not fall back to the operator Codex app home for missing lane prompts', async () => {
+    const projectRoot = createTempDir('vicode-build-project-');
+    writeConfig(projectRoot);
+    rmSync(join(projectRoot, '.vicode', 'control', 'build-prompts', 'core', 'planner.md'), { force: true });
+
+    const appDb = new DatabaseService(join(createTempDir('vicode-build-appdb-'), 'vicode.sqlite'));
+    appDb.migrate();
+    const project = appDb.createProject({ name: 'Vicode', folderPath: projectRoot, trusted: true });
+
+    const service = new VicodeBuildControlService(
+      appDb,
+      {
+        onEvent: vi.fn(() => () => undefined),
+        submitComposer: vi.fn()
+      } as unknown as never
+    );
+
+    await expect(service.wakeLane(project.id, 'core', 'planner')).rejects.toThrow(/no longer reads lane prompts from the operator Codex app home/i);
+    service.dispose();
+    appDb.close();
+  });
+
+  it('rejects the operator Codex app home when configured as a build-control prompt source', () => {
+    const appDb = new DatabaseService(join(createTempDir('vicode-build-appdb-'), 'vicode.sqlite'));
+    appDb.migrate();
+
+    expect(
+      () =>
+        new VicodeBuildControlService(
+          appDb,
+          {
+            onEvent: vi.fn(() => () => undefined),
+            submitComposer: vi.fn()
+          } as unknown as never,
+          { codexHome: join(homedir(), '.codex') }
+        )
+    ).toThrow(/operator Codex app home/i);
+
     appDb.close();
   });
 
@@ -1982,7 +2025,7 @@ describe('VicodeBuildControlService', () => {
     appDb.close();
   });
 
-  it('recovers a stalled planner handoff by stopping planner and waking builder', async () => {
+  orchestrationEnabledIt('recovers a stalled planner handoff by stopping planner and waking builder', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-03-30T12:00:00.000Z'));
 
@@ -2133,7 +2176,7 @@ describe('VicodeBuildControlService', () => {
     appDb.close();
   });
 
-  it('stops a stalled planner pass that still owns the active ticket', async () => {
+  orchestrationEnabledIt('stops a stalled planner pass that still owns the active ticket', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-03-30T12:00:00.000Z'));
 
@@ -2206,7 +2249,7 @@ describe('VicodeBuildControlService', () => {
     appDb.close();
   });
 
-  it('retries a stale builder ticket once when target file evidence shows partial progress', async () => {
+  orchestrationEnabledIt('retries a stale builder ticket once when target file evidence shows partial progress', async () => {
     vi.useFakeTimers();
     const baseTime = new Date('2026-03-30T12:00:00.000Z');
     vi.setSystemTime(baseTime);
@@ -2379,7 +2422,7 @@ describe('VicodeBuildControlService', () => {
     appDb.close();
   });
 
-  it('blocks a repeatedly stale partial builder ticket and hands it back to planner', async () => {
+  orchestrationEnabledIt('blocks a repeatedly stale partial builder ticket and hands it back to planner', async () => {
     vi.useFakeTimers();
     const baseTime = new Date('2026-03-30T12:00:00.000Z');
     vi.setSystemTime(baseTime);
@@ -2512,7 +2555,7 @@ describe('VicodeBuildControlService', () => {
     appDb.close();
   });
 
-  it('hands planner completion to the finisher when a promotable slice lands', async () => {
+  orchestrationEnabledIt('hands planner completion to the finisher when a promotable slice lands', async () => {
     const projectRoot = createTempDir('vicode-build-project-');
     const codexHome = createTempDir('vicode-build-codex-');
     writeConfig(projectRoot);
@@ -2591,7 +2634,77 @@ describe('VicodeBuildControlService', () => {
     appDb.close();
   });
 
-  it('hands planner completion to the builder when the planner only changes planning artifacts', async () => {
+  it('does not auto-handoff planner completion while orchestration is parked', async () => {
+    const projectRoot = createTempDir('vicode-build-project-');
+    const codexHome = createTempDir('vicode-build-codex-');
+    writeConfig(projectRoot);
+    seedPromptDefinitions(codexHome);
+
+    const appDb = new DatabaseService(join(createTempDir('vicode-build-appdb-'), 'vicode.sqlite'));
+    appDb.migrate();
+    const project = appDb.createProject({ name: 'Vicode', folderPath: projectRoot, trusted: true });
+    const plannerThread = appDb.createThread({
+      projectId: project.id,
+      title: 'Vicode Build / Core / Planner',
+      providerId: 'openai',
+      modelId: 'gpt-5.4',
+      executionPermission: 'full_access'
+    });
+    appDb.saveVicodeBuildLaneState({
+      projectId: project.id,
+      teamId: 'core',
+      laneId: 'planner',
+      threadId: plannerThread.id,
+      paused: false
+    });
+
+    const runId = 'planner-run-parked';
+    appDb.addRunEvent(plannerThread.id, runId, 'info', {
+      activity: {
+        changeArtifact: {
+          summary: { filesChanged: 2 },
+          files: [{ path: 'src/main/ipc.ts' }, { path: 'src/preload/index.ts' }]
+        }
+      }
+    });
+    appDb.addRunEvent(plannerThread.id, runId, 'completed', { message: 'Planner slice finished.' });
+    appDb.updateThreadStatus(plannerThread.id, 'completed');
+
+    let providerListener: ((event: AppEvent) => void) | null = null;
+    const submitComposer = vi.fn(async (_input: ComposerSubmitInput) => {
+      throw new Error('submitComposer should not be called while orchestration is parked.');
+    });
+
+    const service = new VicodeBuildControlService(
+      appDb,
+      {
+        onEvent: vi.fn((listener: (event: AppEvent) => void) => {
+          providerListener = listener;
+          return () => {
+            providerListener = null;
+          };
+        }),
+        submitComposer
+      } as unknown as never,
+      { codexHome }
+    );
+
+    providerListener?.({ type: 'run.status', threadId: plannerThread.id, runId, status: 'completed' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const snapshot = service.getSnapshot(project.id);
+    const finisher = snapshot.teams[0]?.lanes.find((lane) => lane.laneId === 'finisher');
+
+    expect(submitComposer).not.toHaveBeenCalled();
+    expect(finisher?.status).toBe('idle');
+    expect(snapshot.recentEvents.some((event) => event.kind === 'auto_handoff')).toBe(false);
+    expect(snapshot.recentEvents.some((event) => event.kind === 'run_completed')).toBe(true);
+
+    service.dispose();
+    appDb.close();
+  });
+
+  orchestrationEnabledIt('hands planner completion to the builder when the planner only changes planning artifacts', async () => {
     const projectRoot = createTempDir('vicode-build-project-');
     const codexHome = createTempDir('vicode-build-codex-');
     writeConfig(projectRoot);
@@ -2673,7 +2786,7 @@ describe('VicodeBuildControlService', () => {
     appDb.close();
   });
 
-  it('hands planner completion to the builder when the queue now points at a builder ticket', async () => {
+  orchestrationEnabledIt('hands planner completion to the builder when the queue now points at a builder ticket', async () => {
     const projectRoot = createTempDir('vicode-build-project-');
     const codexHome = createTempDir('vicode-build-codex-');
     writeConfig(projectRoot);
@@ -2769,7 +2882,7 @@ describe('VicodeBuildControlService', () => {
     appDb.close();
   });
 
-  it('does not auto-handoff when planner changes non-control files without advancing the queue', async () => {
+  orchestrationEnabledIt('does not auto-handoff when planner changes non-control files without advancing the queue', async () => {
     const projectRoot = createTempDir('vicode-build-project-');
     const codexHome = createTempDir('vicode-build-codex-');
     writeConfig(projectRoot);
@@ -2870,7 +2983,7 @@ describe('VicodeBuildControlService', () => {
     appDb.close();
   });
 
-  it('does not auto-wake a paused target lane and records the skipped handoff', async () => {
+  orchestrationEnabledIt('does not auto-wake a paused target lane and records the skipped handoff', async () => {
     const projectRoot = createTempDir('vicode-build-project-');
     const codexHome = createTempDir('vicode-build-codex-');
     writeConfig(projectRoot);
@@ -2943,7 +3056,7 @@ describe('VicodeBuildControlService', () => {
     appDb.close();
   });
 
-  it('hands finisher completion back to the builder for control-plane-only changes', async () => {
+  orchestrationEnabledIt('hands finisher completion back to the builder for control-plane-only changes', async () => {
     const projectRoot = createTempDir('vicode-build-project-');
     const codexHome = createTempDir('vicode-build-codex-');
     writeConfig(projectRoot);
@@ -3024,7 +3137,7 @@ describe('VicodeBuildControlService', () => {
     appDb.close();
   });
 
-  it('hands finisher completion back to the planner for product-work changes', async () => {
+  orchestrationEnabledIt('hands finisher completion back to the planner for product-work changes', async () => {
     const projectRoot = createTempDir('vicode-build-project-');
     const codexHome = createTempDir('vicode-build-codex-');
     writeConfig(projectRoot);
@@ -3102,7 +3215,7 @@ describe('VicodeBuildControlService', () => {
     appDb.close();
   });
 
-  it('keeps an active plan moving by waking planner after a builder no-op', async () => {
+  orchestrationEnabledIt('keeps an active plan moving by waking planner after a builder no-op', async () => {
     const projectRoot = createTempDir('vicode-build-project-');
     const codexHome = createTempDir('vicode-build-codex-');
     writeConfig(projectRoot);
@@ -3197,7 +3310,7 @@ describe('VicodeBuildControlService', () => {
     appDb.close();
   });
 
-  it('holds a repeated builder no-op handoff when the queue still has not advanced', async () => {
+  orchestrationEnabledIt('holds a repeated builder no-op handoff when the queue still has not advanced', async () => {
     const projectRoot = createTempDir('vicode-build-project-');
     const codexHome = createTempDir('vicode-build-codex-');
     writeConfig(projectRoot);
@@ -3296,7 +3409,7 @@ describe('VicodeBuildControlService', () => {
     appDb.close();
   });
 
-  it('keeps an active plan moving by waking planner after a finisher no-op', async () => {
+  orchestrationEnabledIt('keeps an active plan moving by waking planner after a finisher no-op', async () => {
     const projectRoot = createTempDir('vicode-build-project-');
     const codexHome = createTempDir('vicode-build-codex-');
     writeConfig(projectRoot);
@@ -3365,7 +3478,7 @@ describe('VicodeBuildControlService', () => {
     appDb.close();
   });
 
-  it('does not wake planner again when finisher leaves only blocked tickets behind', async () => {
+  orchestrationEnabledIt('does not wake planner again when finisher leaves only blocked tickets behind', async () => {
     const projectRoot = createTempDir('vicode-build-project-');
     const codexHome = createTempDir('vicode-build-codex-');
     writeConfig(projectRoot);
@@ -3443,7 +3556,7 @@ describe('VicodeBuildControlService', () => {
     appDb.close();
   });
 
-  it('does not wake planner again when finisher leaves a fully resolved queue behind', async () => {
+  orchestrationEnabledIt('does not wake planner again when finisher leaves a fully resolved queue behind', async () => {
     const projectRoot = createTempDir('vicode-build-project-');
     const codexHome = createTempDir('vicode-build-codex-');
     writeConfig(projectRoot);

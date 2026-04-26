@@ -350,17 +350,8 @@ describe('registerIpc', () => {
         getBootstrapData: vi.fn(async () => ({
           projects: [],
           threadsByProject: {},
-          skills: [],
-          automations: [],
-          jobs: [],
-          reviewItems: [],
-          providers: [],
           preferences: {},
-          personalization: {},
-          appMeta: null,
-          collaboration: {},
-          archivedThreads: [],
-          pendingRunToolApprovals: []
+          personalization: {}
         }))
       },
       providers: {

@@ -193,20 +193,20 @@ describe('OllamaAdapter', () => {
         contextWindowSource: 'heuristic'
       },
       {
-        id: 'gemma3:12b',
-        label: 'Gemma3 12b',
-        description: 'Local Ollama model from families: gemma3.',
-        supportsVision: true,
+        id: 'deepseek-r1:8b',
+        label: 'Deepseek R1 8b',
+        description: 'Local model discovered from Ollama.',
+        supportsVision: false,
         recommendation: undefined,
         contextWindowTokens: 32_768,
         autoCompactTokenLimit: null,
         contextWindowSource: 'heuristic'
       },
       {
-        id: 'deepseek-r1:8b',
-        label: 'Deepseek R1 8b',
-        description: 'Local model discovered from Ollama.',
-        supportsVision: false,
+        id: 'gemma3:12b',
+        label: 'Gemma3 12b',
+        description: 'Local Ollama model from families: gemma3.',
+        supportsVision: true,
         recommendation: undefined,
         contextWindowTokens: 32_768,
         autoCompactTokenLimit: null,
@@ -2257,6 +2257,46 @@ describe('OllamaAdapter', () => {
     });
   });
 
+  it('surfaces a clearer message when local Ollama cannot be reached', async () => {
+    const runtime = createRuntime({
+      fetch: vi.fn(async () => {
+        throw new Error('fetch failed');
+      })
+    });
+    const adapter = new OllamaAdapter(runtime);
+    const callbacks = createCallbacks();
+
+    await adapter.startRun(createContext(), callbacks);
+
+    await vi.waitFor(() => {
+      expect(callbacks.onError).toHaveBeenCalledWith(
+        'Failed to reach the local Ollama runtime. Start Ollama or check that it is reachable, then retry.'
+      );
+    });
+  });
+
+  it('surfaces a clearer message when hosted Ollama cannot be reached', async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError('fetch failed');
+    });
+    const adapter = new OllamaAdapter(createRuntime(), null, fetchMock as typeof globalThis.fetch);
+    const callbacks = createCallbacks();
+
+    await adapter.startRun(
+      createContext({
+        apiKey: 'ollama-cloud-key',
+        modelId: 'deepseek-v3.2'
+      }),
+      callbacks
+    );
+
+    await vi.waitFor(() => {
+      expect(callbacks.onError).toHaveBeenCalledWith(
+        'Failed to reach Ollama cloud. Check your network connection, then retry.'
+      );
+    });
+  });
+
   it('surfaces a clearer message when the Ollama tool loop times out waiting for the next response', async () => {
     const fetchMock = vi.fn(async () => {
       throw new Error('This operation was aborted');
@@ -2518,7 +2558,7 @@ describe('OllamaAdapter', () => {
 
     expect(firstPayload.tools).toHaveLength(6);
     expect(firstPayload.input?.[0]?.role).toBe('user');
-    expect(String(firstPayload.input?.[0]?.content ?? '')).toContain('Trusted workspace root: C:\\workspace');
+    expect(String(firstPayload.input?.[0]?.content ?? '')).toContain('Workspace root: C:\\workspace');
     expect(secondPayload.input?.some((entry) => String(entry.content ?? '').includes('Tool result for read_file'))).toBe(true);
     expect(agentRuntime.executeToolCall).toHaveBeenCalledWith(
       {

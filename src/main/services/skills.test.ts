@@ -233,7 +233,7 @@ describe('SkillCatalogService', () => {
     expect(skills.some((skill) => skill.id === 'skill-react-landing-direction')).toBe(false);
   });
 
-  it('writes canonical skill files and exports to Codex when requested', async () => {
+  it('writes canonical skill files without exporting into the Codex app home', async () => {
     const { SkillCatalogService } = await import('./skills');
     const service = new SkillCatalogService(db as never, join(root, 'state'));
 
@@ -253,10 +253,14 @@ describe('SkillCatalogService', () => {
     expect(readFileSync(String(skill.path), 'utf8')).toContain('Premium Frontend Build');
 
     const exportedPath = join(mockedHome, '.codex', 'skills');
-    expect(existsSync(exportedPath)).toBe(true);
+    const syncState = (skill.metadata.syncState as Record<string, { exported: boolean; path: string | null; error?: string | null }>).openai;
+    expect(existsSync(exportedPath)).toBe(false);
+    expect(syncState?.exported).toBe(false);
+    expect(syncState?.path).toBeNull();
+    expect(syncState?.error).toMatch(/does not write to the Codex app home/i);
   });
 
-  it('detects file-backed imported skills from the Vicode state folder', async () => {
+  it('detects file-backed imported skills from the Vicode state folder after an explicit refresh', async () => {
     const statePath = join(root, 'state');
     const importedFolder = join(statePath, 'skills', 'user', 'ci-triage');
     mkdirSync(importedFolder, { recursive: true });
@@ -290,6 +294,7 @@ describe('SkillCatalogService', () => {
 
     const { SkillCatalogService } = await import('./skills');
     const service = new SkillCatalogService(db as never, statePath);
+    service.refreshSkillsFromDisk();
 
     const imported = (await service.listSkills()).find((skill) => skill.id === 'file-backed-ci-triage');
 
@@ -322,6 +327,69 @@ describe('SkillCatalogService', () => {
 
     expect(syncState.exported).toBe(false);
     expect(syncState.path).toBeNull();
+  });
+
+  it('does not delete existing files under the Codex app home when disabling sync', async () => {
+    const { SkillCatalogService } = await import('./skills');
+    const service = new SkillCatalogService(db as never, join(root, 'state'));
+    const codexSkillFolder = join(mockedHome, '.codex', 'skills', 'reviewer');
+    const codexSkillPath = join(codexSkillFolder, 'SKILL.md');
+    mkdirSync(codexSkillFolder, { recursive: true });
+    writeFileSync(codexSkillPath, '# Reviewer\n\nKeep this Codex-owned skill.\n', 'utf8');
+
+    db.upsertSkill({
+      id: 'skill-reviewer',
+      name: 'Reviewer',
+      description: 'Review code critically.',
+      instructions: 'Lead with findings.',
+      origin: 'custom_local',
+      scope: 'global',
+      providerTargets: ['openai'],
+      enabled: true,
+      projectId: null,
+      metadata: {
+        syncTargets: ['openai'],
+        syncState: {
+          openai: {
+            exported: true,
+            path: codexSkillPath,
+            updatedAt: new Date().toISOString(),
+            error: null
+          }
+        }
+      },
+      path: join(root, 'state', 'skills', 'user', 'reviewer--skill-re', 'SKILL.md'),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    const synced = service.syncSkill('skill-reviewer', 'openai', false);
+    const syncState = (synced.metadata.syncState as Record<string, { exported: boolean; path: string | null; error?: string | null }>).openai;
+
+    expect(existsSync(codexSkillPath)).toBe(true);
+    expect(readFileSync(codexSkillPath, 'utf8')).toContain('Codex-owned skill');
+    expect(syncState.exported).toBe(false);
+    expect(syncState.path).toBeNull();
+    expect(syncState.error).toMatch(/did not remove provider files inside the Codex app home/i);
+  });
+
+  it('refuses to enable Codex provider-folder sync from Vicode', async () => {
+    const { SkillCatalogService } = await import('./skills');
+    const service = new SkillCatalogService(db as never, join(root, 'state'));
+
+    const skill = service.saveSkill({
+      name: 'Reviewer',
+      description: 'Review code critically.',
+      instructions: 'Lead with findings.',
+      scope: 'global',
+      providerTargets: ['openai'],
+      syncTargets: [],
+      enabled: true,
+      projectId: null
+    });
+
+    expect(() => service.syncSkill(skill.id, 'openai', true)).toThrow(/does not write to the Codex app home/i);
+    expect(existsSync(join(mockedHome, '.codex', 'skills'))).toBe(false);
   });
 
   it('discovers provider-native skills and skips exported Vicode copies', async () => {
@@ -368,11 +436,25 @@ describe('SkillCatalogService', () => {
       instructions: 'Lead with findings.',
       scope: 'global',
       providerTargets: ['openai'],
-      syncTargets: ['openai'],
+      syncTargets: [],
       enabled: true,
       projectId: null
     });
-    const exportedPath = (saved.metadata.syncState as Record<string, { path: string | null }>).openai.path;
+    const exportedPath = join(mockedHome, '.codex', 'skills', 'reviewer--abcd1234', 'SKILL.md');
+    db.upsertSkill({
+      ...saved,
+      metadata: {
+        ...saved.metadata,
+        syncState: {
+          openai: {
+            exported: true,
+            path: exportedPath,
+            updatedAt: new Date().toISOString(),
+            error: null
+          }
+        }
+      }
+    });
     const openAiAdapter = (
       service as unknown as {
         adapters: Record<ProviderId, ProviderAdapter>;
@@ -395,7 +477,7 @@ describe('SkillCatalogService', () => {
         name: 'Reviewer Export',
         description: 'Exported custom reviewer.',
         instructions: 'Lead with findings.',
-        path: exportedPath ?? '',
+        path: exportedPath,
         providerTargets: ['openai'],
         attachMode: 'runtime',
         kind: 'skill',
@@ -503,6 +585,26 @@ describe('SkillCatalogService', () => {
 
     expect(existsSync(extensionDir)).toBe(false);
     expect(() => db.getSkill('provider-native:gemini:extension:superpowers')).toThrow();
+  });
+
+  it('does not install provider-native OpenAI skills into the Codex app home', async () => {
+    const { SkillCatalogService } = await import('./skills');
+    const service = new SkillCatalogService(db as never, join(root, 'state'));
+    const codexSkillDir = join(mockedHome, '.codex', 'skills', 'cloudflare-deploy');
+    const codexSkillPath = join(codexSkillDir, 'SKILL.md');
+    mkdirSync(codexSkillDir, { recursive: true });
+    writeFileSync(codexSkillPath, '# Existing Codex Skill\n', 'utf8');
+
+    await expect(
+      service.installSuggestedSkill({
+        installKind: 'provider_native',
+        providerId: 'openai',
+        token: 'cloudflare-deploy'
+      })
+    ).rejects.toThrow(/does not install provider-native Codex skills/i);
+
+    expect(existsSync(codexSkillPath)).toBe(true);
+    expect(readFileSync(codexSkillPath, 'utf8')).toContain('Existing Codex Skill');
   });
 
   it('installs Gemini extensions without opening an external terminal', async () => {

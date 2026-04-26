@@ -31,6 +31,7 @@ export interface BuildAgentRuntimeToolCatalogInput {
   runtimeNetworkPolicy?: ProjectRuntimeNetworkPolicy;
   nativeWebResearchEnabled: boolean;
   delegationEnabled?: boolean;
+  creatorToolsEnabled?: boolean;
   mcpTools: McpToolDescriptor[];
 }
 
@@ -336,6 +337,9 @@ export function buildAgentRuntimeToolCatalog(
 
       if (tool.callName === 'spawn_subagents') {
         return input.delegationEnabled === true;
+      }
+      if (tool.callName === 'create_skill_bundle' || tool.callName === 'create_plugin_bundle') {
+        return input.creatorToolsEnabled === true;
       }
 
       return true;

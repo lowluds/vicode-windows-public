@@ -8,8 +8,11 @@ import { closeApp, launchApp } from './helpers/electron';
 const workspaceRoot = path.join(process.cwd(), 'test', '.e2e-workspaces', 'review-queue');
 
 async function openAutomations(window: Page) {
-  await window.getByLabel('Account').click();
-  await window.getByRole('menuitem', { name: 'Automations' }).click();
+  const getStarted = window.getByRole('button', { name: 'Get Started' });
+  if (await getStarted.isVisible().catch(() => false)) {
+    await getStarted.click();
+  }
+  await window.getByTestId('nav-automations').click();
   await expect(window.getByRole('heading', { name: 'Automations', exact: true })).toBeVisible();
 }
 
@@ -42,40 +45,57 @@ test.afterAll(async () => {
 
 test('rejects a pending automation review from the automations view', async () => {
   const { app, window: launchedWindow } = await launchApp({
-    bridgePaths: ['vicode.app', 'vicode.automations', 'vicode.jobs']
+    bridgePaths: ['vicode.app', 'vicode.automations', 'vicode.jobs', 'vicode.projects']
   });
 
   let window: Page | null = launchedWindow;
+  let projectId: string | null = null;
   let automationId: string | null = null;
   let reviewItemId: string | null = null;
   let automationName: string | null = null;
 
   try {
-    const seeded = await window.evaluate(async () => {
+    const seeded = await window.evaluate(async (workspaceRoot) => {
       const bootstrap = await window.vicode.app.getBootstrap();
-      const project = bootstrap.projects[0];
-      if (!project) {
-        throw new Error('Expected a default project for the review queue test.');
+      const provider =
+        bootstrap.providers.find((entry) => entry.id === 'openai') ??
+        bootstrap.providers.find((entry) => entry.id === 'gemini') ??
+        bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+        null;
+      if (!provider) {
+        throw new Error('Expected a release-facing provider for the review queue test.');
       }
 
       const suffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+      const project = await window.vicode.projects.create({
+        name: `Review queue ${suffix}`,
+        folderPath: workspaceRoot,
+        trusted: true
+      });
+      const modelId =
+        project.defaultModelByProvider[provider.id] ??
+        bootstrap.preferences.defaultModelByProvider[provider.id] ??
+        provider.models[0]?.id ??
+        'gpt-5';
       const automation = await window.vicode.automations.save({
         name: `Review queue smoke ${suffix}`,
         projectId: project.id,
-        providerId: 'openai',
-        modelId: 'gpt-5',
+        providerId: provider.id,
+        modelId,
         promptTemplate: 'Review queue test prompt',
         enabled: true,
         scheduleType: 'manual'
       });
       const queued = await window.vicode.automations.runNow(automation.id);
       return {
+        projectId: project.id,
         automationId: automation.id,
         automationName: automation.name,
         reviewItemId: queued.reviewItem.id
       };
-    });
+    }, workspaceRoot);
 
+    projectId = seeded.projectId;
     automationId = seeded.automationId;
     automationName = seeded.automationName;
     reviewItemId = seeded.reviewItemId;
@@ -122,6 +142,14 @@ test('rejects a pending automation review from the automations view', async () =
             await window.vicode.automations.remove(targetAutomationId);
           }
         }, { targetAutomationId: automationId });
+        if (projectId) {
+          await window.evaluate(async (targetProjectId) => {
+            const bootstrap = await window.vicode.app.getBootstrap();
+            if (bootstrap.projects.some((project) => project.id === targetProjectId)) {
+              await window.vicode.projects.remove(targetProjectId);
+            }
+          }, projectId);
+        }
       } catch {
         // Best-effort cleanup only.
       }
@@ -148,9 +176,13 @@ test('edits a manual review draft before approving the file write', async () => 
     const seeded = await window.evaluate(
       async ({ projectName, projectPath }) => {
         const bootstrap = await window.vicode.app.getBootstrap();
-        const provider = bootstrap.providers[0] ?? null;
+        const provider =
+          bootstrap.providers.find((entry) => entry.id === 'openai') ??
+          bootstrap.providers.find((entry) => entry.id === 'gemini') ??
+          bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+          null;
         if (!provider) {
-          throw new Error('Expected at least one provider for manual review setup.');
+          throw new Error('Expected a release-facing provider for manual review setup.');
         }
 
         const existing = bootstrap.projects.find((project) => project.name === projectName);

@@ -297,6 +297,37 @@ const COMMON_STANDALONE_WORDS = new Set([
   'workspace'
 ]);
 
+const COMMON_COMPACT_TECHNICAL_TERMS = new Set([
+  'api',
+  'cli',
+  'cpu',
+  'css',
+  'db',
+  'git',
+  'gpt',
+  'gpu',
+  'html',
+  'http',
+  'https',
+  'ide',
+  'ipc',
+  'json',
+  'jsx',
+  'llm',
+  'llms',
+  'mcp',
+  'npm',
+  'ram',
+  'sql',
+  'tsx',
+  'ui',
+  'url',
+  'urls',
+  'ux',
+  'vram',
+  'xml'
+]);
+
 const DISPLAY_WORD_CONTINUATION_SUFFIXES = new Set([
   'action',
   'actions',
@@ -386,6 +417,10 @@ function isContractionFragment(value: string) {
   return ['s', 't', 'd', 'll', 're', 've', 'm'].includes(value);
 }
 
+function isCompactTechnicalSplit(left: string, right: string) {
+  return COMMON_COMPACT_TECHNICAL_TERMS.has(`${left}${right}`.toLowerCase());
+}
+
 function classifyAssistantTextBoundary(
   leftToken: string,
   rightToken: string,
@@ -407,6 +442,10 @@ function classifyAssistantTextBoundary(
       return { action: 'space', finding: 'missing-space-after-acronym' };
     }
     return { action: 'keep', finding: null };
+  }
+
+  if (leftPlainWord && rightPlainWord && isCompactTechnicalSplit(left, right)) {
+    return { action: 'join', finding: 'split-acronym-fragment' };
   }
 
   if (
@@ -846,13 +885,16 @@ function scoreAppendCandidate(
     const jammedDecision = classifyAssistantTextBoundary(context.trailingWord, context.leadingWord, 'jammed');
     const strongJoin = spacedDecision.action === 'join';
     const strongSpace =
-      jammedDecision.action === 'space'
-      || isCommonShortWord(leftLower)
-      || isCommonShortWord(rightLower)
-      || isCommonStandaloneWord(leftLower)
-      || isCommonStandaloneWord(rightLower)
-      || isContractionFragment(leftLower)
-      || isContractionFragment(rightLower);
+      !strongJoin
+      && (
+        jammedDecision.action === 'space'
+        || isCommonShortWord(leftLower)
+        || isCommonShortWord(rightLower)
+        || isCommonStandaloneWord(leftLower)
+        || isCommonStandaloneWord(rightLower)
+        || isContractionFragment(leftLower)
+        || isContractionFragment(rightLower)
+      );
     const mildJoin =
       !strongJoin
       && !strongSpace

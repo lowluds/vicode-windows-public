@@ -1,9 +1,5 @@
-function normalizeErrorMessage(error: unknown) {
-  if (!(error instanceof Error)) {
-    return null;
-  }
-
-  let message = error.message.trim();
+function normalizeMessageText(value: string) {
+  let message = value.trim();
   const remoteInvokeMatch = message.match(/^Error invoking remote method '[^']+':\s*(.+)$/u);
   if (remoteInvokeMatch) {
     message = remoteInvokeMatch[1]?.trim() ?? message;
@@ -14,6 +10,39 @@ function normalizeErrorMessage(error: unknown) {
   }
 
   return message;
+}
+
+function normalizeErrorMessage(error: unknown) {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  return normalizeMessageText(error.message);
+}
+
+function isGenericFetchFailure(message: string) {
+  const normalized = message.trim().toLowerCase();
+  return normalized === 'fetch failed' || normalized === 'failed to fetch' || normalized.includes('fetch failed');
+}
+
+export function formatRunFailureToastMessage(message: string | null | undefined) {
+  const normalized = message ? normalizeMessageText(message) : '';
+  if (!normalized) {
+    return 'The run failed. Open the thread details for more information.';
+  }
+
+  if (
+    /\bhunk\s+\d+\b/iu.test(normalized)
+    || /hunk at line|line count did not match|failed to apply patch|patch .*failed|apply_patch/iu.test(normalized)
+  ) {
+    return 'Patch could not be applied. The file likely changed or the generated patch was stale; details are in the thread.';
+  }
+
+  if (isGenericFetchFailure(normalized)) {
+    return 'A provider request failed. Check that the selected provider is reachable, then retry. Details are in the thread.';
+  }
+
+  return normalized;
 }
 
 export function parseWorkspaceUnavailableError(error: unknown) {
@@ -52,18 +81,22 @@ export function formatUserErrorMessage(error: unknown, fallback: string) {
   const legacyTrustMatch = message.match(/^Project folder must be trusted before (.+) provider runs\.$/u);
   if (legacyTrustMatch) {
     const provider = legacyTrustMatch[1];
-    return `This workspace is not trusted yet. Click Enable workspace in the header before running ${provider}.`;
+    return `This workspace was blocked by an older access rule. Re-open the folder and retry ${provider}.`;
   }
 
   const untrustedWorkspaceMatch = message.match(/^(.+?) cannot run against an untrusted workspace\. Trust the project and retry\.?$/u);
   if (untrustedWorkspaceMatch) {
     const provider = untrustedWorkspaceMatch[1];
-    return `This workspace is not trusted yet. Click Enable workspace in the header before running ${provider}.`;
+    return `This workspace was blocked by an older access rule. Re-open the folder and retry ${provider}.`;
   }
 
   const workspaceUnavailable = parseWorkspaceUnavailableError(error);
   if (workspaceUnavailable) {
     return `This workspace folder is missing. Repair the project path in the header before running ${workspaceUnavailable.provider}.`;
+  }
+
+  if (isGenericFetchFailure(message)) {
+    return fallback;
   }
 
   if (message === 'Gemini CLI exited successfully without producing assistant output.') {

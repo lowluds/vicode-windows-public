@@ -1037,14 +1037,11 @@ describe('GeminiAdapter planner policy', () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
-  it('rejects untrusted workspaces through project validation', () => {
+  it('accepts legacy false-trust workspaces through project validation', () => {
     const adapter = new GeminiAdapter();
     expect(
       adapter.validateProjectContext('C:\\Users\\test-user\\Desktop\\vicode-project\\vicode-windows', false)
-    ).toEqual({
-      valid: false,
-      message: 'Trust the project before running Gemini against this workspace.'
-    });
+    ).toEqual({ valid: true });
   });
 
   it('uses yolo approval flags for full-access runs', async () => {

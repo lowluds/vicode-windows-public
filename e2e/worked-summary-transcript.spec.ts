@@ -29,9 +29,13 @@ async function seedProjectAndThread(window: Page, projectName: string, projectPa
   return await window.evaluate(
     async ({ projectName, projectPath, threadTitle }) => {
       const bootstrap = await window.vicode.app.getBootstrap();
-      const provider = bootstrap.providers[0];
+      const provider =
+        bootstrap.providers.find((entry) => entry.id === 'openai') ??
+        bootstrap.providers.find((entry) => entry.id === 'gemini') ??
+        bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+        null;
       if (!provider) {
-        throw new Error('Expected at least one provider for E2E setup.');
+        throw new Error('Expected a release-facing provider for E2E setup.');
       }
 
       const project = await window.vicode.projects.create({
@@ -210,6 +214,10 @@ test('worked-for disclosure nests compact sources and exposes command details', 
       await compactSourcesButton.click();
       await expect(relaunched.window.getByText('Open-source finetuning guide')).toBeVisible();
       await expect(relaunched.window.getByText('Model comparison')).toBeVisible();
+
+      const commandGroupDisclosure = relaunched.window.getByRole('button', { name: /Ran 1 command/i });
+      await expect(commandGroupDisclosure).toBeVisible();
+      await commandGroupDisclosure.click();
 
       const commandDisclosure = relaunched.window.getByRole('button', {
         name: /Background terminal finished with Select-String/i

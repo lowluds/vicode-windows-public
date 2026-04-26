@@ -71,6 +71,32 @@ describe('OllamaFinalAnswerFormatter', () => {
     );
   });
 
+  it('strips standalone bullet separator lines from malformed summary sections', () => {
+    expect(
+      formatOllamaFinalAnswerFallback(
+        [
+          'Technical Advantages:',
+          '',
+          '-',
+          '',
+          'Open AI-compatible API',
+          '',
+          '- Easy migration from existing OpenAI integrations',
+          '',
+          '-'
+        ].join('\n')
+      )
+    ).toBe(
+      [
+        'Technical Advantages:',
+        '',
+        'Open AI-compatible API',
+        '',
+        '- Easy migration from existing OpenAI integrations'
+      ].join('\n')
+    );
+  });
+
   it('keeps structural wrap-up formatting lightweight and avoids rewriting split words inline', () => {
     expect(
       formatOllamaFinalAnswerFallback(
@@ -79,6 +105,10 @@ describe('OllamaFinalAnswerFormatter', () => {
     ).toBe(
       "Created `audit-note.txt` successfully.\n\nContractions like *don't* can still arrive malformed as pron oun fragments."
     );
+  });
+
+  it('repairs compact technical acronyms in short fallback output', () => {
+    expect(formatOllamaFinalAnswerFallback('m cp: hello-world')).toBe('mcp: hello-world');
   });
 
   it('skips short or already readable answers', async () => {

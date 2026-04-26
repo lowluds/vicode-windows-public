@@ -15,13 +15,13 @@ export interface NativeAgentRuntimeToolDefinition {
 export const NATIVE_AGENT_RUNTIME_TOOL_DEFINITIONS: NativeAgentRuntimeToolDefinition[] = [
   {
     callName: 'apply_patch',
-    description: 'Apply a unified patch to files inside the trusted workspace.',
+    description: 'Apply a unified patch to files inside the workspace.',
     inputJsonSchema: {
       type: 'object',
       properties: {
         patch: {
           type: 'string',
-          description: 'Unified patch content to apply inside the trusted workspace.'
+          description: 'Unified patch content to apply inside the workspace.'
         }
       },
       required: ['patch']
@@ -30,6 +30,104 @@ export const NATIVE_AGENT_RUNTIME_TOOL_DEFINITIONS: NativeAgentRuntimeToolDefini
     concurrencySafe: false,
     visibilityGroup: 'workspace_write',
     mutatesWorkspace: true,
+    readsWorkspace: false,
+    usesNetwork: false
+  },
+  {
+    callName: 'create_plugin_bundle',
+    description: 'Create or update one Vicode plugin bundle inside Vicode app state.',
+    inputJsonSchema: {
+      type: 'object',
+      properties: {
+        scope: {
+          type: 'string',
+          enum: ['global', 'project'],
+          description: 'Whether the plugin should be global or project-scoped.'
+        },
+        project_id: {
+          type: 'string',
+          description: 'Project id required when scope is "project".'
+        },
+        folder_name: {
+          type: 'string',
+          description: 'Single folder name for the plugin bundle.'
+        },
+        files: {
+          type: 'array',
+          description: 'Files to write inside the plugin bundle root.',
+          minItems: 1,
+          maxItems: 16,
+          items: {
+            type: 'object',
+            properties: {
+              path: {
+                type: 'string',
+                description: 'Path inside the plugin bundle, such as .codex-plugin/plugin.json or .mcp.json.'
+              },
+              content: {
+                type: 'string',
+                description: 'UTF-8 file content.'
+              }
+            },
+            required: ['path', 'content']
+          }
+        }
+      },
+      required: ['scope', 'folder_name', 'files']
+    },
+    requiresApproval: false,
+    concurrencySafe: false,
+    visibilityGroup: 'workspace_write',
+    mutatesWorkspace: false,
+    readsWorkspace: false,
+    usesNetwork: false
+  },
+  {
+    callName: 'create_skill_bundle',
+    description: 'Create or update one Vicode skill bundle inside Vicode app state.',
+    inputJsonSchema: {
+      type: 'object',
+      properties: {
+        scope: {
+          type: 'string',
+          enum: ['global', 'project'],
+          description: 'Whether the skill should be global or project-scoped.'
+        },
+        project_id: {
+          type: 'string',
+          description: 'Project id required when scope is "project".'
+        },
+        folder_name: {
+          type: 'string',
+          description: 'Single folder name for the skill bundle.'
+        },
+        files: {
+          type: 'array',
+          description: 'Files to write inside the skill bundle root.',
+          minItems: 1,
+          maxItems: 16,
+          items: {
+            type: 'object',
+            properties: {
+              path: {
+                type: 'string',
+                description: 'Path inside the skill bundle, such as SKILL.md or .vicode-skill.json.'
+              },
+              content: {
+                type: 'string',
+                description: 'UTF-8 file content.'
+              }
+            },
+            required: ['path', 'content']
+          }
+        }
+      },
+      required: ['scope', 'folder_name', 'files']
+    },
+    requiresApproval: false,
+    concurrencySafe: false,
+    visibilityGroup: 'workspace_write',
+    mutatesWorkspace: false,
     readsWorkspace: false,
     usesNetwork: false
   },
@@ -91,7 +189,7 @@ export const NATIVE_AGENT_RUNTIME_TOOL_DEFINITIONS: NativeAgentRuntimeToolDefini
   },
   {
     callName: 'list_directory',
-    description: 'List files and folders inside the trusted workspace.',
+    description: 'List files and folders inside the workspace.',
     inputJsonSchema: {
       type: 'object',
       properties: {
@@ -142,7 +240,7 @@ export const NATIVE_AGENT_RUNTIME_TOOL_DEFINITIONS: NativeAgentRuntimeToolDefini
   },
   {
     callName: 'mkdir',
-    description: 'Create a directory inside the trusted workspace.',
+    description: 'Create a directory inside the workspace.',
     inputJsonSchema: {
       type: 'object',
       properties: {
@@ -162,7 +260,7 @@ export const NATIVE_AGENT_RUNTIME_TOOL_DEFINITIONS: NativeAgentRuntimeToolDefini
   },
   {
     callName: 'read_file',
-    description: 'Read one text file inside the trusted workspace.',
+    description: 'Read one text file inside the workspace.',
     inputJsonSchema: {
       type: 'object',
       properties: {
@@ -210,7 +308,7 @@ export const NATIVE_AGENT_RUNTIME_TOOL_DEFINITIONS: NativeAgentRuntimeToolDefini
   },
   {
     callName: 'run_command',
-    description: 'Run one Windows shell command starting in the trusted workspace.',
+    description: 'Run one Windows shell command starting in the workspace.',
     inputJsonSchema: {
       type: 'object',
       properties: {
@@ -336,7 +434,7 @@ export const NATIVE_AGENT_RUNTIME_TOOL_DEFINITIONS: NativeAgentRuntimeToolDefini
   },
   {
     callName: 'write_file',
-    description: 'Create or overwrite a file inside the trusted workspace.',
+    description: 'Create or overwrite a file inside the workspace.',
     inputJsonSchema: {
       type: 'object',
       properties: {

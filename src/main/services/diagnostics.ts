@@ -159,7 +159,11 @@ export class DiagnosticsService {
   constructor(
     private readonly db: DatabaseService,
     private readonly exportsDir: string,
-    private readonly getCollaborationDiagnostics: (() => Record<string, unknown>) | null = null
+    private readonly getCollaborationDiagnostics: (() => Record<string, unknown>) | null = null,
+    private readonly getInstrumentationDiagnostics: (() => {
+      bootstrapDiagnostics: Record<string, unknown> | null;
+      skillCatalogDiagnostics: Record<string, unknown> | null;
+    }) | null = null
   ) {}
 
   async export(providers: ProviderDescriptor[]) {
@@ -172,6 +176,7 @@ export class DiagnosticsService {
       skills: this.db.listSkills(),
       automations: this.db.listAutomations(),
       providers,
+      instrumentationDiagnostics: this.collectInstrumentationDiagnostics(),
       runProgressDiagnostics: this.collectRunProgressDiagnostics(),
       collaborationDiagnostics: this.collectCollaborationDiagnostics()
     };
@@ -189,6 +194,7 @@ export class DiagnosticsService {
       project,
       thread,
       providers,
+      instrumentationDiagnostics: this.collectInstrumentationDiagnostics(),
       runProgressDiagnostics: this.collectRunProgressDiagnostics([threadId]),
       collaborationDiagnostics: this.collectCollaborationDiagnostics()
     };
@@ -474,5 +480,12 @@ export class DiagnosticsService {
 
   private collectCollaborationDiagnostics() {
     return this.getCollaborationDiagnostics?.() ?? null;
+  }
+
+  private collectInstrumentationDiagnostics() {
+    return this.getInstrumentationDiagnostics?.() ?? {
+      bootstrapDiagnostics: null,
+      skillCatalogDiagnostics: null
+    };
   }
 }

@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
 import { EventEmitter } from 'node:events';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -26,8 +25,21 @@ import type {
   VicodeBuildVerificationStep
 } from '../../shared/domain';
 import { getProviderMetadata } from '../../shared/providers';
+import { BUILD_CONTROL_ORCHESTRATION_ENABLED } from '../../shared/product-flags';
 import { DatabaseService } from '../../storage/database';
 import { ProviderManager } from './provider-manager';
+import {
+  createLaneStateMap,
+  laneKey,
+  listProjectedControllerEvents,
+  sortTeamSnapshotsByActivity
+} from './build-control-snapshot-projection';
+import {
+  deriveTeamLastActivity,
+  deriveTeamStatus,
+  projectSnapshotTickets
+} from './build-control-team-aggregate';
+import { assertOutsideOperatorCodexHome } from './codex-app-boundary';
 
 const execFileAsync = promisify(execFile);
 const CONFIG_RELATIVE_PATH = join('.vicode', 'control', 'vicode-build-teams.json');
@@ -85,7 +97,6 @@ type LoadedContext = {
 };
 
 type LaneState = ReturnType<DatabaseService['getVicodeBuildLaneState']>;
-type ControllerEventRow = ReturnType<DatabaseService['listVicodeBuildEvents']>[number];
 
 type LanePromptSpec = {
   providerId: ProviderId;
@@ -176,10 +187,6 @@ type VicodeBuildControlUpdate = {
   laneId: VicodeBuildLaneId;
   threadId: string | null;
 };
-
-function laneKey(teamId: VicodeBuildTeamId, laneId: VicodeBuildLaneId) {
-  return `${teamId}:${laneId}`;
-}
 
 function slugifyBuildControlId(value: string) {
   return value
@@ -907,29 +914,11 @@ function hasResolvedTerminalQueue(tickets: VicodeBuildTicketSnapshot[]) {
   return !hasActionableTicket && !hasBlockedTicket && hasDoneTicket;
 }
 
-function toControllerEvent(event: ControllerEventRow): VicodeBuildControllerEvent {
-  return {
-    id: event.id,
-    projectId: event.projectId,
-    teamId: event.teamId as VicodeBuildTeamId,
-    laneId: event.laneId as VicodeBuildLaneId,
-    kind: event.kind as VicodeBuildControllerEventKind,
-    trigger: event.trigger as VicodeBuildControllerEvent['trigger'],
-    summary: event.summary,
-    detail: event.detail,
-    sourceLaneId: (event.sourceLaneId as VicodeBuildLaneId | null) ?? null,
-    targetLaneId: (event.targetLaneId as VicodeBuildLaneId | null) ?? null,
-    threadId: event.threadId,
-    runId: event.runId,
-    createdAt: event.createdAt
-  };
-}
-
 export class VicodeBuildControlService {
-  private readonly codexHome: string;
+  private readonly codexHome: string | null;
   private readonly emitter = new EventEmitter();
   private readonly unsubscribeProviders: () => void;
-  private readonly recoveryInterval: ReturnType<typeof setInterval>;
+  private readonly recoveryInterval: ReturnType<typeof setInterval> | null;
 
   constructor(
     private readonly db: DatabaseService,
@@ -938,18 +927,25 @@ export class VicodeBuildControlService {
       codexHome?: string;
     }
   ) {
-    this.codexHome = options?.codexHome ?? join(os.homedir(), '.codex');
+    this.codexHome = options?.codexHome ? resolve(options.codexHome) : null;
+    if (this.codexHome) {
+      assertOutsideOperatorCodexHome(this.codexHome, 'use Codex home for build-control automation prompts');
+    }
     this.unsubscribeProviders = this.providers.onEvent((event) => {
       void this.handleProviderEvent(event);
     });
-    this.recoveryInterval = setInterval(() => {
-      void this.sweepControllerRecovery();
-    }, HANDOFF_DRIFT_RECOVERY_INTERVAL_MS);
-    this.recoveryInterval.unref?.();
+    this.recoveryInterval = BUILD_CONTROL_ORCHESTRATION_ENABLED
+      ? setInterval(() => {
+          void this.sweepControllerRecovery();
+        }, HANDOFF_DRIFT_RECOVERY_INTERVAL_MS)
+      : null;
+    this.recoveryInterval?.unref?.();
   }
 
   dispose() {
-    clearInterval(this.recoveryInterval);
+    if (this.recoveryInterval) {
+      clearInterval(this.recoveryInterval);
+    }
     this.unsubscribeProviders();
     this.emitter.removeAllListeners();
   }
@@ -975,23 +971,27 @@ export class VicodeBuildControlService {
       };
     }
 
-    const recentEvents = this.db
-      .listVicodeBuildEvents({ projectId: context.value.projectId, limit: 40 })
-      .map(toControllerEvent);
-    const laneStates = new Map(
-      this.db
-        .listVicodeBuildLaneStates(context.value.projectId)
-        .map((state) => [laneKey(state.teamId as VicodeBuildTeamId, state.laneId as VicodeBuildLaneId), state])
+    const recentEvents = listProjectedControllerEvents(this.db, {
+      projectId: context.value.projectId,
+      limit: 40
+    }).filter((event) =>
+      BUILD_CONTROL_ORCHESTRATION_ENABLED
+        || (event.kind !== 'auto_handoff'
+          && event.kind !== 'auto_handoff_skipped'
+          && event.kind !== 'queue_stalled')
     );
-    const teams = context.value.teams
-      .map((team) =>
-        this.buildTeamSnapshot(context.value.projectId, context.value.projectRoot, team, laneStates, recentEvents)
+    const laneStates = createLaneStateMap(this.db, context.value.projectId);
+    const teams = sortTeamSnapshotsByActivity(
+      context.value.teams.map((team) =>
+        this.buildTeamSnapshot(
+          context.value.projectId,
+          context.value.projectRoot,
+          team,
+          laneStates,
+          recentEvents
+        )
       )
-      .sort((left, right) => {
-        const rightTime = right.lastActivityAt ? new Date(right.lastActivityAt).getTime() : 0;
-        const leftTime = left.lastActivityAt ? new Date(left.lastActivityAt).getTime() : 0;
-        return rightTime - leftTime;
-      });
+    );
 
     return {
       available: true,
@@ -1001,7 +1001,9 @@ export class VicodeBuildControlService {
       configPath: context.value.configPath,
       teams,
       recentEvents: recentEvents.slice(0, 12),
-      note: 'Vicode owns lane orchestration here. Prompts are repo-local and downstream handoffs happen through native Vicode run completion.'
+      note: BUILD_CONTROL_ORCHESTRATION_ENABLED
+        ? 'Vicode owns lane orchestration here. Prompts are repo-local and downstream handoffs happen through native Vicode run completion.'
+        : 'Visible lane threads and heartbeat remain active here. Automatic handoffs and queue-driven orchestration are currently parked.'
     };
   }
 
@@ -1152,14 +1154,11 @@ export class VicodeBuildControlService {
 
   clearInactivePlans(projectId: string): VicodeBuildSnapshot {
     const context = this.requireContext(projectId);
-    const recentEvents = this.db
-      .listVicodeBuildEvents({ projectId: context.projectId, limit: 40 })
-      .map(toControllerEvent);
-    const laneStates = new Map(
-      this.db
-        .listVicodeBuildLaneStates(context.projectId)
-        .map((state) => [laneKey(state.teamId as VicodeBuildTeamId, state.laneId as VicodeBuildLaneId), state])
-    );
+    const recentEvents = listProjectedControllerEvents(this.db, {
+      projectId: context.projectId,
+      limit: 40
+    });
+    const laneStates = createLaneStateMap(this.db, context.projectId);
     const removableIds = new Set(
       context.teams
         .map((team) => this.buildTeamSnapshot(context.projectId, context.projectRoot, team, laneStates, recentEvents))
@@ -1636,66 +1635,24 @@ export class VicodeBuildControlService {
     }
 
     const lanes = (Object.keys(team.lanes) as VicodeBuildLaneId[]).map((laneId) => laneContexts.get(laneId)!.snapshot);
-    const snapshotTickets = ticketQueue.tickets.map((ticket) => {
-      const blockedByTicketIds = unresolvedDependenciesForTicket(ticket, ticketQueue.tickets);
-      return {
-        ...ticket,
-        blockedByTicketIds,
-        readyToClaim: ticket.status === 'todo' && blockedByTicketIds.length === 0,
-        active: ticket.status === 'in_progress',
-        ownerThreadId: laneContexts.get(ticket.ownerLane)?.snapshot.threadId ?? null
-      };
-    });
-    const statuses = lanes.map((lane) => lane.status);
-    const latestLaneActivity = lanes
-      .flatMap((lane) => [lane.lastRunAt, lane.lastWakeAt, lane.lastHandoffAt].filter((value): value is string => Boolean(value)))
-      .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] ?? null;
-    const lastActivityAt = [latestLaneActivity, heartbeat.updatedAt, ticketQueue.updatedAt]
-      .filter((value): value is string => Boolean(value))
-      .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] ?? null;
+    const snapshotTickets = projectSnapshotTickets(ticketQueue.tickets, lanes);
+    const lastActivityAt = deriveTeamLastActivity(
+      lanes,
+      heartbeat.updatedAt,
+      ticketQueue.updatedAt
+    );
     const activeTicket = snapshotTickets.find((ticket) => ticket.active) ?? null;
     const openTicketCount = snapshotTickets.filter((ticket) => ticket.status === 'todo' || ticket.status === 'in_progress').length;
     const blockedTicketCount = snapshotTickets.filter((ticket) => ticket.status === 'blocked').length;
-    const dependencyHeldQueue = !activeTicket && hasDependencyBlockedOpenTickets(snapshotTickets);
-    const hasLaneAttention = lanes.some((lane) => Boolean(lane.blockedReason) && (lane.status === 'running' || lane.status === 'failed' || lane.status === 'cancelled'));
-    const hasLoopHold = lanes.some((lane) =>
-      lane.recentEvents.some(
-        (event) =>
-          event.kind === 'auto_handoff_skipped'
-          && /repeated .* handoff|queue still has not advanced/iu.test(`${event.summary} ${event.detail ?? ''}`)
-      )
-    );
-    const overlapHoldEvent = recentEvents.find(
-      (event) =>
-        event.teamId === team.id
-        && event.kind === 'auto_handoff_skipped'
-        && /overlap|already-active|avoid duplicate|coordination hold/iu.test(`${event.summary ?? ''} ${event.detail ?? ''}`)
-    );
-    const isWaitingOnExistingSlice =
-      heartbeat.status === 'paused'
-      && openTicketCount > 0
-      && Boolean(overlapHoldEvent);
-    const hasTerminalBlockedQueue = openTicketCount === 0 && blockedTicketCount > 0;
-    const teamStatus =
-      statuses.every((status) => status === 'paused')
-        ? 'paused'
-        : isWaitingOnExistingSlice
-          ? 'waiting'
-        : dependencyHeldQueue
-          ? 'waiting'
-        : hasLoopHold
-          ? 'attention'
-        : hasTerminalBlockedQueue
-          ? 'attention'
-        : statuses.some((status) => status === 'running' || status === 'waiting_for_review')
-          ? hasLaneAttention
-            ? 'attention'
-            : 'active'
-          : statuses.some((status) => status === 'failed' || status === 'skipped' || status === 'cancelled')
-            ? 'attention'
-            : isHeartbeatTerminalStatus(heartbeat.status)
-              ? 'idle'
-              : 'idle';
+    const teamStatus = deriveTeamStatus({
+      lanes,
+      heartbeatStatus: heartbeat.status,
+      openTicketCount,
+      blockedTicketCount,
+      recentEvents,
+      teamId: team.id,
+      snapshotTickets
+    });
 
       return {
         teamId: team.id,
@@ -2061,14 +2018,11 @@ export class VicodeBuildControlService {
       if (!context.ok) {
         continue;
       }
-      const laneStates = new Map(
-        this.db
-          .listVicodeBuildLaneStates(project.id)
-          .map((state) => [laneKey(state.teamId as VicodeBuildTeamId, state.laneId as VicodeBuildLaneId), state])
-      );
-      const recentEvents = this.db
-        .listVicodeBuildEvents({ projectId: project.id, limit: 60 })
-        .map((controllerEvent) => toControllerEvent(controllerEvent));
+      const laneStates = createLaneStateMap(this.db, project.id);
+      const recentEvents = listProjectedControllerEvents(this.db, {
+        projectId: project.id,
+        limit: 60
+      });
       for (const team of context.value.teams) {
         const partialStall = this.findRecoverablePartialTicketStall(
           context.value.projectRoot,
@@ -2156,6 +2110,9 @@ export class VicodeBuildControlService {
   }
 
   private async sweepControllerRecovery() {
+    if (!BUILD_CONTROL_ORCHESTRATION_ENABLED) {
+      return;
+    }
     await this.sweepRecoverableHandoffs();
     await this.sweepStalledPlannerPasses();
     await this.sweepRecoverablePartialTicketStalls();
@@ -2713,6 +2670,12 @@ export class VicodeBuildControlService {
         };
     }
 
+    if (!this.codexHome) {
+      throw new Error(
+        `Lane prompt definition not found for ${lane.automationId}. Vicode no longer reads lane prompts from the operator Codex app home; set a repo-local promptPath or pass an isolated Codex home.`
+      );
+    }
+
     const automationPath = join(this.codexHome, 'automations', lane.automationId, 'automation.toml');
     if (!existsSync(automationPath)) {
       throw new Error(`Lane prompt definition not found: ${lane.automationId}`);
@@ -3209,7 +3172,11 @@ export class VicodeBuildControlService {
       );
     }
 
-    const allowedRoots = [resolve(team.worktreeRoot), resolve(projectRoot), resolve(this.codexHome, 'automations')];
+    const allowedRoots = [
+      resolve(team.worktreeRoot),
+      resolve(projectRoot),
+      ...(this.codexHome ? [resolve(this.codexHome, 'automations')] : [])
+    ];
     const mismatchedPaths = requiredPaths.filter(
       (value) => !allowedRoots.some((rootPath) => resolve(value).startsWith(rootPath))
     );
@@ -3274,14 +3241,11 @@ export class VicodeBuildControlService {
     if (!context.ok) {
       return null;
     }
-    const laneStates = new Map(
-      this.db
-        .listVicodeBuildLaneStates(projectId)
-        .map((state) => [laneKey(state.teamId as VicodeBuildTeamId, state.laneId as VicodeBuildLaneId), state])
-    );
-    const recentEvents = this.db
-      .listVicodeBuildEvents({ projectId, limit: 40 })
-      .map(toControllerEvent);
+    const laneStates = createLaneStateMap(this.db, projectId);
+    const recentEvents = listProjectedControllerEvents(this.db, {
+      projectId,
+      limit: 40
+    });
     const candidateRoot = resolve(projectRoot, worktreePath);
 
     for (const team of context.value.teams) {
@@ -3425,6 +3389,10 @@ export class VicodeBuildControlService {
       runId: event.runId
     });
 
+    if (!BUILD_CONTROL_ORCHESTRATION_ENABLED) {
+      return;
+    }
+
     let nextLaneId: VicodeBuildLaneId | null = null;
     let heartbeat: HeartbeatState | null = null;
     let heartbeatStatus: string | null = null;
@@ -3437,9 +3405,11 @@ export class VicodeBuildControlService {
       heartbeat = team ? this.readHeartbeatState(context.projectRoot, team) : null;
       heartbeatStatus = heartbeat?.status?.trim().toLowerCase() ?? null;
       ticketQueue = team ? this.readTicketQueueState(context.projectRoot, team) : null;
-      recentEvents = this.db
-        .listVicodeBuildEvents({ projectId: laneState.projectId, teamId, limit: 40 })
-        .map((controllerEvent) => toControllerEvent(controllerEvent));
+      recentEvents = listProjectedControllerEvents(this.db, {
+        projectId: laneState.projectId,
+        teamId,
+        limit: 40
+      });
       const queueMarker = this.readLatestLaneQueueRunMarker(thread, teamId, laneId);
       if (ticketQueue && queueMarker.signature) {
         queueChanged = queueMarker.signature !== ticketQueueSignature(ticketQueue.tickets);

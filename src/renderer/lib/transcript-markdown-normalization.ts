@@ -1,11 +1,72 @@
+const STANDALONE_LIST_SEPARATOR_LINE_PATTERN = /^\s*(?:[-*+•●▪◦])\s*$/u;
+
+function stripStandaloneListSeparatorLines(source: string) {
+  return source
+    .split(/(```[\s\S]*?```)/gu)
+    .map((segment) => {
+      if (segment.startsWith('```')) {
+        return segment;
+      }
+
+      return segment
+        .split('\n')
+        .filter((line) => !STANDALONE_LIST_SEPARATOR_LINE_PATTERN.test(line))
+        .join('\n');
+    })
+    .join('')
+    .replace(/\n{3,}/gu, '\n\n');
+}
+
+function isTopLevelUnorderedListLine(line: string) {
+  return /^(?:[-*+•●▪◦])\s+\S/u.test(line);
+}
+
+function tightenLooseMarkdownLists(source: string) {
+  return source
+    .split(/(```[\s\S]*?```)/gu)
+    .map((segment) => {
+      if (segment.startsWith('```')) {
+        return segment;
+      }
+
+      const lines = segment.split('\n');
+      const tightened: string[] = [];
+
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index] ?? '';
+        if (line.trim()) {
+          tightened.push(line);
+          continue;
+        }
+
+        const previousNonEmpty = [...tightened].reverse().find((value) => value.trim());
+        const nextNonEmpty = lines.slice(index + 1).find((value) => value.trim());
+        if (
+          previousNonEmpty
+          && nextNonEmpty
+          && isTopLevelUnorderedListLine(nextNonEmpty)
+          && (isTopLevelUnorderedListLine(previousNonEmpty) || /[:!?]$/u.test(previousNonEmpty.trim()))
+        ) {
+          continue;
+        }
+
+        tightened.push(line);
+      }
+
+      return tightened.join('\n');
+    })
+    .join('')
+    .replace(/\n{3,}/gu, '\n\n');
+}
+
 function normalizeListLikeMarkdown(source: string) {
   let text = source;
   const listItemLead = String.raw`(?:\*\*|[A-Z0-9]|\p{Extended_Pictographic})`;
 
   text = text.replace(/^(#{2,6}\s[^\n]+?)-\s*(?=[A-Z0-9])/gmu, '$1\n- ');
-  text = text.replace(new RegExp(`([:!?])\\s*[-•●▪◦]\\s+(?=${listItemLead})`, 'gu'), '$1\n- ');
-  text = text.replace(new RegExp(`([.])\\s*[-•●▪◦]\\s+(?=${listItemLead})`, 'gu'), '$1\n\n- ');
-  text = text.replace(new RegExp(`\\s+[-•●▪◦]\\s+(?=${listItemLead})`, 'gu'), '\n- ');
+  text = text.replace(new RegExp(`([:!?])[ \\t]*[-•●▪◦][ \\t]+(?=${listItemLead})`, 'gu'), '$1\n- ');
+  text = text.replace(new RegExp(`([.])[ \\t]*[-•●▪◦][ \\t]+(?=${listItemLead})`, 'gu'), '$1\n- ');
+  text = text.replace(new RegExp(`(?<=\\S)[ \\t]+[-•●▪◦][ \\t]+(?=${listItemLead})`, 'gu'), '\n- ');
   text = normalizeInlineBoldLabelBullets(text);
   text = text.replace(/^- ([^\nA-Za-z0-9]{1,6})\s*\n- (\*\*[^*\n]{2,60}:\*\*)/gmu, '- $1 $2');
   text = text.replace(/^- ([^\nA-Za-z0-9]{1,6})\s{2,}(\*\*[^*\n]{2,60}:\*\*)/gmu, '- $1 $2');
@@ -49,8 +110,8 @@ function shouldRecoverDenseMarkdown(source: string) {
   const listItemLead = String.raw`(?:\*\*|[A-Z0-9]|\p{Extended_Pictographic})`;
   return (
     /(?:^|[^#\n])#{2,6}\s/u.test(source)
-    || new RegExp(`(?:[:.!?]|[)\\]}])\\s*[-•●▪◦]\\s+(?=${listItemLead})`, 'u').test(source)
-    || new RegExp(`\\s+[-•●▪◦]\\s+(?=${listItemLead})`, 'u').test(source)
+    || new RegExp(`(?:[:.!?]|[)\\]}])[ \\t]*[-•●▪◦][ \\t]+(?=${listItemLead})`, 'u').test(source)
+    || new RegExp(`(?<=\\S)[ \\t]+[-•●▪◦][ \\t]+(?=${listItemLead})`, 'u').test(source)
   );
 }
 
@@ -277,6 +338,8 @@ export function normalizeTranscriptMarkdownSource(source: string) {
 
   text = normalizeCommandSnippetMarkdown(text);
   text = annotateUnlabeledFencedCodeBlocks(text);
+  text = stripStandaloneListSeparatorLines(text);
+  text = tightenLooseMarkdownLists(text);
 
-  return text;
+  return text.trim();
 }
