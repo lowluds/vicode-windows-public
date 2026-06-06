@@ -1,0 +1,87 @@
+name: Beta feedback
+description: Share first-run feedback from the Vicode Windows public beta.
+title: "[Beta feedback]: "
+labels:
+  - beta-feedback
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing Vicode. This form is for broad beta feedback, including what worked, what was confusing, and which of the first-run checks you completed.
+  - type: input
+    id: version
+    attributes:
+      label: Vicode version
+      description: Example: 0.2.8
+      placeholder: 0.2.8
+    validations:
+      required: true
+  - type: input
+    id: windows_version
+    attributes:
+      label: Windows version
+      description: Example: Windows 11 23H2
+    validations:
+      required: true
+  - type: dropdown
+    id: install_path
+    attributes:
+      label: Install path
+      options:
+        - Windows installer
+        - win-unpacked build
+        - Local dev build
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider tested
+      options:
+        - Local Ollama
+        - Custom API / OpenAI-compatible
+        - Both
+        - No provider connected
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks completed
+      options:
+        - label: Fresh install completed.
+        - label: First launch reached the normal app shell.
+        - label: Opened a normal local project folder.
+        - label: Connected local Ollama or Custom API.
+        - label: Asked Vicode to explain a file.
+        - label: Asked Vicode to make a small edit.
+        - label: Asked Vicode to fix a tiny bug.
+        - label: Approval and warning copy made sense.
+        - label: Relaunch restored project, thread, provider/model choice, or completed evidence.
+        - label: Installed over a previous beta.
+        - label: Uninstalled cleanly.
+        - label: Tester docs and download link were clear.
+  - type: textarea
+    id: what_worked
+    attributes:
+      label: What worked well?
+      description: Note the parts that felt clear or reliable.
+    validations:
+      required: true
+  - type: textarea
+    id: what_broke
+    attributes:
+      label: What broke or felt confusing?
+      description: Include exact steps, errors, screenshots, or logs when possible.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect instead?
+      description: This helps separate bugs from unclear wording or missing workflow support.
+  - type: textarea
+    id: notes
+    attributes:
+      label: Extra context
+      description: Project type, model name, hardware constraints, or anything else that shaped the test.
