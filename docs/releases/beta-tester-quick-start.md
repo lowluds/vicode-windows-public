@@ -31,7 +31,7 @@ Recommended first provider:
 
 Supported API-key lanes:
 
-- `Custom API` for OpenAI-compatible API keys
+- `Custom API` for OpenAI-compatible `/v1` base URLs, API keys, and models
 
 Not part of the current beta scope:
 
@@ -50,10 +50,12 @@ Provider setup instructions:
 
 For this beta line, Ollama runs through your local Ollama API. Ollama API keys
 are retired. OpenAI keys should be added through `Custom API` as an
-OpenAI-compatible provider, not through a first-class OpenAI CLI provider. For
-OpenAI testing, use `https://api.openai.com/v1` as the compatible base URL and
-the selected testing model, currently `gpt-5.4-nano` unless the test owner
-provides a different model.
+OpenAI-compatible provider, not through a first-class OpenAI CLI provider.
+OpenAI is one compatible option; other API-key or cloud-model providers can be
+tested through `Custom API` when they expose an OpenAI-compatible `/v1` base URL
+and model. For OpenAI testing, use `https://api.openai.com/v1` as the compatible
+base URL and the selected testing model, currently `gpt-5.4-nano` unless the
+test owner provides a different model.
 
 ## 4. Run A First Test
 

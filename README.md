@@ -6,8 +6,10 @@ It is intentionally smaller than Codex, Cursor, Claude Code, or a full IDE. The 
 
 Current beta candidate: `0.2.8`
 
-`0.2.8` remains unpublished until the release owner chooses public beta or a
-private/invite-only beta link.
+Release-owner decision: ready for limited public beta.
+
+`0.2.8` remains draft/unpublished until the release owner explicitly publishes
+or shares the installer link for testers.
 
 Public source mirror: [lowluds/vicode-windows-public](https://github.com/lowluds/vicode-windows-public)
 
@@ -52,7 +54,8 @@ Good beta reports include:
 - Vicode version
 - Windows version
 - install path, such as installer, unpacked build, or local dev build
-- provider used, such as local Ollama or Custom API with an OpenAI-compatible key
+- provider used, such as local Ollama or Custom API with an
+  OpenAI-compatible `/v1` key, base URL, and model
 - which first-run checks were completed
 - exact steps to reproduce
 - expected behavior
@@ -176,9 +179,9 @@ Current provider stance:
 - normalized backend lanes: Ollama responses, Ollama chat, OpenAI-compatible Custom API chat
 - retired provider CLI lanes: OpenAI/Codex, Gemini, Qwen, and Kimi keep historical IDs only for storage/schema compatibility and fail with a retired-provider message
 
-Ollama runs through the local Ollama runtime/API for this beta route. Ollama API keys and hosted/cloud Ollama setup are retired. Local model writing is model-dependent, so broad local write-capable execution should stay caveated in public claims.
+Ollama runs through the local Ollama runtime/API for this beta route. Ollama API keys and hosted/cloud Ollama setup are retired unless the service is used through the generic OpenAI-compatible Custom API path. Local model writing is model-dependent, so broad local write-capable execution should stay caveated in public claims.
 
-OpenAI usage should be configured through `Custom API` with an OpenAI-compatible `/v1` base URL and API key. Vicode should not write, delete, sync, install, uninstall, or clean files inside another provider application's private app-state folders.
+OpenAI usage should be configured through `Custom API` with an OpenAI-compatible `/v1` base URL and API key. Other API-key or cloud-model providers can be tested through the same Custom API path when they expose an OpenAI-compatible `/v1` endpoint and model. Vicode should not write, delete, sync, install, uninstall, or clean files inside another provider application's private app-state folders.
 
 ## Release And Source Distribution
 
