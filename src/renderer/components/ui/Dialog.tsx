@@ -28,17 +28,17 @@ export function ModalDialog({ open, onOpenChange, title, description, children, 
   return (
     <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
       <RadixDialog.Portal>
-        <RadixDialog.Overlay className="ui-dialog-overlay fixed inset-0 z-50 backdrop-blur-sm" />
+        <RadixDialog.Overlay className="ui-dialog-overlay fixed inset-0 z-50" />
         <div className="ui-dialog-positioner">
           <RadixDialog.Content
             className={cx(
-              'ui-dialog-content relative z-50 flex max-h-[calc(100dvh-32px)] w-[min(640px,calc(100vw-32px))] flex-col gap-5 overflow-x-hidden overflow-y-auto rounded-[calc(var(--ui-radius-xl)+4px)] border border-[color:var(--ui-border)] bg-[color:var(--ui-menu-bg)] p-6 text-[color:var(--ui-text)] shadow-[var(--ui-shadow-menu)] backdrop-blur-xl outline-none',
+              'ui-dialog-content relative z-50 flex max-h-[calc(100dvh-32px)] w-[min(640px,calc(100vw-32px))] flex-col gap-4 overflow-x-hidden overflow-y-auto rounded-[var(--ui-radius-lg)] border border-[color:var(--ui-border)] bg-[color:var(--ui-menu-bg)] p-5 text-[color:var(--ui-text)] shadow-[var(--ui-shadow-apple)] outline-none',
               className
             )}
           >
             {title || description ? (
               <div className="ui-dialog-header flex flex-col gap-2">
-                {title ? <RadixDialog.Title className="ui-dialog-title text-[24px] font-semibold tracking-[-0.03em] text-[color:var(--ui-text-title)]">{title}</RadixDialog.Title> : null}
+                {title ? <RadixDialog.Title className="ui-dialog-title text-[18px] font-semibold text-[color:var(--ui-text-title)]">{title}</RadixDialog.Title> : null}
                 {description ? <RadixDialog.Description className="ui-dialog-description text-[14px] text-[color:var(--ui-text-muted)]">{description}</RadixDialog.Description> : null}
               </div>
             ) : null}
@@ -65,11 +65,11 @@ export function ConfirmDialog({
     <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
       {children ? <RadixDialog.Trigger asChild>{children}</RadixDialog.Trigger> : null}
       <RadixDialog.Portal>
-        <RadixDialog.Overlay className="ui-dialog-overlay fixed inset-0 z-50 backdrop-blur-sm" />
+        <RadixDialog.Overlay className="ui-dialog-overlay fixed inset-0 z-50" />
         <div className="ui-dialog-positioner">
-          <RadixDialog.Content className="ui-dialog-content relative z-50 flex max-h-[calc(100dvh-32px)] w-[min(520px,calc(100vw-32px))] flex-col gap-5 overflow-x-hidden overflow-y-auto rounded-[calc(var(--ui-radius-xl)+4px)] border border-[color:var(--ui-border)] bg-[color:var(--ui-menu-bg)] p-6 text-[color:var(--ui-text)] shadow-[var(--ui-shadow-menu)] backdrop-blur-xl outline-none">
+          <RadixDialog.Content className="ui-dialog-content relative z-50 flex max-h-[calc(100dvh-32px)] w-[min(520px,calc(100vw-32px))] flex-col gap-4 overflow-x-hidden overflow-y-auto rounded-[var(--ui-radius-lg)] border border-[color:var(--ui-border)] bg-[color:var(--ui-menu-bg)] p-5 text-[color:var(--ui-text)] shadow-[var(--ui-shadow-apple)] outline-none">
             <div className="ui-dialog-header flex flex-col gap-2">
-              <RadixDialog.Title className="ui-dialog-title text-[22px] font-semibold tracking-[-0.03em] text-[color:var(--ui-text-title)]">{title}</RadixDialog.Title>
+              <RadixDialog.Title className="ui-dialog-title text-[18px] font-semibold text-[color:var(--ui-text-title)]">{title}</RadixDialog.Title>
               <RadixDialog.Description className="ui-dialog-description text-[14px] text-[color:var(--ui-text-muted)]">{description}</RadixDialog.Description>
             </div>
             <div className="ui-dialog-actions flex items-center justify-end gap-3">

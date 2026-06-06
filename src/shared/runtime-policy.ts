@@ -10,13 +10,13 @@ export const PROJECT_RUNTIME_COMMAND_POLICY_OPTIONS = [
     value: 'approval_required' as const,
     label: 'Require approval',
     description:
-      'Allow local shell commands only after explicit per-command approval.'
+      'Allow host-local shell commands only after explicit per-command approval. This is not sandboxed command execution.'
   },
   {
     value: 'auto_approve' as const,
     label: 'Auto-approve commands',
     description:
-      'Allow local shell commands to start immediately in this workspace without a per-command approval prompt.'
+      'Allow host-local shell commands to start immediately in this workspace without a per-command approval prompt. This is not sandboxed command execution.'
   },
   {
     value: 'disabled' as const,
@@ -411,9 +411,9 @@ export function deriveRuntimePolicy(
       commandAccess: 'blocked',
       networkAccess: 'web_tools',
       summary:
-        'Workspace file tools and app-owned web research stay available, but this workspace disables local shell commands even under Full access.',
+        'Workspace file tools and app-owned web research stay available, but this workspace disables host-local shell commands even under Full access.',
       commandSummary:
-        'Update the workspace runtime policy before the runtime can request host-local shell commands here.',
+        'Command policy is disabled. Update the workspace runtime policy before the runtime can request host-local shell commands here.',
       networkSummary:
         runtimeNetworkPolicy === 'enabled'
           ? 'App-owned web research tools can still reach the public web in this workspace, and approved shell commands can also use host network access here once shell commands are re-enabled.'
@@ -437,17 +437,17 @@ export function deriveRuntimePolicy(
       commandAccess: 'auto_approve',
       networkAccess: runtimeNetworkPolicy === 'enabled' ? 'host_local' : 'web_tools',
       summary:
-        'Workspace file tools stay available, and local shell commands can start immediately under Full access.',
+        'Workspace file tools stay available, and host-local shell commands can start immediately under Full access.',
       commandSummary:
-        'Commands start in the workspace, run on the local host, and use isolated temp home/appdata directories by default, but they are not sandboxed to it.',
+        'Commands start in the workspace, run on the local host, and use isolated temp home/appdata directories by default, but they are not sandboxed or contained to that temp profile.',
       networkSummary:
         runtimeNetworkPolicy === 'enabled'
           ? 'Commands can use host network access in this workspace. Vicode does not isolate that network activity yet.'
           : 'App-owned web research tools can still reach the public web in this workspace, but clearly network-oriented shell commands stay blocked here. Vicode still does not sandbox arbitrary binaries or host network activity yet.',
       modelInstruction:
         runtimeNetworkPolicy === 'enabled'
-          ? 'run_command can start immediately in this workspace without asking for approval. Commands start in the workspace, but they run on the local host and are not sandboxed to the workspace or its network.'
-          : 'run_command can start immediately in this workspace without asking for approval. Commands start in the workspace, but this workspace blocks clearly network-oriented shell commands. Use app-owned web research tools instead when the user needs online or current information.',
+          ? 'run_command can start immediately in this workspace without asking for approval. Commands are host-local: they start in the workspace, run on the local host, and are not sandboxed to the workspace, temp profile, or network.'
+          : 'run_command can start immediately in this workspace without asking for approval. Commands are host-local: they start in the workspace, run on the local host, and are not sandboxed to the workspace or temp profile. This workspace blocks clearly network-oriented shell commands, so use app-owned web research tools when the user needs online or current information.',
       commandDeniedMessage: null
     };
   }
@@ -462,17 +462,17 @@ export function deriveRuntimePolicy(
       commandAccess: 'approval_required',
       networkAccess: runtimeNetworkPolicy === 'enabled' ? 'host_local' : 'web_tools',
       summary:
-        'Workspace file tools stay available, and local shell commands can run after per-command approval.',
+        'Workspace file tools stay available, and host-local shell commands can run after approval under Full access.',
       commandSummary:
-        'Approved commands start in the workspace, run on the local host, and use isolated temp home/appdata directories by default, but they are not sandboxed to it.',
+        'Approved commands start in the workspace, run on the local host, and use isolated temp home/appdata directories by default, but they are not sandboxed or contained to that temp profile.',
       networkSummary:
         runtimeNetworkPolicy === 'enabled'
           ? 'Approved shell commands can use host network access. Vicode does not isolate that network activity yet.'
           : 'App-owned web research tools can still reach the public web in this workspace, but clearly network-oriented shell commands stay blocked here. Vicode still does not sandbox arbitrary binaries or host network activity yet.',
       modelInstruction:
         runtimeNetworkPolicy === 'enabled'
-          ? 'run_command requires user approval every time. Approved commands start in the workspace, but they run on the local host and are not sandboxed to the workspace or its network.'
-          : 'run_command requires user approval every time. Approved commands start in the workspace, but this workspace blocks clearly network-oriented shell commands. Use app-owned web research tools instead when the user needs online or current information.',
+          ? 'run_command requires user approval every time. Approved commands start in the workspace and are host-local: they run on the local host and are not sandboxed to the workspace, temp profile, or network.'
+          : 'run_command requires user approval every time. Approved commands start in the workspace and are host-local: they run on the local host and are not sandboxed to the workspace or temp profile. This workspace blocks clearly network-oriented shell commands, so use app-owned web research tools when the user needs online or current information.',
       commandDeniedMessage: null
     };
   }
@@ -486,9 +486,9 @@ export function deriveRuntimePolicy(
     commandAccess: 'blocked',
     networkAccess: 'web_tools',
     summary:
-      'The runtime stays on workspace file tools plus app-owned web research. Local shell commands are blocked under Default permissions.',
+      'Default uses workspace file tools plus app-owned web research. Default does not enable host-local shell commands.',
     commandSummary:
-      'Use list_directory, search_text, read_file, mkdir, and apply_patch for workspace work.',
+      'No local shell commands are available under Default. Use list_directory, search_text, read_file, mkdir, and apply_patch for workspace work.',
     networkSummary:
       runtimeNetworkPolicy === 'enabled'
         ? 'App-owned web research tools can reach the public web in this workspace, but local shell commands remain blocked under Default permissions.'
@@ -498,7 +498,7 @@ export function deriveRuntimePolicy(
         ? 'Shell commands are unavailable in this run. Stay within workspace file tools for workspace edits, and use app-owned web research tools when the user asks for online research or when current or external facts are needed.'
         : 'Shell commands are unavailable in this run. Stay within workspace file tools for workspace edits, and use app-owned web research tools when the user asks for online research or when current or external facts are needed.',
     commandDeniedMessage:
-      'run_command requires Full access. Approved commands start in the workspace, run on the local host, and use isolated temp home/appdata directories by default, but they are not sandboxed to it.'
+      'run_command requires Full access. Full access enables host-local commands according to the workspace runtime policy; commands are not contained sandbox execution.'
   };
 }
 

@@ -5,7 +5,7 @@ import {
   providerDisplayName,
   providerSettingsConnectLabel,
   providerSettingsInstallActionLabel,
-  providerUsesHostedApi
+  isRetiredProviderId
 } from '../../../shared/providers';
 import { MoreIcon } from '../icons';
 import {
@@ -29,19 +29,15 @@ interface ProviderAuthActionsProps {
   stopOllamaRuntime: () => Promise<void>;
 }
 
-function isOllamaCloudProvider(provider: ProviderDescriptor) {
-  return providerUsesHostedApi(provider);
-}
-
 function shouldShowInstallAction(provider: ProviderDescriptor) {
-  if (provider.id === 'ollama' && isOllamaCloudProvider(provider)) {
+  if (isRetiredProviderId(provider.id)) {
     return false;
   }
   return !provider.installed;
 }
 
 function shouldShowPrimaryProviderAction(provider: ProviderDescriptor) {
-  if (provider.id === 'ollama' && isOllamaCloudProvider(provider)) {
+  if (isRetiredProviderId(provider.id)) {
     return false;
   }
   if (!provider.installed) {
@@ -57,7 +53,7 @@ function shouldShowPrimaryProviderAction(provider: ProviderDescriptor) {
 }
 
 function shouldAdoptDetectedProviderAuth(provider: ProviderDescriptor) {
-  if (provider.id === 'ollama') {
+  if (provider.id === 'ollama' || isRetiredProviderId(provider.id)) {
     return false;
   }
 
@@ -69,7 +65,7 @@ function shouldAdoptDetectedProviderAuth(provider: ProviderDescriptor) {
 }
 
 function shouldOfferCliLaunch(provider: ProviderDescriptor) {
-  if (provider.id === 'ollama' || !provider.installed || provider.authMode !== 'cli') {
+  if (provider.id === 'ollama' || isRetiredProviderId(provider.id) || !provider.installed || provider.authMode !== 'cli') {
     return false;
   }
 
@@ -77,16 +73,13 @@ function shouldOfferCliLaunch(provider: ProviderDescriptor) {
 }
 
 function canDisconnectProvider(provider: ProviderDescriptor) {
-  if (provider.id === 'ollama') {
-    return isOllamaCloudProvider(provider) && provider.authState === 'connected';
+  if (provider.id === 'ollama' || isRetiredProviderId(provider.id)) {
+    return false;
   }
   return provider.installed && provider.authState === 'connected';
 }
 
 function providerManualCliLabel(providerId: ProviderId) {
-  if (providerId === 'gemini') {
-    return 'Retry Gemini sign-in';
-  }
   return `Open ${providerCliLabel(providerId)}`;
 }
 

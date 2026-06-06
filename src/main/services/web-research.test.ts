@@ -77,6 +77,45 @@ describe('NativeWebResearchService', () => {
     expect(result).toContain('2. Engineering Blog');
   });
 
+  it('can use a custom search base URL for deterministic native web research tests', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toContain('http://127.0.0.1:4545/search/?q=roofing+hero');
+      return new Response(
+        `
+        <html>
+          <body>
+            <table>
+              <tr>
+                <td><a href="/l/?uddg=https%3A%2F%2Fexample.com%2Froofing" class='result-link'>Roofing hero image</a></td>
+              </tr>
+              <tr>
+                <td class='result-snippet'>A roofing hero image result.</td>
+              </tr>
+            </table>
+          </body>
+        </html>
+        `,
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/html; charset=utf-8'
+          }
+        }
+      );
+    });
+    const service = new NativeWebResearchService({
+      fetch: fetchMock as typeof globalThis.fetch,
+      searchBaseUrl: 'http://127.0.0.1:4545/search/'
+    });
+
+    const result = await service.search('roofing hero', {
+      maxResults: 1
+    });
+
+    expect(result).toContain('1. Roofing hero image');
+    expect(result).toContain('URL: https://example.com/roofing');
+  });
+
   it('prefers official documentation sources for docs-style queries', async () => {
     const fetchMock = vi.fn(async () =>
       new Response(

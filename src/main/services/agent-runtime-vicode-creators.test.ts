@@ -30,7 +30,7 @@ describe('createAgentRuntimeVicodeCreatorBridge', () => {
     return dir;
   }
 
-  it('creates and imports a skill bundle through the app-owned state bridge', async () => {
+  it('creates and imports a skill bundle through the app-owned state bridge without provider export metadata', async () => {
     const statePath = createStateDir();
     const db = new DatabaseService(join(statePath, 'vicode.sqlite'));
     db.migrate();
@@ -82,7 +82,10 @@ describe('createAgentRuntimeVicodeCreatorBridge', () => {
     expect(result.importedId).toBe('file-backed-ci-triage');
     expect(existsSync(skillPath)).toBe(true);
     expect(readFileSync(skillPath, 'utf8')).toContain('CI Triage');
-    expect((await skills.listSkills()).some((skill) => skill.id === 'file-backed-ci-triage')).toBe(true);
+    const imported = (await skills.listSkills()).find((skill) => skill.id === 'file-backed-ci-triage');
+    expect(imported).toBeTruthy();
+    expect(imported?.metadata).not.toHaveProperty('syncTargets');
+    expect(readFileSync(join(statePath, 'skills', 'user', 'ci-triage', 'skill.json'), 'utf8')).not.toContain('syncTargets');
 
     await mcp.dispose();
     db.close();

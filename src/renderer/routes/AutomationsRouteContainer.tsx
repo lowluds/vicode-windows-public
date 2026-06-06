@@ -287,7 +287,7 @@ export function AutomationsRouteContainer({
                     <div className="pending-review-header">
                       <div className="pending-review-header-copy">
                         <h3>Pending review</h3>
-                        <p>Approve queued automation runs and any remaining manual review items.</p>
+                        <p>Approve queued automation runs and app-managed review items.</p>
                       </div>
                       <StatusPill tone="warning">{reviewItems.length} pending</StatusPill>
                     </div>
@@ -328,8 +328,8 @@ export function AutomationsRouteContainer({
                             <SurfaceCard className="review-card-draft">
                               <div className="review-card-draft-header">
                                 <div className="review-card-draft-copy">
-                                  <strong>Proposed contents</strong>
-                                  <span>{String(reviewItem.details.relativePath ?? 'workspace file')}</span>
+                                  <strong>Review draft</strong>
+                                  <span>App-managed memory</span>
                                 </div>
                                 <div className="review-card-draft-actions">
                                   {hasUnsavedDraftChanges ? <span className="review-card-draft-status">Edited locally</span> : null}
@@ -346,7 +346,7 @@ export function AutomationsRouteContainer({
                               </div>
                               <TextArea
                                 rows={8}
-                                className="workspace-bootstrap-editor review-card-editor"
+                                className="app-managed-memory-editor review-card-editor"
                                 value={draftContent}
                                 onChange={(event) =>
                                   setReviewDraftEdits((current) => ({
@@ -366,7 +366,7 @@ export function AutomationsRouteContainer({
                               leadingIcon={<PlayIcon />}
                               disabled={hasUnsavedDraftChanges}
                             >
-                              {presentation.isManualWrite ? 'Approve and write' : 'Approve and run'}
+                              {presentation.isManualWrite ? 'Approve' : 'Approve and run'}
                             </PrimaryButton>
                           </div>
                         </article>

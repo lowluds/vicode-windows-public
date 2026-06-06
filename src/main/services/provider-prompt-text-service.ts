@@ -6,8 +6,9 @@ import type {
 } from '../../shared/domain';
 import { normalizeDisplayText } from '../../shared/display-text';
 import {
+  decodeOllamaModelId,
   providerCapabilities,
-  providerDisplayName
+  resolveOllamaApiKeyForModel
 } from '../../shared/providers';
 import { ThreadProjectionService } from './thread-projection-service';
 
@@ -26,10 +27,6 @@ export interface ProviderPromptTextServiceHost {
     getProject(projectId: string): {
       name: string;
       folderPath: string | null;
-    };
-    getPersonalization(): {
-      globalInstructions: string;
-      providerInstructions: Partial<Record<ProviderId, string>>;
     };
     getProviderAccount(providerId: ProviderId): {
       encryptedApiKey?: string | null;
@@ -64,15 +61,20 @@ export class ProviderPromptTextService {
     const adapter = this.host.adapters[input.providerId];
     const account = this.host.db.getProviderAccount(input.providerId);
     const auth = await adapter.getAuthState(account);
-    const apiKey =
+    const providerApiKey =
       auth.authMode === 'api_key' && account?.encryptedApiKey
         ? this.host.decryptApiKey(account.encryptedApiKey)
         : null;
-    const modelId = await this.host.resolveUsableModelId(input.providerId, input.modelId);
+    const resolvedModelId = await this.host.resolveUsableModelId(input.providerId, input.modelId);
+    const modelId = input.providerId === 'ollama' ? decodeOllamaModelId(resolvedModelId) : resolvedModelId;
+    const apiKey =
+      input.providerId === 'ollama'
+        ? resolveOllamaApiKeyForModel(resolvedModelId, providerApiKey)
+        : providerApiKey;
     const runId = randomUUID();
     this.host.assertProviderRunPermission(input.providerId, 'default');
     const contextPrompt = input.projectId
-      ? this.buildPromptRefinementInput(input.projectId, input.providerId, trimmedPrompt)
+      ? this.buildPromptRefinementInput(input.projectId, trimmedPrompt)
       : trimmedPrompt;
 
     const refinedPrompt = await new Promise<string>((resolve, reject) => {
@@ -151,10 +153,15 @@ export class ProviderPromptTextService {
     const adapter = this.host.adapters[thread.providerId];
     const account = this.host.db.getProviderAccount(thread.providerId);
     const auth = await adapter.getAuthState(account);
-    const apiKey =
+    const providerApiKey =
       auth.authMode === 'api_key' && account?.encryptedApiKey
         ? this.host.decryptApiKey(account.encryptedApiKey)
         : null;
+    const modelId = thread.providerId === 'ollama' ? decodeOllamaModelId(thread.modelId) : thread.modelId;
+    const apiKey =
+      thread.providerId === 'ollama'
+        ? resolveOllamaApiKeyForModel(thread.modelId, providerApiKey)
+        : providerApiKey;
     const runId = randomUUID();
 
     const resolvedTitle = await new Promise<string | null>((resolve) => {
@@ -178,7 +185,7 @@ export class ProviderPromptTextService {
             threadId: thread.id,
             runId,
             prompt: this.buildThreadTitlePrompt(trimmedPrompt),
-            modelId: thread.modelId,
+            modelId,
             folderPath: null,
             trusted: false,
             apiKey,
@@ -223,18 +230,11 @@ export class ProviderPromptTextService {
     ].join('\n');
   }
 
-  private buildPromptRefinementInput(projectId: string, providerId: ProviderId, prompt: string) {
+  private buildPromptRefinementInput(projectId: string, prompt: string) {
     const project = this.host.db.getProject(projectId);
-    const personalization = this.host.db.getPersonalization();
     const sections = [
       `Project: ${project.name}`,
       project.folderPath ? `Active workspace folder: ${project.folderPath}` : null,
-      personalization.globalInstructions.trim()
-        ? `Global instructions:\n${personalization.globalInstructions.trim()}`
-        : null,
-      personalization.providerInstructions[providerId]?.trim()
-        ? `${providerDisplayName(providerId)} instructions:\n${personalization.providerInstructions[providerId]!.trim()}`
-        : null,
       `User draft:\n${prompt}`
     ].filter((value): value is string => Boolean(value));
 

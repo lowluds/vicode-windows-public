@@ -25,8 +25,14 @@ import {
   normalizeProviderInfoEvent,
   type NormalizedProviderInfoEvent
 } from './provider-run-event-normalizer';
+import { buildProviderCompatibilityDispatchTraceDetail } from './provider-compatibility-dispatch-policy';
 import { deriveStructuredPlannerPlan } from './planner-parser';
-import { providerCapabilities, providerDisplayName } from '../../shared/providers';
+import {
+  decodeOllamaModelId,
+  providerCapabilities,
+  providerDisplayName,
+  resolveOllamaApiKeyForModel
+} from '../../shared/providers';
 import type {
   ComposerMode,
   ComposerSubmitInput,
@@ -107,6 +113,12 @@ type PlannerSessionServiceOptions = {
     runId: string,
     normalizedInfo: NormalizedProviderInfoEvent
   ) => ReturnType<DatabaseService['addRunEvent']> | null;
+  recordRuntimeTraceMark: (
+    threadId: string,
+    runId: string,
+    stage: string,
+    payload?: Record<string, unknown> | null
+  ) => void;
   recordNativePlannerCloseout: (
     threadId: string,
     runId: string,
@@ -296,15 +308,20 @@ export class ProviderPlannerSessionService {
     const runId = randomUUID();
     const account = this.options.db.getProviderAccount(input.input.providerId);
     const auth = await adapter.getAuthState(account);
-    const apiKey =
+    const providerApiKey =
       auth.authMode === 'api_key' && account?.encryptedApiKey
         ? this.options.decryptApiKey(account.encryptedApiKey)
         : null;
-    const modelId = await this.options.resolveExecutionModelId(
+    const resolvedModelId = await this.options.resolveExecutionModelId(
       input.input.providerId,
       input.input.modelId,
       input.input.imageAttachments ?? []
     );
+    const modelId = input.input.providerId === 'ollama' ? decodeOllamaModelId(resolvedModelId) : resolvedModelId;
+    const apiKey =
+      input.input.providerId === 'ollama'
+        ? resolveOllamaApiKeyForModel(resolvedModelId, providerApiKey)
+        : providerApiKey;
     let questionCallId: string | null = null;
     const workspaceContext = this.options.assembleWorkspaceContext(
       input.input,
@@ -325,7 +342,6 @@ export class ProviderPlannerSessionService {
       },
       workspaceContext,
       {
-        personalization: this.options.db.getPersonalization(),
         vicodeGuidance: this.options.resolveVicodeGuidance({
           prompt: input.prompt,
           selectedSkillIds: workspaceContext.selectedSkillIds
@@ -375,6 +391,15 @@ export class ProviderPlannerSessionService {
           this.options.db.addRunEvent(input.threadId, runId, 'delta', { delta });
         }
       });
+      this.options.recordRuntimeTraceMark(
+        input.threadId,
+        runId,
+        'provider_model_compatibility_dispatch_started',
+        buildProviderCompatibilityDispatchTraceDetail({
+          providerId: input.input.providerId,
+          runMode: 'plan'
+        })
+      );
       run = await adapter.startRun(
         {
           threadId: input.threadId,

@@ -39,7 +39,6 @@ function createAdapter(overrides: Partial<ProviderAdapter> = {}): ProviderAdapte
     getAuthState: async () => ({ authState: 'disconnected', authMode: null, message: 'Disconnected' }),
     startAuth: async () => {},
     clearAuth: async () => {},
-    discoverNativeSkills: async () => [],
     validateProjectContext: () => ({ valid: true }),
     startRun: async () =>
       ({

@@ -4,7 +4,7 @@
 ---
 type: workflow
 status: active
-updated: 2026-04-23
+updated: 2026-05-23
 ---
 
 # Frontend Quality Gate
@@ -31,6 +31,7 @@ Skip the full gate only for tiny copy, wiring, or bug fixes where visual layout 
 - visual system: semantic color roles, type ladder, spacing rhythm, surface levels, control family, and motion rules
 - desktop screenshot and mobile screenshot, or a clear reason screenshots could not be captured
 - viewport checks for overflow, overlap, text clipping, broken stacking, and touch target plausibility
+- mobile performance checks when the task changes first-viewport media, fonts, scripts, heavy client components, or motion
 - style audit for gradients, blobs, shadows, borders, raw colors, radius scatter, and one-off spacing
 - browser console result when a browser run is feasible
 - relevant lint, typecheck, build, test, Storybook, or Playwright result
@@ -50,13 +51,16 @@ Skip the full gate only for tiny copy, wiring, or bug fixes where visual layout 
 - buttons, inputs, cards, media, and text blocks align deliberately
 - no text overlaps, clipped labels, unstable hover layout, or accidental horizontal scroll
 - mobile layout is designed, not just a collapsed desktop layout
+- mobile first-viewport content is readable and usable without waiting for decorative animation
 - fixed-format elements use stable dimensions through grid tracks, aspect ratios, min/max values, or container constraints
 
 ### 3. Restraint
 
 - gradients, glows, blobs, glass, and blur are absent unless the selected source system requires them
 - shadows are rare, soft, and purposeful; they do not create muddy elevation
+- shadows use a repo-local token or a named restrained soft-shadow token; arbitrary shadow strings need a visible hierarchy reason
 - borders are used for hierarchy or structure, not around every object
+- decorative meta pills, badges, chips, and tags are absent unless they are functional, source-backed, or explicitly requested
 - accent color is reserved for action, state, or proof
 - page sections are not styled as nested floating cards
 
@@ -67,6 +71,8 @@ Skip the full gate only for tiny copy, wiring, or bug fixes where visual layout 
 - repeated cards or panels share one surface model
 - icons, if present, use one library and one stroke/fill language
 - loading, empty, and error states exist when the UI has async or stateful behavior
+- generated, uploaded, saved, exported, or background work has visible pending, success, failure, and recovery paths when relevant
+- placeholder proof surfaces such as metrics, avatars, charts, timelines, or activity feeds are real, representative, or clearly marked as placeholder
 
 ### 5. Accessibility And Interaction
 
@@ -75,12 +81,16 @@ Skip the full gate only for tiny copy, wiring, or bug fixes where visual layout 
 - contrast is readable in the tested theme
 - reduced-motion handling exists when non-essential motion is used
 - touch targets are plausible on mobile
+- mobile media, font, and script choices do not obviously sabotage LCP, INP, or CLS
+- interactive elements can be operated and understood without relying only on hover
+- AI-generated or AI-assisted outputs include review, correction, regeneration, provenance, or uncertainty paths when the product workflow needs them
 
 ## Style Audit
 
 For Tailwind, CSS, and component-heavy pages, inspect the changed files for these patterns before finishing:
 
 - `gradient`, `blur`, `backdrop`, `shadow`, `rounded`, `border`, `ring`
+- `badge`, `pill`, `chip`, `tag`, `label`, and repeated `rounded-full` styling
 - raw hex colors, repeated `rgba(...)`, and hard-coded one-off spacing
 - repeated arbitrary values such as `p-[...]`, `mt-[...]`, `rounded-[...]`, and `shadow-[...]`
 - many visual effects inside one component or section
@@ -90,6 +100,7 @@ These are not automatic failures. They are prompts to verify that each value exp
 ## Recommended Checks
 
 - Playwright screenshot pass for page-level work, preferably desktop and mobile
+- Lighthouse/PageSpeed/Vercel Speed Insights/Search Console/WebPageTest when mobile performance is the claim or the change affects Core Web Vitals risk
 - Playwright visual comparisons when the repo already has screenshot baselines
 - Storybook or Chromatic when the project already uses component stories
 - `@axe-core/playwright` or the repo's accessibility test path when feasible
@@ -112,6 +123,8 @@ Do not say visual work is done if the agent did not inspect the rendered result.
 - [[Frontend Standards]]
 - [[Design Taste Translation]]
 - [[Reference To Code Workflow]]
+- [[Mobile Web Performance And Design]]
 - [[UI Review Rubric]]
 - [[Source - Frontend Visual QA And Tokens]]
 - [[Source - W3C UI Accessibility]]
+- [[Source - AI Generated UI Failure Modes 2026]]

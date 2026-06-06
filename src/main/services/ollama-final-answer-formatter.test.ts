@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  formatOllamaFinalAnswerFallback,
+  formatDiagnosticFinalAnswerFallback,
   OllamaFinalAnswerFormatter
 } from './ollama-final-answer-formatter';
 
@@ -23,7 +23,7 @@ function createRuntime(responsePayload: unknown) {
 describe('OllamaFinalAnswerFormatter', () => {
   it('formats dense wrap-up fact blobs into readable bullets and closing paragraphs', () => {
     expect(
-      formatOllamaFinalAnswerFallback(
+      formatDiagnosticFinalAnswerFallback(
         'Sure! Here are some fun facts about Mars:- 🌍 **The Red Planet:** Mars looks red due to iron oxide. - 🌙 **Moons:** Mars has Phobos and Deimos. - 🏔️ **Olympus Mons:** It is the tallest volcano in the solar system. Let me know if you want more.'
       )
     ).toBe(
@@ -33,7 +33,7 @@ describe('OllamaFinalAnswerFormatter', () => {
 
   it('rescues jammed markdown headings and bullets in malformed wrap-up blobs', () => {
     expect(
-      formatOllamaFinalAnswerFallback(
+      formatDiagnosticFinalAnswerFallback(
         'What is Quantization in AI?### How It Works- Full precision (FP32): Each weight uses 32 bits - Quantized: Weights use fewer bits'
       )
     ).toBe(
@@ -43,7 +43,7 @@ describe('OllamaFinalAnswerFormatter', () => {
 
   it('repairs jammed follow-up prompts and titlecase list separators in wrap-up text', () => {
     expect(
-      formatOllamaFinalAnswerFallback(
+      formatDiagnosticFinalAnswerFallback(
         'Other top coding models (for context): Claude Code (Anthropic)- GPT-4o / o1 (OpenAI)- DeepSeek Coder-StarCoder-CodeLlamaWant me to look up the most current coding model benchmarks?'
       )
     ).toBe(
@@ -53,7 +53,7 @@ describe('OllamaFinalAnswerFormatter', () => {
 
   it('preserves a single leading bullet instead of splitting it into an empty bullet plus a heading bullet', () => {
     expect(
-      formatOllamaFinalAnswerFallback(
+      formatDiagnosticFinalAnswerFallback(
         '- **Founded:** 2000 by Victor Goossens and Joy Hoogeveen. Official website launched in 2001 and moved to teamliquid.net in 2002.'
       )
     ).toBe(
@@ -63,7 +63,7 @@ describe('OllamaFinalAnswerFormatter', () => {
 
   it('keeps hyphenated proper nouns intact while still formatting dense wrap-ups', () => {
     expect(
-      formatOllamaFinalAnswerFallback(
+      formatDiagnosticFinalAnswerFallback(
         '- **Founded:** 2000 by Victor Goossens and Joy Hoogeveen. It won major titles in Dota 2, League of Legends, and Counter-Strike, and now fields teams across many games.'
       )
     ).toBe(
@@ -73,7 +73,7 @@ describe('OllamaFinalAnswerFormatter', () => {
 
   it('strips standalone bullet separator lines from malformed summary sections', () => {
     expect(
-      formatOllamaFinalAnswerFallback(
+      formatDiagnosticFinalAnswerFallback(
         [
           'Technical Advantages:',
           '',
@@ -99,7 +99,7 @@ describe('OllamaFinalAnswerFormatter', () => {
 
   it('keeps structural wrap-up formatting lightweight and avoids rewriting split words inline', () => {
     expect(
-      formatOllamaFinalAnswerFallback(
+      formatDiagnosticFinalAnswerFallback(
         'Created ` audit-note.txt ` successfully.\n\nContractions like *don\'t* can still arrive malformed as pron oun fragments.'
       )
     ).toBe(
@@ -107,8 +107,8 @@ describe('OllamaFinalAnswerFormatter', () => {
     );
   });
 
-  it('repairs compact technical acronyms in short fallback output', () => {
-    expect(formatOllamaFinalAnswerFallback('m cp: hello-world')).toBe('mcp: hello-world');
+  it('preserves compact technical fragments in short fallback output', () => {
+    expect(formatDiagnosticFinalAnswerFallback('m cp: hello-world')).toBe('m cp: hello-world');
   });
 
   it('skips short or already readable answers', async () => {

@@ -1,21 +1,26 @@
 import type {
   ProviderContextWindowUsage,
   ProviderId,
+  RunEventPayloadKind,
   RunActivityInfo,
   RunProgressState
 } from '../../shared/domain';
+import type { StagedWorkspaceChangeSet } from '../../providers/agent-runtime';
+import type { VerificationArtifact } from '../../shared/harness-verification';
 import type {
   ProviderDiagnosticsPayload,
   ProviderExecutionSessionSignal,
+  HarnessFinalEvidenceSummary,
+  HarnessHookEvidence,
   ProviderInfoPayload,
   ProviderPlannerSignal
 } from '../../providers/types';
 import {
-  appendAssistantTextDelta,
   preferNormalizedAssistantText,
   reconcileAssistantTextSnapshot,
   normalizeAssistantVisibleTextChunk,
-} from '../../providers/text-normalization';
+} from '../../shared/assistant-text-normalization';
+import { appendAssistantStreamChunk } from '../../shared/assistant-text/stream-assembler';
 import { deriveRunActivityInfo } from './run-activity';
 import { getProviderTextNormalizationOptions } from './provider-text-policy';
 
@@ -37,6 +42,10 @@ export interface NormalizedProviderInfoEvent {
   message: string;
   activity: RunActivityInfo | null;
   providerProgress: RunProgressState | null;
+  stagedWorkspaceChangeSet: StagedWorkspaceChangeSet | null;
+  verificationArtifact: VerificationArtifact | null;
+  harnessHookEvidence: HarnessHookEvidence | null;
+  finalEvidenceSummary: HarnessFinalEvidenceSummary | null;
   planner: ProviderPlannerSignal | null;
   session: ProviderExecutionSessionSignal | null;
   contextWindow: ProviderContextWindowUsage | null;
@@ -44,6 +53,82 @@ export interface NormalizedProviderInfoEvent {
   eventPayload: Record<string, unknown>;
   shouldPersist: boolean;
   dedupeKey: string | null;
+  eventKind: RunEventPayloadKind;
+  transcriptVisible: boolean;
+}
+
+function isInternalRuntimeReminderText(value: string | null | undefined) {
+  return typeof value === 'string' && /^Internal runtime reminder:/iu.test(value.trim());
+}
+
+function classifyProviderInfoEvent(input: {
+  requestedKind: RunEventPayloadKind | null;
+  requestedTranscriptVisible: boolean | null;
+  message: string;
+  activity: RunActivityInfo | null;
+  providerDiagnostics: ProviderDiagnosticsPayload | null;
+  stagedWorkspaceChangeSet: StagedWorkspaceChangeSet | null;
+  verificationArtifact: VerificationArtifact | null;
+  harnessHookEvidence: HarnessHookEvidence | null;
+  finalEvidenceSummary: HarnessFinalEvidenceSummary | null;
+}): { eventKind: RunEventPayloadKind; transcriptVisible: boolean } {
+  if (input.requestedKind) {
+    return {
+      eventKind: input.requestedKind,
+      transcriptVisible: input.requestedTranscriptVisible ?? input.requestedKind !== 'internal_runtime_reminder'
+    };
+  }
+
+  if (
+    isInternalRuntimeReminderText(input.message)
+    || isInternalRuntimeReminderText(input.activity?.summary)
+    || isInternalRuntimeReminderText(input.activity?.text)
+  ) {
+    return {
+      eventKind: 'internal_runtime_reminder',
+      transcriptVisible: false
+    };
+  }
+
+  if (input.providerDiagnostics && !input.message && !input.activity) {
+    return {
+      eventKind: 'provider_diagnostic',
+      transcriptVisible: false
+    };
+  }
+
+  if ((input.stagedWorkspaceChangeSet || input.verificationArtifact) && !input.message && !input.activity) {
+    return {
+      eventKind: 'debug_detail',
+      transcriptVisible: input.requestedTranscriptVisible ?? false
+    };
+  }
+
+  if ((input.harnessHookEvidence || input.finalEvidenceSummary) && !input.message && !input.activity) {
+    return {
+      eventKind: 'debug_detail',
+      transcriptVisible: input.requestedTranscriptVisible ?? false
+    };
+  }
+
+  if (input.activity?.kind === 'guidance' && input.activity.status === 'failed') {
+    return {
+      eventKind: 'failure_summary',
+      transcriptVisible: input.requestedTranscriptVisible ?? true
+    };
+  }
+
+  if (input.activity) {
+    return {
+      eventKind: 'tool_activity',
+      transcriptVisible: input.requestedTranscriptVisible ?? true
+    };
+  }
+
+  return {
+    eventKind: 'debug_detail',
+    transcriptVisible: input.requestedTranscriptVisible ?? true
+  };
 }
 
 export function normalizeProviderVisibleText(providerId: ProviderId, value: string) {
@@ -55,7 +140,7 @@ export function normalizeProviderAssistantDelta(
   current: string,
   delta: string
 ): NormalizedProviderAssistantDelta {
-  return appendAssistantTextDelta(current, delta, getProviderTextNormalizationOptions(providerId));
+  return appendAssistantStreamChunk(current, delta, getProviderTextNormalizationOptions(providerId));
 }
 
 export function reconcileProviderAssistantSnapshot(
@@ -126,6 +211,24 @@ export function normalizeProviderInfoEvent(providerId: ProviderId, payload: Prov
   const contextWindow = typeof normalizedPayload === 'string' ? null : normalizedPayload.contextWindow ?? null;
   const providerDiagnostics = typeof normalizedPayload === 'string' ? null : normalizedPayload.providerDiagnostics ?? null;
   const providerProgress = typeof normalizedPayload === 'string' ? null : normalizedPayload.progress ?? null;
+  const stagedWorkspaceChangeSet = typeof normalizedPayload === 'string' ? null : normalizedPayload.stagedWorkspaceChangeSet ?? null;
+  const verificationArtifact = typeof normalizedPayload === 'string' ? null : normalizedPayload.verificationArtifact ?? null;
+  const harnessHookEvidence = typeof normalizedPayload === 'string' ? null : normalizedPayload.harnessHookEvidence ?? null;
+  const finalEvidenceSummary = typeof normalizedPayload === 'string' ? null : normalizedPayload.finalEvidenceSummary ?? null;
+  const requestedKind = typeof normalizedPayload === 'string' ? null : normalizedPayload.eventKind ?? null;
+  const requestedTranscriptVisible =
+    typeof normalizedPayload === 'string' ? null : normalizedPayload.transcriptVisible ?? null;
+  const { eventKind, transcriptVisible } = classifyProviderInfoEvent({
+    requestedKind,
+    requestedTranscriptVisible,
+    message: trimmedMessage,
+    activity,
+    providerDiagnostics,
+    stagedWorkspaceChangeSet,
+    verificationArtifact,
+    harnessHookEvidence,
+    finalEvidenceSummary
+  });
   const eventPayload: Record<string, unknown> = {};
   if (trimmedMessage) {
     eventPayload.message = trimmedMessage;
@@ -145,19 +248,52 @@ export function normalizeProviderInfoEvent(providerId: ProviderId, payload: Prov
   if (providerDiagnostics) {
     eventPayload.providerDiagnostics = providerDiagnostics;
   }
-  const shouldPersist = Boolean(trimmedMessage || activity || planner || session || contextWindow || providerDiagnostics);
+  if (stagedWorkspaceChangeSet) {
+    eventPayload.stagedWorkspaceChangeSet = stagedWorkspaceChangeSet;
+  }
+  if (verificationArtifact) {
+    eventPayload.verificationArtifact = verificationArtifact;
+  }
+  if (harnessHookEvidence) {
+    eventPayload.harnessHookEvidence = harnessHookEvidence;
+  }
+  if (finalEvidenceSummary) {
+    eventPayload.finalEvidenceSummary = finalEvidenceSummary;
+  }
+  const shouldPersist = Boolean(
+    trimmedMessage
+    || activity
+    || planner
+    || session
+    || contextWindow
+    || providerDiagnostics
+    || stagedWorkspaceChangeSet
+    || verificationArtifact
+    || harnessHookEvidence
+    || finalEvidenceSummary
+  );
+  if (shouldPersist) {
+    eventPayload.eventKind = eventKind;
+    eventPayload.transcriptVisible = transcriptVisible;
+  }
 
   return {
     normalizedPayload,
     message: trimmedMessage,
     activity,
     providerProgress,
+    stagedWorkspaceChangeSet,
+    verificationArtifact,
+    harnessHookEvidence,
+    finalEvidenceSummary,
     planner,
     session,
     contextWindow,
     providerDiagnostics,
     eventPayload,
     shouldPersist,
-    dedupeKey: trimmedMessage || null
+    dedupeKey: trimmedMessage || null,
+    eventKind,
+    transcriptVisible
   };
 }

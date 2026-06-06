@@ -7,12 +7,17 @@ import {
   plannerSetModeSchema,
   preferenceSaveSchema,
   projectCreateSchema,
+  projectIdValueSchema,
+  providerIdSchema,
   skillSaveSchema,
-  skillSyncSchema,
+  skillSuggestedInstallSchema,
   threadFollowUpCreateSchema,
   threadFollowUpIdSchema,
   threadFollowUpUpdateSchema,
-  threadCreateSchema
+  threadCreateSchema,
+  worktreeHunkApplySchema,
+  worktreeHunkRejectSchema,
+  worktreeReviewSchema
 } from './schemas';
 import { MAX_COMPOSER_PROMPT_CHARS } from './domain';
 
@@ -27,6 +32,13 @@ describe('shared schemas', () => {
 
     expect(result.name).toBe('Workspace');
     expect(result.runtimeCommandPolicy).toBe('auto_approve');
+  });
+
+  it('validates raw IPC identifier values', () => {
+    expect(projectIdValueSchema.parse('project-1')).toBe('project-1');
+    expect(providerIdSchema.parse('openai')).toBe('openai');
+    expect(() => projectIdValueSchema.parse('')).toThrow();
+    expect(() => providerIdSchema.parse('anthropic')).toThrow();
   });
 
   it('accepts planner mode and answer payloads', () => {
@@ -77,6 +89,134 @@ describe('shared schemas', () => {
     ).toHaveLength(MAX_COMPOSER_PROMPT_CHARS);
   });
 
+  it('preserves composer execution constraints for provider tool policy', () => {
+    const parsed = composerSubmitSchema.parse({
+      projectId: crypto.randomUUID(),
+      providerId: 'ollama',
+      modelId: 'qwen2.5-coder:7b',
+      executionPermission: 'full_access',
+      prompt: 'Run npm test only.',
+      executionConstraints: {
+        permissionMode: 'default',
+        toolPolicy: {
+          preset: 'default',
+          allowedToolCallNames: ['run_command'],
+          disallowedToolCallNames: []
+        },
+        maxTurns: null,
+        maxReasoningTokens: null,
+        taskBudgetTokens: null,
+        costBudgetUsd: null,
+        maxDelegationDepth: 0,
+        maxAutomaticRetries: null,
+        maxUnchangedHandoffs: null,
+        maxSiblingDelegates: null
+      }
+    });
+
+    expect(parsed.executionConstraints?.toolPolicy.allowedToolCallNames).toEqual(['run_command']);
+    expect(parsed.executionConstraints?.maxDelegationDepth).toBe(0);
+  });
+
+  it('defaults composer isolation mode to direct workspace and accepts explicit isolation modes', () => {
+    expect(
+      composerSubmitSchema.parse({
+        projectId: crypto.randomUUID(),
+        providerId: 'openai',
+        modelId: 'gpt-5',
+        executionPermission: 'default',
+        prompt: 'Update the helper.'
+      }).isolationMode
+    ).toBe('direct_workspace');
+
+    expect(
+      composerSubmitSchema.parse({
+        projectId: crypto.randomUUID(),
+        providerId: 'openai',
+        modelId: 'gpt-5',
+        executionPermission: 'default',
+        isolationMode: 'patch_buffer',
+        prompt: 'Update the helper.'
+      }).isolationMode
+    ).toBe('patch_buffer');
+
+    expect(
+      composerSubmitSchema.parse({
+        projectId: crypto.randomUUID(),
+        providerId: 'openai',
+        modelId: 'gpt-5',
+        executionPermission: 'default',
+        isolationMode: 'git_worktree',
+        prompt: 'Update the helper.'
+      }).isolationMode
+    ).toBe('git_worktree');
+  });
+
+  it('validates worktree hunk review actions without accepting file contents or roots', () => {
+    expect(
+      worktreeHunkApplySchema.parse({
+        threadId: 'thread-1',
+        runId: 'run-1',
+        acceptedHunkIds: ['hunk-1'],
+        rejectedHunkIds: ['hunk-2'],
+        sourceWorkspaceRoot: 'C:/must-not-cross',
+        beforeContent: 'must-not-cross'
+      })
+    ).toEqual({
+      threadId: 'thread-1',
+      runId: 'run-1',
+      acceptedHunkIds: ['hunk-1'],
+      rejectedHunkIds: ['hunk-2']
+    });
+
+    expect(
+      worktreeHunkApplySchema.parse({
+        threadId: 'thread-1',
+        runId: 'run-1',
+        acceptedHunkIds: ['hunk-1']
+      }).rejectedHunkIds
+    ).toEqual([]);
+
+    expect(
+      worktreeHunkRejectSchema.parse({
+        threadId: 'thread-1',
+        runId: 'run-1',
+        hunkIds: ['hunk-1'],
+        afterContent: 'must-not-cross'
+      })
+    ).toEqual({
+      threadId: 'thread-1',
+      runId: 'run-1',
+      hunkIds: ['hunk-1']
+    });
+
+    expect(
+      worktreeReviewSchema.parse({
+        threadId: 'thread-1',
+        runId: 'run-1',
+        worktreeWorkspaceRoot: 'C:/must-not-cross'
+      })
+    ).toEqual({
+      threadId: 'thread-1',
+      runId: 'run-1'
+    });
+
+    expect(() =>
+      worktreeHunkApplySchema.parse({
+        threadId: 'thread-1',
+        runId: 'run-1',
+        acceptedHunkIds: []
+      })
+    ).toThrow();
+    expect(() =>
+      worktreeHunkRejectSchema.parse({
+        threadId: 'thread-1',
+        runId: 'run-1',
+        hunkIds: []
+      })
+    ).toThrow();
+  });
+
   it('rejects composer prompts above the shared limit', () => {
     const prompt = 'a'.repeat(MAX_COMPOSER_PROMPT_CHARS + 1);
     expect(() =>
@@ -109,21 +249,13 @@ describe('shared schemas', () => {
         scope: 'global',
         projectId: null,
         enabled: true,
-        providerTargets: ['openai', 'gemini'],
-        syncTargets: ['openai']
+        providerTargets: ['openai', 'gemini']
       }).providerTargets
     ).toHaveLength(2);
 
-    expect(
-      skillSyncSchema.parse({
-        skillId: crypto.randomUUID(),
-        providerId: 'qwen',
-        enabled: true
-      }).providerId
-    ).toBe('qwen');
   });
 
-  it('accepts qwen and kimi-specific preference and personalization payloads', () => {
+  it('accepts qwen and kimi-specific preference payloads', () => {
     expect(
       composerSubmitSchema.parse({
         projectId: crypto.randomUUID(),
@@ -179,8 +311,7 @@ describe('shared schemas', () => {
         scope: 'global',
         projectId: null,
         enabled: true,
-        providerTargets: ['qwen'],
-        syncTargets: []
+        providerTargets: ['qwen']
       }).providerTargets
     ).toEqual(['qwen']);
 
@@ -225,6 +356,41 @@ describe('shared schemas', () => {
         enabled: true
       }).intervalMinutes
     ).toBe(60);
+  });
+
+  it('accepts only Vicode-managed suggested skill imports', () => {
+    const parsed = skillSuggestedInstallSchema.parse({
+      installKind: 'github_folder',
+      providerId: 'openai',
+      providerTargets: ['openai', 'gemini'],
+      token: 'react-best-practices',
+      installTarget: 'https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices',
+      owner: 'vercel-labs',
+      repo: 'agent-skills',
+      path: 'skills/react-best-practices',
+      name: 'React Best Practices',
+      description: 'React and Next.js guidance.',
+      browseUrl: 'https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices'
+    });
+    expect(parsed.installKind).toBe('github_folder');
+    expect(parsed).not.toHaveProperty('providerId');
+    expect(parsed).not.toHaveProperty('installTarget');
+
+    expect(() =>
+      skillSuggestedInstallSchema.parse({
+        installKind: 'provider_native',
+        providerId: 'openai',
+        token: 'pdf'
+      })
+    ).toThrow();
+
+    expect(() =>
+      skillSuggestedInstallSchema.parse({
+        installKind: 'provider_reference',
+        providerId: 'gemini',
+        token: 'context7'
+      })
+    ).toThrow();
   });
 
   it('accepts follow-up queue payloads', () => {

@@ -1,7 +1,9 @@
 /* Ordered stylesheet entrypoint for the renderer. */
 @import './tokens.css';
 @import './sidebar.css';
+@import './sidebar-collections.css';
 @import './thread.css';
-@import './landing.css';
 @import './skills.css';
 @import './settings.css';
+@import './settings-providers.css';
+@import './boot.css';

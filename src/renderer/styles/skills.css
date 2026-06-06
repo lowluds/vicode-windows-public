@@ -86,7 +86,7 @@
   min-height: 0;
   height: 100%;
   margin: 0 auto;
-  padding: 4px 32px 34px;
+  padding: 4px 28px 30px;
   overflow-y: auto;
 }
 
@@ -122,10 +122,10 @@
 .skills-catalog-stage {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  width: min(100%, 840px);
+  gap: 12px;
+  width: min(100%, 940px);
   margin: 0 auto;
-  padding: 28px 0 0;
+  padding: 16px 0 0;
 }
 
 .skills-hero {
@@ -165,10 +165,10 @@
 .skills-subnav {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  padding: 2px;
+  gap: 0;
+  padding: 0;
   border: 1px solid var(--ui-border-soft);
-  border-radius: 10px;
+  border-radius: 2px;
   background: var(--ui-surface-1);
   box-shadow: none;
 }
@@ -176,8 +176,8 @@
 .skills-subnav-button {
   min-height: 28px;
   gap: 0;
-  padding: 0 9px;
-  border-radius: 8px;
+  padding: 0 10px;
+  border-radius: 0;
   border-color: transparent;
   background: transparent;
   box-shadow: none;
@@ -191,15 +191,15 @@
 
 .skills-subnav-button[aria-selected='false']:hover,
 .skills-subnav-button[aria-selected='false']:focus-visible {
-  background: var(--ui-alpha-04);
+  background: var(--ui-hover);
   color: var(--ui-text-title);
 }
 
 .skills-subnav-button[aria-selected='true'] {
-  background: var(--ui-surface-3);
+  background: var(--ui-surface-4);
   color: var(--ui-text-title);
   border-color: var(--ui-border-soft);
-  box-shadow: inset 0 0 0 1px var(--ui-border-soft);
+  box-shadow: none;
 }
 
 .skills-subnav-count {
@@ -209,7 +209,7 @@
   min-width: 20px;
   height: 20px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: 2px;
   background: var(--ui-hover);
   color: inherit;
   font-size: 11px;
@@ -226,10 +226,10 @@
 }
 
 .skills-search {
-  width: min(100%, 610px);
-  flex: 0 1 610px;
+  width: min(100%, 760px);
+  flex: 0 1 760px;
   min-height: 30px;
-  border-radius: 9px;
+  border-radius: 2px;
   border-color: var(--ui-border-strong);
   background: var(--ui-surface-2);
   box-shadow: none;
@@ -244,7 +244,7 @@
 
 .skills-toolbar-button {
   min-height: 30px;
-  border-radius: 9px;
+  border-radius: 2px;
   border-color: var(--ui-border-soft);
   background: var(--ui-surface-2);
   color: var(--ui-text-title);
@@ -276,7 +276,7 @@
   flex: 0 0 30px;
   min-width: 30px;
   min-height: 30px;
-  border-radius: 9px;
+  border-radius: 2px;
   border: 1px solid var(--ui-border-soft);
   background: var(--ui-surface-2);
   color: var(--ui-text-muted);
@@ -293,6 +293,19 @@
   background: var(--ui-surface-3);
   color: var(--ui-text-title);
   box-shadow: none;
+}
+
+.skills-create-menu.ui-menu-content {
+  border-radius: 2px;
+  border-color: var(--ui-border-soft);
+  background: var(--ui-menu-bg);
+  box-shadow: none;
+  padding: 4px;
+}
+
+.skills-create-menu .ui-menu-item {
+  min-height: 26px;
+  border-radius: 0;
 }
 
 .skills-inline-link {
@@ -321,15 +334,15 @@
 
 .skills-catalog-shell {
   min-width: 0;
-  gap: 28px;
-  padding-top: 12px;
+  gap: 18px;
+  padding-top: 8px;
   padding-bottom: 24px;
 }
 
 .skills-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
 }
 
 .skills-section-heading,
@@ -350,16 +363,16 @@
 
 .skills-section-heading h3 {
   margin: 0;
-  color: var(--ui-text-title);
-  font-size: 18px;
-  font-weight: 600;
+  color: var(--ui-text-muted);
+  font-size: 12px;
+  font-weight: 650;
   letter-spacing: 0;
   line-height: 1.2;
 }
 
 .skills-section-heading {
-  min-height: 26px;
-  padding-bottom: 8px;
+  min-height: 24px;
+  padding: 0 6px 6px;
   border-bottom: 1px solid var(--ui-border-soft);
 }
 
@@ -376,9 +389,9 @@
 
 .skills-list {
   display: grid;
-  column-gap: 38px;
-  row-gap: 14px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 0;
+  row-gap: 0;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .skills-list-single-column {
@@ -389,12 +402,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
-  min-height: 54px;
-  padding: 5px 6px;
+  min-height: 38px;
+  padding: 4px 6px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: 0;
   background: transparent;
   color: inherit;
   text-align: left;
@@ -407,7 +420,7 @@
 .skills-list-item:hover,
 .skills-list-item:focus-visible {
   border-color: transparent;
-  background: var(--ui-alpha-04);
+  background: var(--ui-hover);
 }
 
 .skills-integration-item {
@@ -419,12 +432,12 @@
 .skills-integration-item:hover,
 .skills-integration-item:focus-visible {
   border-color: transparent;
-  background: var(--ui-alpha-04);
+  background: var(--ui-hover);
 }
 
 .skills-integration-item.is-selected {
   border-color: transparent;
-  background: transparent;
+  background: var(--ui-surface-4);
   box-shadow: none;
 }
 
@@ -452,8 +465,8 @@
 .skills-integration-status {
   display: inline-flex;
   align-items: center;
-  padding: 2px 6px;
-  border-radius: 999px;
+  padding: 1px 5px;
+  border-radius: 2px;
   border: 1px solid var(--ui-border-soft);
   color: var(--ui-text);
   background: var(--ui-surface-3);
@@ -484,8 +497,8 @@
 .skills-publisher-badge {
   display: inline-flex;
   align-items: center;
-  padding: 4px 8px;
-  border-radius: 999px;
+  padding: 1px 5px;
+  border-radius: 2px;
   font-size: 11px;
   font-weight: 600;
 }
@@ -517,8 +530,8 @@
 }
 
 .skills-detail-meta span {
-  padding: 4px 8px;
-  border-radius: 999px;
+  padding: 2px 6px;
+  border-radius: 2px;
   background: var(--ui-surface-3);
   color: var(--ui-text-muted);
   font-size: 12px;
@@ -575,7 +588,7 @@
   flex-direction: column;
   gap: 14px;
   padding: 18px 20px;
-  border-radius: var(--ui-radius-xl);
+  border-radius: 2px;
   background: var(--ui-surface-2);
   border: 1px solid var(--ui-border-soft);
   box-shadow: none;
@@ -611,7 +624,7 @@
   flex-direction: column;
   gap: 6px;
   padding: 14px 16px;
-  border-radius: 12px;
+  border-radius: 2px;
   background: var(--ui-surface-3);
   border: 1px solid var(--ui-border-soft);
 }
@@ -650,7 +663,7 @@
   flex-direction: column;
   gap: 8px;
   padding: 14px 16px;
-  border-radius: 12px;
+  border-radius: 2px;
   background: var(--ui-surface-3);
   border: 1px solid var(--ui-border-soft);
 }
@@ -697,7 +710,7 @@
   height: 26px;
   min-width: 26px;
   min-height: 26px;
-  border-radius: 999px;
+  border-radius: 2px;
   border-color: transparent;
   background: var(--ui-alpha-04);
   color: var(--ui-text-muted);
@@ -724,7 +737,7 @@
   min-width: 26px;
   min-height: 26px;
   padding: 0;
-  border-radius: 999px;
+  border-radius: 2px;
   color: var(--ui-text-subtle);
   font-size: 12px;
 }
@@ -748,7 +761,7 @@
   justify-content: center;
   width: 34px;
   height: 34px;
-  border-radius: 9px;
+  border-radius: 2px;
   overflow: hidden;
   border: 1px solid transparent;
   color: var(--ui-text-title);
@@ -765,7 +778,7 @@
 .skills-avatar.is-large {
   width: 56px;
   height: 56px;
-  border-radius: 18px;
+  border-radius: 3px;
   font-size: 16px;
 }
 
@@ -819,19 +832,22 @@
 }
 
 .skills-dialog-content {
-  width: min(880px, calc(100vw - 32px));
+  width: min(1040px, calc(100vw - 32px));
   max-height: min(88dvh, calc(100dvh - 32px));
   margin: 0;
-  padding: 26px 22px 22px;
+  padding: 24px;
 }
 
 .skills-dialog-body {
   min-height: 0;
+  gap: 16px;
 }
 
 .skills-dialog-top {
   align-items: flex-start;
-  gap: 20px;
+  gap: 22px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--ui-border-soft);
 }
 
 .skills-dialog-heading {
@@ -846,42 +862,115 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 10px;
+  gap: 9px;
 }
 
 .skills-dialog-title-row {
   align-items: flex-start;
-  padding-right: 36px;
 }
 
 .skills-dialog-title-row h3 {
-  font-size: 22px;
+  font-size: 23px;
+  line-height: 1.08;
 }
 
 .skills-dialog-close-button {
-  position: absolute;
-  top: 18px;
-  right: 18px;
+  position: static;
+  flex: 0 0 auto;
 }
 
 .skills-dialog-header-actions {
   align-items: flex-start;
   flex: 0 0 auto;
-  max-width: calc(100% - 52px);
-  margin-right: 34px;
+  max-width: min(360px, 100%);
   padding-top: 2px;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
 
 .skills-dialog-loading,
-.skills-runtime-note,
+.skills-status-strip,
 .skills-example-card,
 .skills-sync-item {
   padding: 14px 16px;
-  border-radius: 12px;
+  border-radius: 8px;
   background: var(--ui-alpha-025);
   border: 1px solid var(--ui-alpha-06);
+}
+
+.skills-status-strip {
+  color: var(--ui-text-muted);
+  line-height: var(--ui-line-height-body);
+}
+
+.skills-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 14px;
+  align-items: start;
+}
+
+.skills-detail-panel {
+  min-width: 0;
+  border-radius: 8px;
+  border: 1px solid var(--ui-alpha-06);
+  background: color-mix(in srgb, var(--ui-surface-1) 72%, transparent);
+}
+
+.skills-detail-panel-main {
+  overflow: hidden;
+}
+
+.skills-detail-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+}
+
+.skills-detail-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--ui-alpha-06);
+}
+
+.skills-detail-panel-heading span,
+.skills-facts-list dt {
+  color: var(--ui-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.skills-detail-panel-heading strong {
+  color: var(--ui-text-title);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.skills-facts-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.skills-facts-list div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.skills-facts-list dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ui-text-title);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .skills-example-card pre {
@@ -903,10 +992,10 @@
 .skills-markdown {
   max-height: min(54vh, 640px);
   overflow: auto;
-  padding: 18px;
-  border-radius: var(--ui-radius-xl);
-  background: var(--ui-panel-gradient-strong);
-  border: 1px solid var(--ui-alpha-05);
+  padding: 18px 20px 22px;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
   color: var(--ui-text);
   line-height: 1.65;
 }
@@ -971,6 +1060,7 @@
 
 .skills-dialog-actions {
   align-items: center;
+  padding-top: 2px;
 }
 
 .skills-dialog-actions-left {
@@ -980,6 +1070,26 @@
 
 .skills-dialog-footnote {
   font-size: 12px;
+}
+
+@media (max-width: 860px) {
+  .skills-dialog-top,
+  .skills-dialog-header-actions {
+    align-items: flex-start;
+  }
+
+  .skills-dialog-top {
+    flex-direction: column;
+  }
+
+  .skills-dialog-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .skills-detail-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .skills-editor-dialog {
@@ -1178,12 +1288,13 @@
 .composer-skill-picker {
   display: flex;
   width: 100%;
-  max-height: 236px;
+  max-height: 212px;
   flex-direction: column;
   overflow-y: auto;
   border: 1px solid var(--ui-border-soft);
-  border-radius: 18px;
-  background: var(--ui-panel-gradient-strong);
+  border-radius: 2px;
+  background: var(--ui-menu-bg);
+  box-shadow: var(--ui-shadow-apple);
 }
 
 .composer-skill-picker-item,
@@ -1193,8 +1304,8 @@
   justify-content: space-between;
   gap: 12px;
   width: 100%;
-  min-height: 76px;
-  padding: 10px 14px;
+  min-height: 54px;
+  padding: 8px 10px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -1210,9 +1321,9 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 6px;
+  gap: 3px;
   width: 100%;
-  min-height: 56px;
+  min-height: 38px;
 }
 
 .composer-skill-picker-heading {
@@ -1224,7 +1335,7 @@
 }
 
 .composer-skill-picker-item + .composer-skill-picker-item {
-  border-top: 1px solid var(--ui-alpha-04);
+  border-top: 1px solid var(--ui-alpha-035);
 }
 
 .composer-skill-picker-item:hover,
@@ -1246,8 +1357,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   flex: 0 0 auto;
   color: var(--ui-text);
 }
@@ -1270,10 +1381,10 @@
 .composer-skill-picker-description,
 .composer-skill-item span:last-child {
   display: block;
-  padding-left: 28px;
+  padding-left: 26px;
   color: var(--ui-text-muted);
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.35;
   overflow-wrap: anywhere;
   word-break: break-word;
   display: -webkit-box;
@@ -1289,7 +1400,9 @@
   margin-top: 1px;
   padding-left: 8px;
   color: var(--ui-text-muted);
-  font-size: 12px;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 

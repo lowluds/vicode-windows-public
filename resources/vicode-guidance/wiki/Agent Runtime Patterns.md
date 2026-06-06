@@ -4,7 +4,12 @@
 ---
 type: concept
 status: active
-updated: 2026-04-23
+updated: 2026-05-30
+aliases:
+  - agent runtime
+  - agent tooling runtime
+  - agent memory and tools
+  - tool runtime patterns
 ---
 
 # Agent Runtime Patterns
@@ -12,6 +17,8 @@ updated: 2026-04-23
 ## Summary
 
 Reusable agent systems benefit from explicit capability models, centralized permission handling, deterministic tool-pool assembly, route-specific exploration docs, and separate summary lanes for durable notes, transcript compaction, and live progress.
+
+Use [[AI Harness Engineering]] when the question is not just where runtime pieces live, but how context, tools, memory, permissions, orchestration, verification, observability, and repeated corrections work together as a model-adjacent control system.
 
 ## Tool Capability Model
 
@@ -98,6 +105,20 @@ Use distinct memory jobs instead of one generic "memory" surface:
 
 Where the runtime needs file-backed memory, scope it deliberately rather than treating memory as one opaque store.
 
+## Active Goals
+
+Treat Codex goals as a distinct continuity surface, not as ordinary memory, task plans, or reminders.
+
+An active goal should carry:
+
+- one persistent objective
+- scope and source boundaries
+- acceptance evidence
+- next action and feedback signal
+- explicit completion or blocked criteria
+
+For agent-facing use, goal creation must stay an explicit action. Do not infer a persistent goal from every user request. Use [[Codex Goal Mechanism]] for the detailed operating contract.
+
 ## Memory Promotion And Recall
 
 - memory promotion should be selective rather than transcript-wide
@@ -142,14 +163,25 @@ These artifacts have different cadence, persistence, and failure costs.
 - render tool use with clear status rather than hiding it in raw text
 - preserve accessibility affordances for live updates and focus movement
 
+## Coding Agent Apps
+
+For coding-agent systems or local agent shells, read [[Coding Agent Tooling Architecture]] before adding tool, MCP, memory, provider, or approval behavior. The reusable pattern is a small visible product surface backed by explicit runtime contracts for tools, permissions, context, evidence, evals, and traces.
+
 ## Rule
 
 Do not let tool shape, memory shape, or permission shape remain implicit in a growing agent runtime.
 
+If a recurring agent failure appears, decide which harness layer should change: route, source note, skill, tool contract, permission gate, memory rule, verification sensor, eval, or cleanup loop.
+
 ## Sources
 
+- [[Coding Agent Tooling Architecture]]
+- [[AI Harness Engineering]]
+- [[Source - AI Harness Engineering 2026]]
+- [[Source - Coding Agent Tooling And Runtime Research 2026-05-21]]
 - [[Source - Claude Code Runtime And Memory Patterns]]
 - [[Source - RAG And Knowledge Base Retrieval Patterns]]
+- [[Source - Codex Goal Mechanism Research 2026-05-23]]
 - [[Multi-Agent Collaboration]]
 - [[Context Packet Standard]]
 - [[Capability Routing Standard]]

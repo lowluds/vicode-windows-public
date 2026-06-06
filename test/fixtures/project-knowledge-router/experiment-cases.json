@@ -1,0 +1,65 @@
+[
+  {
+    "name": "distractor-heavy local model task keeps relevant guidance",
+    "files": {
+      "models/ollama.md": "# Ollama And Local Models\nLocal coding models need compact Project Knowledge packets, source-backed context, and small verification prompts.",
+      "retrieval/context-budget.md": "# Retrieval Context Budget\nProject Knowledge should select the smallest relevant markdown sections instead of dumping the folder.",
+      "trust/tool-use.md": "# Tool Use And Trust\nUse read-only tools before mutating tools when the model only needs context.",
+      "frontend/colors.md": "# Color Tokens\nUse theme tokens instead of raw colors.",
+      "release/checklist.md": "# Release Checklist\nRun smoke tests before release.",
+      "docs/copy.md": "# Copy Notes\nUse concise UI copy."
+    },
+    "prompt": "Help an Ollama local coding model use Project Knowledge without dumping a huge knowledge folder.",
+    "task": {
+      "objective": "Design a compact local-model Project Knowledge retrieval packet.",
+      "expectedToolGroups": ["project_knowledge", "verification"]
+    },
+    "maxResults": 3,
+    "expectedRelativePaths": ["models/ollama.md", "retrieval/context-budget.md"],
+    "expectedExcludedRelativePaths": ["frontend/colors.md", "release/checklist.md", "docs/copy.md"],
+    "relevantRelativePaths": ["models/ollama.md", "retrieval/context-budget.md", "trust/tool-use.md"],
+    "minPrecisionAtK": 0.67,
+    "minRecall": 0.67,
+    "maxTotalContentChars": 1200
+  },
+  {
+    "name": "multi-intent coding task retrieves workflow and eval guidance",
+    "files": {
+      "workflow/coding-agent-workflows.md": "# Coding Agent Workflows\nPlan small slices, keep commits narrow, and verify the implemented behavior.",
+      "evals/structured-outputs.md": "# Structured Outputs And Evals\nUse deterministic evals to check route selection, expected files, and context economy.",
+      "retrieval/source-quality.md": "# Source Quality And Grounding\nGround important claims in repo-local truth, Project Knowledge, official docs, or labeled inference.",
+      "marketing/hero-copy.md": "# Hero Copy\nUse product language on landing pages.",
+      "support/email.md": "# Support Email\nWrite short customer replies."
+    },
+    "prompt": "Create a small implementation plan and evals for a coding-agent knowledge system.",
+    "task": {
+      "objective": "Build and verify a coding-agent knowledge retrieval improvement.",
+      "expectedToolGroups": ["workspace_write", "project_knowledge", "verification"]
+    },
+    "maxResults": 3,
+    "expectedRelativePaths": ["workflow/coding-agent-workflows.md", "evals/structured-outputs.md"],
+    "expectedExcludedRelativePaths": ["marketing/hero-copy.md", "support/email.md"],
+    "relevantRelativePaths": ["workflow/coding-agent-workflows.md", "evals/structured-outputs.md", "retrieval/source-quality.md"],
+    "minPrecisionAtK": 0.67,
+    "minRecall": 0.67,
+    "maxTotalContentChars": 1300
+  },
+  {
+    "name": "exact route hint beats repeated keyword distractors",
+    "files": {
+      "routes/search-and-retrieval.md": "# Search And Retrieval\nUse route hints, titles, aliases, and headings to select minimal source-backed context.",
+      "noise/search-release.md": "# Release Search Notes\nSearch search search release release release checklist.",
+      "noise/search-marketing.md": "# Marketing Search Notes\nSearch search search landing page campaign copy.",
+      "noise/search-support.md": "# Support Search Notes\nSearch search search support queue triage."
+    },
+    "prompt": "Use [[Search And Retrieval]] for this context budget decision.",
+    "task": null,
+    "maxResults": 2,
+    "expectedFirstRelativePath": "routes/search-and-retrieval.md",
+    "expectedExcludedRelativePaths": ["noise/search-marketing.md", "noise/search-support.md"],
+    "relevantRelativePaths": ["routes/search-and-retrieval.md"],
+    "minPrecisionAtK": 0.5,
+    "minRecall": 1,
+    "maxTotalContentChars": 900
+  }
+]

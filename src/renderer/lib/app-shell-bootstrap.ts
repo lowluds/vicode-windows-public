@@ -3,7 +3,6 @@ import type {
   AppUpdateState,
   BootstrapData,
   CollabBootstrap,
-  PersonalizationSettings,
   Preferences,
   Project,
   ProviderDescriptor,
@@ -15,6 +14,7 @@ import type {
 } from '../../shared/domain';
 import { deriveRecentThreads, surfaceProviders } from './thread-presentation';
 import { resolveDefaultProviderId, resolveProviderModelId } from './provider-defaults';
+import { resolveProviderThinkingDefault } from '../../shared/providers';
 
 export type BootstrapComposerEffort = 'Low' | 'Medium' | 'High' | 'Extra high';
 
@@ -43,7 +43,7 @@ export interface AppShellBootstrapHost {
   openThread(threadId: string): Promise<ThreadDetail>;
   clearLastOpenedThreadPreference(): Promise<Preferences>;
   applyAppearance(preferences: Preferences): void;
-  applyOpenedThread(thread: ThreadDetail): void;
+  applyOpenedThread(thread: ThreadDetail, options?: { preserveRoute?: boolean }): void;
   resolveComposerEffort(
     providerId: ProviderId,
     effort: Preferences['defaultReasoningEffortByProvider'][ProviderId]
@@ -63,7 +63,6 @@ export interface AppShellBootstrapHost {
   setPendingRunToolApprovals(approvals: RunToolApprovalRequest[]): void;
   setToolApprovalResolvingId(value: string | null | ((current: string | null) => string | null)): void;
   setPreferences(preferences: Preferences): void;
-  setPersonalization(personalization: PersonalizationSettings): void;
   setSelectedProjectId(projectId: string | null): void;
   setExpandedProjectIds(projectIds: string[] | ((current: string[]) => string[])): void;
   setThreadsByProject(threadsByProject: Record<string, ThreadSummary[]>): void;
@@ -125,7 +124,6 @@ export function applyBootstrapPayload(host: AppShellBootstrapHost, payload: Boot
       : null
   );
   host.setPreferences(payload.preferences);
-  host.setPersonalization(payload.personalization);
   host.setSelectedProjectId(projectId);
   host.setExpandedProjectIds(() => {
     const availableProjectIds = new Set(payload.projects.map((project) => project.id));
@@ -142,7 +140,7 @@ export function applyBootstrapPayload(host: AppShellBootstrapHost, payload: Boot
   host.applyBootstrapComposerDefaults({
     providerId: defaultProviderId,
     modelId: defaultModelId,
-    thinkingEnabled: payload.preferences.defaultThinkingByProvider[defaultProviderId],
+    thinkingEnabled: resolveProviderThinkingDefault(defaultProviderId),
     executionPermission: payload.preferences.defaultExecutionPermission
   });
   host.clearActiveThreadSelection();
@@ -190,7 +188,7 @@ export async function bootstrapAppShell(host: AppShellBootstrapHost) {
       host.setStartupThreadRestoreState('pending');
       try {
         const detail = await host.openThread(payload.preferences.lastOpenedThreadId);
-        host.applyOpenedThread(detail);
+        host.applyOpenedThread(detail, { preserveRoute: true });
         host.setStartupThreadRestoreState('resolved');
       } catch (error) {
         if (host.isMissingThreadError(error)) {

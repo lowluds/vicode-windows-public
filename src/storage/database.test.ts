@@ -88,6 +88,57 @@ describe("DatabaseService bootstrap defaults", () => {
 });
 
 describe("DatabaseService storage diagnostics", () => {
+  it("persists custom OpenAI-compatible provider settings separately from built-in provider ids", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vicode-storage-"));
+    cleanupPaths.push(dir);
+
+    const db = createTestDatabase(dir);
+
+    const saved = db.saveCustomProvider({
+      name: "Gateway",
+      transportKind: "openai_compatible_chat",
+      baseUrl: "https://gateway.example/v1",
+      encryptedApiKey: "encrypted-compatible-key",
+      defaultModelId: "gateway-coder",
+      enabled: true,
+    });
+
+    expect(saved).toMatchObject({
+      name: "Gateway",
+      transportKind: "openai_compatible_chat",
+      baseUrl: "https://gateway.example/v1",
+      encryptedApiKey: "encrypted-compatible-key",
+      defaultModelId: "gateway-coder",
+      enabled: true,
+    });
+    expect(saved.id).toMatch(/^custom-provider-/);
+    expect(db.listCustomProviders()).toEqual([saved]);
+    expect(db.getCustomProvider(saved.id)).toEqual(saved);
+
+    const updated = db.saveCustomProvider({
+      id: saved.id,
+      name: "Gateway Updated",
+      transportKind: "openai_compatible_chat",
+      baseUrl: "https://gateway-updated.example/v1",
+      encryptedApiKey: "encrypted-compatible-key-2",
+      defaultModelId: "gateway-coder-latest",
+      enabled: false,
+    });
+
+    expect(updated).toMatchObject({
+      id: saved.id,
+      name: "Gateway Updated",
+      transportKind: "openai_compatible_chat",
+      baseUrl: "https://gateway-updated.example/v1",
+      encryptedApiKey: "encrypted-compatible-key-2",
+      defaultModelId: "gateway-coder-latest",
+      enabled: false,
+      createdAt: saved.createdAt,
+    });
+    expect(new Date(updated.updatedAt).getTime()).toBeGreaterThanOrEqual(new Date(saved.updatedAt).getTime());
+    expect(db.listCustomProviders()).toEqual([updated]);
+  });
+
   it("persists MCP server scope, project ownership, and lifecycle state", async () => {
     const dir = await mkdtemp(join(tmpdir(), "vicode-storage-"));
     cleanupPaths.push(dir);
@@ -157,6 +208,40 @@ describe("DatabaseService storage diagnostics", () => {
     expect(listed?.definition.projectId).toBe(project.id);
   });
 
+  it("persists remote MCP transport URL and headers separately from stdio command settings", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vicode-storage-"));
+    cleanupPaths.push(dir);
+
+    const db = createTestDatabase(dir);
+    const server = db.saveMcpServer({
+      name: "Remote MCP",
+      transportType: "streamable_http",
+      command: "",
+      url: "https://mcp.example.com/mcp",
+      headers: {
+        Authorization: "Bearer test-token",
+      },
+      enabled: true,
+      toolInvocationMode: "ask",
+      launchApproved: false,
+    });
+
+    expect(server.definition).toMatchObject({
+      name: "Remote MCP",
+      transportType: "streamable_http",
+      command: "",
+      args: [],
+      cwd: null,
+      env: {},
+      url: "https://mcp.example.com/mcp",
+      headers: {
+        Authorization: "Bearer test-token",
+      },
+      enabled: true,
+      launchApproved: false,
+    });
+  });
+
   it("persists the workspace runtime command and network policies on projects", async () => {
     const dir = await mkdtemp(join(tmpdir(), "vicode-storage-"));
     cleanupPaths.push(dir);
@@ -195,6 +280,9 @@ describe("DatabaseService storage diagnostics", () => {
     expect(db.getPreferences().accentColor).toBeNull();
     expect(db.getPreferences().generatedMemoryUseEnabled).toBe(false);
     expect(db.getPreferences().generatedMemoryGenerationEnabled).toBe(true);
+    expect(db.getPreferences().userLibraryPath).toBeNull();
+    expect(db.getPreferences().skillsLibraryPath).toBeNull();
+    expect(db.getPreferences().llmWikiLibraryPath).toBeNull();
 
     db.savePreferences({ appearanceMode: "light" });
     expect(db.getPreferences().appearanceMode).toBe("light");
@@ -212,31 +300,15 @@ describe("DatabaseService storage diagnostics", () => {
     });
     expect(db.getPreferences().generatedMemoryUseEnabled).toBe(true);
     expect(db.getPreferences().generatedMemoryGenerationEnabled).toBe(false);
-  });
 
-  it('persists personalization settings and provider-specific instructions', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'vicode-storage-'));
-    cleanupPaths.push(dir);
-
-    const db = createTestDatabase(dir);
-
-    expect(db.getPersonalization().globalInstructions).toBe('');
-    expect(db.getPersonalization().useWorkspaceInstructions).toBe(true);
-
-    db.savePersonalization({
-      globalInstructions: 'Keep replies direct.',
-      providerInstructions: {
-        openai: 'Prefer concise answers.',
-        gemini: 'Use structured output.'
-      },
-      useWorkspaceInstructions: false
+    db.savePreferences({
+      userLibraryPath: join(dir, "library"),
+      skillsLibraryPath: join(dir, "skills"),
+      llmWikiLibraryPath: join(dir, "wiki"),
     });
-
-    const personalization = db.getPersonalization();
-    expect(personalization.globalInstructions).toBe('Keep replies direct.');
-    expect(personalization.providerInstructions.openai).toBe('Prefer concise answers.');
-    expect(personalization.providerInstructions.gemini).toBe('Use structured output.');
-    expect(personalization.useWorkspaceInstructions).toBe(false);
+    expect(db.getPreferences().userLibraryPath).toBe(join(dir, "library"));
+    expect(db.getPreferences().skillsLibraryPath).toBe(join(dir, "skills"));
+    expect(db.getPreferences().llmWikiLibraryPath).toBe(join(dir, "wiki"));
   });
 
   it('clears stale selected project and last opened thread references from preferences', async () => {
@@ -1494,17 +1566,69 @@ describe("DatabaseService built-in skills", () => {
     const skills = db.listSkills();
 
     const concise = skills.find((skill) => skill.id === "built-in-concise");
-    const planner = skills.find((skill) => skill.id === "built-in-planner");
-    const pdfToolkit = skills.find(
-      (skill) => skill.id === "built-in-pdf-toolkit",
-    );
+    const reviewer = skills.find((skill) => skill.id === "built-in-reviewer");
+    const ids = skills.map((skill) => skill.id);
 
     expect(concise?.description).toContain("when the user wants");
-    expect(planner?.instructions).toContain(
-      "do not replace or fake the provider-native planner state machine",
+    expect(reviewer?.instructions).toContain("Lead with the highest-signal findings");
+    expect(ids).not.toEqual(
+      expect.arrayContaining([
+        "built-in-planner",
+        "built-in-pdf-toolkit",
+        "built-in-spreadsheet-analyst",
+        "built-in-doc-writer",
+        "built-in-slide-writer",
+      ]),
     );
-    expect(pdfToolkit?.instructions).toContain(
-      "Do not imply that a file was inspected when it was not provided.",
-    );
+  });
+
+  it("prunes stale built-in skills without touching user skills during migration", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vicode-skills-"));
+    cleanupPaths.push(dir);
+    const databasePath = join(dir, "vicode.sqlite");
+    const now = new Date().toISOString();
+
+    const legacyDb = new DatabaseService(databasePath);
+    legacyDb.migrate();
+    legacyDb.upsertSkill({
+      id: "built-in-planner",
+      name: "Planner",
+      description: "Old planning preset",
+      instructions: "Draft a plan.",
+      origin: "built_in_style",
+      scope: "global",
+      providerTargets: ["ollama"],
+      enabled: true,
+      projectId: null,
+      metadata: {},
+      path: "resources/built-in-skills/built-in-planner.md",
+      createdAt: now,
+      updatedAt: now,
+    });
+    legacyDb.upsertSkill({
+      id: "custom-planner",
+      name: "Custom Planner",
+      description: "User-owned planning skill",
+      instructions: "Plan the user's way.",
+      origin: "custom_local",
+      scope: "global",
+      providerTargets: ["ollama"],
+      enabled: true,
+      projectId: null,
+      metadata: {},
+      path: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    legacyDb.close();
+
+    const reopened = new DatabaseService(databasePath);
+    reopened.migrate();
+    cleanupDatabases.push(reopened);
+    const ids = reopened.listSkills().map((skill) => skill.id);
+
+    expect(ids).not.toContain("built-in-planner");
+    expect(ids).toContain("custom-planner");
+    expect(ids).toContain("built-in-reviewer");
   });
 });

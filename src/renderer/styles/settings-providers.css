@@ -1,0 +1,45 @@
+/* Provider settings compact overrides */
+
+.settings-provider-card {
+  gap: 11px;
+  padding: 12px;
+  border-radius: var(--settings-panel-radius);
+  border-color: var(--settings-group-border);
+  background: var(--settings-group-bg);
+  box-shadow: none;
+}
+
+.settings-provider-summary {
+  gap: 3px;
+  margin-top: 0;
+  padding: 9px 10px;
+}
+
+.settings-provider-default-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(168px, 220px);
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-provider-default-select {
+  min-width: 0;
+}
+
+.settings-provider-actions,
+.settings-provider-key {
+  margin-top: 0;
+}
+
+.settings-provider-advanced {
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top-color: var(--settings-row-border);
+}
+
+.settings-provider-key .ui-field,
+.settings-provider-save {
+  min-height: 30px;
+  border-radius: var(--settings-control-radius);
+}
+

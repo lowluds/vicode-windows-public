@@ -4,7 +4,7 @@
 ---
 type: concept
 status: active
-updated: 2026-04-23
+updated: 2026-04-25
 ---
 
 # Design Taste Translation
@@ -102,6 +102,7 @@ If the agent cannot state these clearly, it should not build the whole page yet.
 - decorative motion without meaning
 - "premium" effects used as filler instead of structure
 - decorative blobs, bokeh, gradients, and glow used as visual filler
+- image-like gradient panels with small top meta-label triplets such as "Design / Build / Grow", "Starter / Refresh / Custom", or "URL / Budget / Goal"
 - too many borders around objects that should be separated by spacing or type hierarchy
 - muddy or oversized shadows used to create fake depth
 - misaligned buttons, labels, controls, or media edges
@@ -115,6 +116,8 @@ If the agent cannot state these clearly, it should not build the whole page yet.
 If the agent cannot describe the visual system in plain language before coding, it probably does not understand the taste well enough yet.
 
 Keep typography styles consistent within a discrete task, component, or region unless a deliberate contrast is part of the hierarchy.
+
+For OpenAI-style generated visuals, CSS gradient cards, or image-like marketing panels, do not add generic top-row taxonomy labels unless the user explicitly asks for that pattern. Prefer one strong centered idea, purposeful negative space, and a few meaningful anchors only when they improve comprehension.
 
 ## Best Skill Pairings
 

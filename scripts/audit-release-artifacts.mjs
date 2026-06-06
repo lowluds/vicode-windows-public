@@ -10,6 +10,10 @@ const packageJson = JSON.parse(readFileSync(path.join(root, 'package.json'), 'ut
 const releaseDir = path.join(root, 'release');
 const winUnpackedDir = path.join(releaseDir, 'win-unpacked');
 const appAsarPath = path.join(winUnpackedDir, 'resources', 'app.asar');
+const requiredRuntimeResourceFiles = [
+  path.join(winUnpackedDir, 'resources', 'app-icon.ico'),
+  path.join(winUnpackedDir, 'resources', 'app-icon.png')
+];
 const packagedBetterSqlitePath = path.join(
   winUnpackedDir,
   'resources',
@@ -139,6 +143,12 @@ function main() {
   }
 
   const findings = [];
+
+  for (const filePath of requiredRuntimeResourceFiles) {
+    if (!existsSync(filePath)) {
+      findings.push(`Packaged runtime resource is missing: ${path.relative(root, filePath)}`);
+    }
+  }
 
   for (const fileName of forbiddenReleaseFiles) {
     if (existsSync(path.join(releaseDir, fileName))) {

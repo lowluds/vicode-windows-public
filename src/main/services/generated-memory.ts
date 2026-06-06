@@ -20,7 +20,7 @@ const MAX_COMMAND_CLAUSE_LENGTH = 420;
 const MAX_EXCERPT_LENGTH = 220;
 
 const WORKSPACE_CONVENTION_PATTERN =
-  /\b(canonical|source of truth|checked-in|checked in|workspace files?|repo docs?|agents\.md|soul\.md|user\.md|memory\.md|daily notes?)\b/iu;
+  /\b(canonical|source of truth|checked-in|checked in|workspace files?|repo docs?|agents\.md|user\.md|memory\.md|daily notes?)\b/iu;
 const USER_PREFERENCE_PATTERN =
   /\b(prefer|preferences?|always|never|do not|don't|keep|avoid|concise|brief|verbose|format|style|tone|explain|tradeoffs?)\b/iu;
 const KNOWN_PITFALL_PATTERN =

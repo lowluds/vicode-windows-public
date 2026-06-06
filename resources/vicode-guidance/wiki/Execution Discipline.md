@@ -13,6 +13,8 @@ updated: 2026-04-23
 
 Implementation should be tight, source-backed, and easy to verify.
 
+For common coding-agent mistakes around silent assumptions, overengineering, broad edits, and vague success criteria, also use [[Coding Agent Behavior Standard]].
+
 For non-trivial code changes, also use [[Code Organization Standard]] so implementation remains modular and reviewable.
 
 When work creates, replaces, or reveals stale files, also use [[Cleanup And Stale Artifact Discipline]].
@@ -25,14 +27,19 @@ When work creates, replaces, or reveals stale files, also use [[Cleanup And Stal
 - do not reformat unrelated files
 - prefer additive changes when possible
 - preserve working flows unless the task requires structural change
+- make each changed line traceable to the request, required cleanup from that change, or verification support
+- prefer simple, bounded control flow over clever branching, implicit recursion, uncontrolled retries, or unbounded loops
 - avoid dumping new behavior into one large file when a focused module, component, hook, service, or test file would be clearer
 - if a file is already large or gains a new responsibility, consider extraction before adding more code
 
 ## Dependency Discipline
 
+- before hand-rolling non-trivial commodity behavior, use [[Library-First Development]] to check existing repo utilities, official SDKs, and mature libraries
 - avoid new production dependencies unless there is a clear reason
-- justify new dependencies against existing utilities and repo conventions
+- accept a new dependency when it clearly reduces risk, complexity, edge-case burden, or delivery time compared with custom code
+- justify new dependencies against existing utilities, repo conventions, maintenance, license, security, bundle/runtime cost, and verification needs
 - prefer existing repo utilities before adding new helpers
+- when rejecting an obvious library candidate, state the reason briefly
 
 ## Reliability Loop
 
@@ -40,6 +47,8 @@ When work creates, replaces, or reveals stale files, also use [[Cleanup And Stal
 - run the repo's standard checks when feasible
 - report commands run and observed results
 - note what could not be verified
+- treat lint, typecheck, build, test, and static-analysis warnings as defects unless there is an explicit, source-backed reason to accept them
+- check tool/API return values, error states, and ignored results deliberately instead of assuming success
 
 ## Completion Discipline
 
@@ -58,5 +67,8 @@ When work creates, replaces, or reveals stale files, also use [[Cleanup And Stal
 ## Sources
 
 - project pattern sweep
+- [[Coding Agent Behavior Standard]]
+- [[Library-First Development]]
 - [[Code Organization Standard]]
 - [[Cleanup And Stale Artifact Discipline]]
+- [[Source - Power of 10 Safety-Critical Code]]

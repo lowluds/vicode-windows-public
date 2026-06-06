@@ -1,13 +1,23 @@
 import type { ComposerSubmitInput, ThreadDetail } from '../../shared/domain';
 
+type ComposerSubmitInputBuilderInput = ComposerSubmitInput;
+
 type OptimisticComposerInput = Pick<
   ComposerSubmitInput,
-  'prompt' | 'executionPermission' | 'skillIds' | 'imageAttachments' | 'textAttachments'
+  'prompt' | 'executionPermission' | 'isolationMode' | 'skillIds' | 'imageAttachments' | 'textAttachments'
 >;
 
 export interface OptimisticComposerThreadUpdate {
   thread: ThreadDetail;
   turnId: string;
+}
+
+export function buildComposerSubmitInput(input: ComposerSubmitInputBuilderInput): ComposerSubmitInput {
+  return {
+    ...input,
+    prompt: input.prompt.trim(),
+    isolationMode: input.isolationMode ?? 'direct_workspace'
+  };
 }
 
 export function applyOptimisticComposerTurn(
@@ -44,6 +54,7 @@ export function applyOptimisticComposerTurn(
           content: input.prompt,
           metadata: {
             executionPermission: input.executionPermission,
+            isolationMode: input.isolationMode ?? 'direct_workspace',
             imageAttachments: input.imageAttachments ?? [],
             textAttachments: input.textAttachments ?? [],
             skillIds: input.skillIds,

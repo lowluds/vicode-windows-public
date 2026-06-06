@@ -6,6 +6,7 @@ const api: VicodeApi = {
     getBootstrap: () => ipcRenderer.invoke('app:getBootstrap'),
     pickFolder: () => ipcRenderer.invoke('app:pickFolder'),
     openExternal: (url) => ipcRenderer.invoke('app:openExternal', { url }),
+    openPath: (path) => ipcRenderer.invoke('app:openPath', { path }),
     revealPath: (path) => ipcRenderer.invoke('app:revealPath', { path }),
     getMeta: () => ipcRenderer.invoke('app:getMeta'),
     getNativeTheme: () => ipcRenderer.invoke('app:getNativeTheme'),
@@ -24,18 +25,6 @@ const api: VicodeApi = {
     create: (input) => ipcRenderer.invoke('projects:create', input),
     update: (input) => ipcRenderer.invoke('projects:update', input),
     remove: (projectId) => ipcRenderer.invoke('projects:remove', { projectId })
-  },
-  workspaceBootstrap: {
-    getStatus: (projectId) => ipcRenderer.invoke('workspaceBootstrap:getStatus', { projectId }),
-    getQuestionnaire: () => ipcRenderer.invoke('workspaceBootstrap:getQuestionnaire'),
-    dismissSuggestion: (projectId) => ipcRenderer.invoke('workspaceBootstrap:dismissSuggestion', { projectId }),
-    createDrafts: (input) => ipcRenderer.invoke('workspaceBootstrap:createDrafts', input),
-    writeDrafts: (input) => ipcRenderer.invoke('workspaceBootstrap:writeDrafts', input)
-  },
-  memoryWrites: {
-    createDailyNoteReview: (threadId) => ipcRenderer.invoke('memoryWrites:createDailyNoteReview', { threadId }),
-    createMemoryPromotionReview: (threadId) => ipcRenderer.invoke('memoryWrites:createMemoryPromotionReview', { threadId }),
-    createUserPreferenceReview: (threadId) => ipcRenderer.invoke('memoryWrites:createUserPreferenceReview', { threadId })
   },
   threads: {
     list: (projectId) => ipcRenderer.invoke('threads:list', projectId),
@@ -68,7 +57,21 @@ const api: VicodeApi = {
   },
   runs: {
     approveToolApproval: (approvalId) => ipcRenderer.invoke('runs:approveToolApproval', { approvalId }),
-    rejectToolApproval: (approvalId) => ipcRenderer.invoke('runs:rejectToolApproval', { approvalId })
+    rejectToolApproval: (approvalId) => ipcRenderer.invoke('runs:rejectToolApproval', { approvalId }),
+    previewStagedWorkspaceChange: (input) => ipcRenderer.invoke('runs:previewStagedWorkspaceChange', input),
+    applyStagedWorkspaceChange: (input) => ipcRenderer.invoke('runs:applyStagedWorkspaceChange', input),
+    rejectStagedWorkspaceChange: (input) => ipcRenderer.invoke('runs:rejectStagedWorkspaceChange', input),
+    revertStagedWorkspaceChange: (input) => ipcRenderer.invoke('runs:revertStagedWorkspaceChange', input),
+    applyStagedWorkspaceHunks: (input) => ipcRenderer.invoke('runs:applyStagedWorkspaceHunks', input),
+    rejectStagedWorkspaceHunks: (input) => ipcRenderer.invoke('runs:rejectStagedWorkspaceHunks', input),
+    revertStagedWorkspaceHunks: (input) => ipcRenderer.invoke('runs:revertStagedWorkspaceHunks', input),
+    applyWorktreeReview: (input) => ipcRenderer.invoke('runs:applyWorktreeReview', input),
+    rejectWorktreeReview: (input) => ipcRenderer.invoke('runs:rejectWorktreeReview', input),
+    revertWorktreeReview: (input) => ipcRenderer.invoke('runs:revertWorktreeReview', input),
+    applyWorktreeHunks: (input) => ipcRenderer.invoke('runs:applyWorktreeHunks', input),
+    rejectWorktreeHunks: (input) => ipcRenderer.invoke('runs:rejectWorktreeHunks', input),
+    revertWorktreeHunks: (input) => ipcRenderer.invoke('runs:revertWorktreeHunks', input),
+    cleanupWorktreeReview: (input) => ipcRenderer.invoke('runs:cleanupWorktreeReview', input)
   },
   planner: {
     setMode: (input) => ipcRenderer.invoke('planner:setMode', input),
@@ -83,7 +86,10 @@ const api: VicodeApi = {
     adoptAuth: (providerId) => ipcRenderer.invoke('providers:adoptAuth', { providerId }),
     clearAuth: (providerId) => ipcRenderer.invoke('providers:clearAuth', providerId),
     saveApiKey: (providerId, apiKey) => ipcRenderer.invoke('providers:saveApiKey', { providerId, apiKey }),
-    refresh: (providerId) => ipcRenderer.invoke('providers:refresh', providerId)
+    refresh: (providerId) => ipcRenderer.invoke('providers:refresh', providerId),
+    listCustom: () => ipcRenderer.invoke('providers:listCustom'),
+    saveCustom: (input) => ipcRenderer.invoke('providers:saveCustom', input),
+    removeCustom: (providerId) => ipcRenderer.invoke('providers:removeCustom', { providerId })
   },
   ollamaRuntime: {
     getStatus: () => ipcRenderer.invoke('ollamaRuntime:getStatus'),
@@ -98,9 +104,18 @@ const api: VicodeApi = {
     detail: (skillId) => ipcRenderer.invoke('skills:detail', { skillId }),
     save: (input) => ipcRenderer.invoke('skills:save', input),
     toggle: (skillId, enabled) => ipcRenderer.invoke('skills:toggle', { skillId, enabled }),
-    sync: (skillId, providerId, enabled) => ipcRenderer.invoke('skills:sync', { skillId, providerId, enabled }),
     installSuggested: (input) => ipcRenderer.invoke('skills:installSuggested', input),
+    rescanLibrary: () => ipcRenderer.invoke('skills:rescanLibrary'),
     remove: (skillId) => ipcRenderer.invoke('skills:remove', { skillId })
+  },
+  library: {
+    getSources: () => ipcRenderer.invoke('library:getSources')
+  },
+  projectKnowledge: {
+    getIndexStatus: () => ipcRenderer.invoke('projectKnowledge:getIndexStatus'),
+    refreshIndex: () => ipcRenderer.invoke('projectKnowledge:refreshIndex'),
+    suggestIndex: () => ipcRenderer.invoke('projectKnowledge:suggestIndex'),
+    openSuggestedIndexDraft: () => ipcRenderer.invoke('projectKnowledge:openSuggestedIndexDraft')
   },
   automations: {
     list: () => ipcRenderer.invoke('automations:list'),
@@ -109,17 +124,6 @@ const api: VicodeApi = {
     toggle: (automationId, enabled) => ipcRenderer.invoke('automations:toggle', { automationId, enabled }),
     remove: (automationId) => ipcRenderer.invoke('automations:delete', { automationId }),
     runNow: (automationId) => ipcRenderer.invoke('automations:runNow', { automationId })
-  },
-  vicodeBuild: {
-    getSnapshot: (projectId) => ipcRenderer.invoke('vicodeBuild:getSnapshot', { projectId }),
-    generatePlanDraft: (input) => ipcRenderer.invoke('vicodeBuild:generatePlanDraft', input),
-    createPlan: (input) => ipcRenderer.invoke('vicodeBuild:createPlan', input),
-    createPlanFromThread: (threadId) => ipcRenderer.invoke('vicodeBuild:createPlanFromThread', { threadId }),
-    setTeamPaused: (input) => ipcRenderer.invoke('vicodeBuild:setTeamPaused', input),
-    wakeLane: (input) => ipcRenderer.invoke('vicodeBuild:wakeLane', input),
-    retryLane: (input) => ipcRenderer.invoke('vicodeBuild:retryLane', input),
-    clearInactivePlans: (projectId) => ipcRenderer.invoke('vicodeBuild:clearInactivePlans', { projectId }),
-    runVerification: (projectId) => ipcRenderer.invoke('vicodeBuild:runVerification', { projectId })
   },
   jobs: {
     list: () => ipcRenderer.invoke('jobs:list'),
@@ -147,13 +151,12 @@ const api: VicodeApi = {
   },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
-    save: (input) => ipcRenderer.invoke('settings:save', input),
-    getPersonalization: () => ipcRenderer.invoke('settings:getPersonalization'),
-    savePersonalization: (input) => ipcRenderer.invoke('settings:savePersonalization', input)
+    save: (input) => ipcRenderer.invoke('settings:save', input)
   },
   diagnostics: {
     export: () => ipcRenderer.invoke('diagnostics:export'),
     exportThread: (threadId) => ipcRenderer.invoke('diagnostics:exportThread', { threadId }),
+    exportThreadReport: (threadId) => ipcRenderer.invoke('diagnostics:exportThreadReport', { threadId }),
     getStorage: () => ipcRenderer.invoke('diagnostics:getStorage'),
     compactRunEvents: () => ipcRenderer.invoke('diagnostics:compactRunEvents'),
     maintainStorage: (input?: { vacuum?: boolean }) => ipcRenderer.invoke('diagnostics:maintainStorage', input)

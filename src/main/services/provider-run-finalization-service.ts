@@ -1,11 +1,16 @@
 import { collectThreadSourcesFromRunArtifacts } from '../../shared/thread-sources';
-import type { RunChangeArtifact, RunToolApprovalDecision } from '../../shared/domain';
+import type {
+  RunChangeArtifact,
+  RunToolApprovalDecision,
+  RunWorktreeChangeEvidence
+} from '../../shared/domain';
 import type { AppEvent } from '../../shared/events';
 import type { DatabaseService } from '../../storage/database';
 import { deriveRunChangeArtifact, type WorkspaceSnapshot } from './workspace-changes';
 import { ProviderRunEventService } from './provider-run-event-service';
 import { ProviderRunProgressService } from './provider-run-progress-service';
 import { ThreadProjectionService } from './thread-projection-service';
+import type { HarnessWorktreeSession } from './harness-worktree-session';
 
 function formatRunChangeSummary(filesChanged: number) {
   return filesChanged === 1 ? '1 file changed' : `${filesChanged} files changed`;
@@ -13,6 +18,36 @@ function formatRunChangeSummary(filesChanged: number) {
 
 function serializeRunChangeArtifact(artifact: RunChangeArtifact | null) {
   return JSON.stringify(artifact ?? null);
+}
+
+function buildWorktreeChangeEvidence(input: {
+  artifact: RunChangeArtifact | null;
+  runId: string;
+  session: HarnessWorktreeSession;
+  threadId: string;
+}): RunWorktreeChangeEvidence {
+  const summary = input.artifact?.summary ?? {
+    filesChanged: 0,
+    insertions: 0,
+    deletions: 0
+  };
+
+  return {
+    threadId: input.threadId,
+    runId: input.runId,
+    isolationMode: 'git_worktree',
+    status: input.session.status,
+    reviewStatus: input.session.reviewStatus,
+    cleanupPolicy: input.session.cleanupPolicy,
+    sourceWorkspaceRelativePath: input.session.sourceWorkspaceRelativePath,
+    branchName: input.session.branchName,
+    baseRef: input.session.baseRef,
+    baseSha: input.session.baseSha,
+    filesChanged: summary.filesChanged,
+    insertions: summary.insertions,
+    deletions: summary.deletions,
+    changedPaths: input.artifact?.files.map((file) => file.path) ?? []
+  };
 }
 
 type FinalizationDb = Pick<
@@ -57,12 +92,16 @@ export class ProviderRunFinalizationService {
     projectFolderPath: string;
     approvedPlan: boolean;
     titlePrompt: string | null;
+    changeArtifactSource?: RunChangeArtifact['source'];
+    harnessWorktreeSession?: HarnessWorktreeSession | null;
   }) {
     this.host.clearPendingToolApprovals(input.runId, 'cancelled');
     this.host.runEvents.clearRunInfo(input.runId);
     this.host.runProgress.clearPersisted(input.runId);
     const previousChangeArtifact = this.lastChangeArtifactByRun.get(input.runId) ?? null;
-    const changeArtifact = deriveRunChangeArtifact(input.workspaceSnapshot, input.projectFolderPath);
+    const changeArtifact = deriveRunChangeArtifact(input.workspaceSnapshot, input.projectFolderPath, {
+      source: input.changeArtifactSource
+    });
     if (changeArtifact) {
       if (serializeRunChangeArtifact(previousChangeArtifact) !== serializeRunChangeArtifact(changeArtifact)) {
         this.emitLiveFileEditEvents(input.threadId, input.runId, previousChangeArtifact, changeArtifact);
@@ -86,6 +125,19 @@ export class ProviderRunFinalizationService {
         }
       });
       this.host.emit({ type: 'raw.event', event: changeEvent });
+    }
+    if (input.harnessWorktreeSession) {
+      const worktreeChangeEvent = this.host.db.addRunEvent(input.threadId, input.runId, 'info', {
+        worktreeChangeEvidence: buildWorktreeChangeEvidence({
+          artifact: changeArtifact,
+          runId: input.runId,
+          session: input.harnessWorktreeSession,
+          threadId: input.threadId
+        }),
+        eventKind: 'debug_detail',
+        transcriptVisible: false
+      });
+      this.host.emit({ type: 'raw.event', event: worktreeChangeEvent });
     }
     this.host.runProgress.complete(input.runId);
     const thread = this.host.db.getThread(input.threadId);

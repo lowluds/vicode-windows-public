@@ -8,11 +8,12 @@ import { closeApp, launchApp } from './helpers/electron';
 const workspaceRoot = path.join(process.cwd(), 'test', '.e2e-workspaces', 'review-queue');
 
 async function openAutomations(window: Page) {
-  const getStarted = window.getByRole('button', { name: 'Get Started' });
-  if (await getStarted.isVisible().catch(() => false)) {
-    await getStarted.click();
+  const automationsNav = window.getByTestId('nav-automations');
+  if (await automationsNav.isVisible().catch(() => false)) {
+    await automationsNav.click();
+  } else {
+    await window.getByRole('button', { name: 'View queue' }).click();
   }
-  await window.getByTestId('nav-automations').click();
   await expect(window.getByRole('heading', { name: 'Automations', exact: true })).toBeVisible();
 }
 
@@ -58,9 +59,8 @@ test('rejects a pending automation review from the automations view', async () =
     const seeded = await window.evaluate(async (workspaceRoot) => {
       const bootstrap = await window.vicode.app.getBootstrap();
       const provider =
-        bootstrap.providers.find((entry) => entry.id === 'openai') ??
-        bootstrap.providers.find((entry) => entry.id === 'gemini') ??
         bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+        bootstrap.providers.find((entry) => entry.id === 'openai_compatible') ??
         null;
       if (!provider) {
         throw new Error('Expected a release-facing provider for the review queue test.');
@@ -76,7 +76,7 @@ test('rejects a pending automation review from the automations view', async () =
         project.defaultModelByProvider[provider.id] ??
         bootstrap.preferences.defaultModelByProvider[provider.id] ??
         provider.models[0]?.id ??
-        'gpt-5';
+        'qwen2.5-coder:14b-instruct-q6_K';
       const automation = await window.vicode.automations.save({
         name: `Review queue smoke ${suffix}`,
         projectId: project.id,
@@ -160,7 +160,7 @@ test('rejects a pending automation review from the automations view', async () =
 
 test('edits a manual review draft before approving the file write', async () => {
   const { app, window: launchedWindow } = await launchApp({
-    bridgePaths: ['vicode.app', 'vicode.projects', 'vicode.threads', 'vicode.composer', 'vicode.memoryWrites', 'vicode.jobs']
+    bridgePaths: ['vicode.app', 'vicode.projects', 'vicode.threads', 'vicode.composer', 'vicode.jobs']
   });
 
   let window: Page | null = launchedWindow;
@@ -177,9 +177,8 @@ test('edits a manual review draft before approving the file write', async () => 
       async ({ projectName, projectPath }) => {
         const bootstrap = await window.vicode.app.getBootstrap();
         const provider =
-          bootstrap.providers.find((entry) => entry.id === 'openai') ??
-          bootstrap.providers.find((entry) => entry.id === 'gemini') ??
           bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+          bootstrap.providers.find((entry) => entry.id === 'openai_compatible') ??
           null;
         if (!provider) {
           throw new Error('Expected a release-facing provider for manual review setup.');
@@ -203,7 +202,7 @@ test('edits a manual review draft before approving the file write', async () => 
           project.defaultModelByProvider[provider.id] ??
           bootstrap.preferences.defaultModelByProvider[provider.id] ??
           provider.models[0]?.id ??
-          'gpt-5';
+          'qwen2.5-coder:14b-instruct-q6_K';
 
         const thread = await window.vicode.threads.create({
           projectId: project.id,
@@ -278,11 +277,11 @@ test('edits a manual review draft before approving the file write', async () => 
           })
           connection.execute(
             "INSERT INTO jobs (id, project_id, source_type, source_id, title, status, thread_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (job_id, project_id, 'manual', f'daily-note:{thread_id}:manual-test', 'Capture daily note', 'waiting_for_review', thread_id, now, now)
+            (job_id, project_id, 'manual', f'daily-note:{thread_id}:manual-test', 'Capture project checkpoint', 'waiting_for_review', thread_id, now, now)
           )
           connection.execute(
             "INSERT INTO review_items (id, job_id, job_run_id, kind, status, summary, details_json, decision_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (review_item_id, job_id, None, 'manual_review', 'pending', 'Review daily note update', details, None, now, now)
+            (review_item_id, job_id, None, 'manual_review', 'pending', 'Review project checkpoint', details, None, now, now)
           )
           connection.commit()
         finally:
@@ -298,6 +297,9 @@ test('edits a manual review draft before approving the file write', async () => 
         `memory/${new Date().toISOString().slice(0, 10)}.md`
       ]
     );
+
+    await window.reload();
+    await window.waitForLoadState('domcontentloaded');
 
     await expect
       .poll(async () => {
@@ -318,7 +320,7 @@ test('edits a manual review draft before approving the file write', async () => 
     await reviewCard.getByRole('button', { name: 'Save draft changes' }).click();
     await expect(reviewCard.getByText('Edited locally')).toHaveCount(0);
 
-    await reviewCard.getByRole('button', { name: 'Approve and write' }).click();
+    await reviewCard.getByRole('button', { name: 'Approve' }).click();
     await expect(reviewCard).toHaveCount(0);
 
     const pendingReviewStillExists = await window.evaluate(async (targetReviewItemId) => {

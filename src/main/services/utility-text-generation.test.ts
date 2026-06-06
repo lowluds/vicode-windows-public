@@ -32,7 +32,6 @@ function createAdapter(providerId: ProviderId, startRun?: ProviderAdapter['start
     getAuthState: async () => ({ authState: 'disconnected', authMode: null }),
     startAuth: async () => {},
     clearAuth: async () => {},
-    discoverNativeSkills: async () => [],
     validateProjectContext: () => ({ valid: true }),
     startRun:
       startRun ??

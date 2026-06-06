@@ -1,7 +1,14 @@
 import { app, dialog, ipcMain, shell, systemPreferences } from 'electron';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { basename, extname, join, resolve } from 'node:path';
 import type { BrowserWindow } from 'electron';
-import type { ProviderId } from '../shared/domain';
+import type {
+  LibrarySourceEntry,
+  LibrarySourceSummary,
+  Preferences,
+  ProjectKnowledgeIndexStatus,
+  ProjectKnowledgeSuggestedIndexDraft
+} from '../shared/domain';
 import type { MicrophoneAccessStatus } from '../shared/ipc';
 import { createEmptyCollaborationBootstrap } from '../shared/collaboration-bootstrap';
 import { COLLABORATION_ENABLED } from '../shared/product-flags';
@@ -10,13 +17,6 @@ import {
   automationIdSchema,
   automationSaveSchema,
   automationToggleSchema,
-  vicodeBuildLaneActionSchema,
-  vicodeBuildClearPlansSchema,
-  vicodeBuildPlanCreateSchema,
-  vicodeBuildPlanDraftSchema,
-  vicodeBuildPlanFromThreadSchema,
-  vicodeBuildProjectSchema,
-  vicodeBuildTeamPauseSchema,
   collabConfigSaveSchema,
   collabCreateDirectChatSchema,
   collabCreateGuestProfileSchema,
@@ -37,6 +37,8 @@ import {
   composerTextAttachmentCreateSchema,
   composerTextAttachmentDeleteSchema,
   composerSubmitSchema,
+  customProviderIdSchema,
+  customProviderSettingsSaveSchema,
   plannerAnswerSchema,
   plannerApprovePlanSchema,
   plannerCancelSchema,
@@ -48,24 +50,30 @@ import {
   filePathSchema,
   diagnosticsCompactionSchema,
   diagnosticsMaintenanceSchema,
-  personalizationSaveSchema,
   preferenceSaveSchema,
   projectCreateSchema,
   projectIdSchema,
+  projectIdValueSchema,
   projectUpdateSchema,
   providerAuthAdoptSchema,
   providerApiKeySchema,
   providerAuthStartSchema,
+  providerIdSchema,
   ollamaModelMutationSchema,
   renameThreadSchema,
   reviewDraftUpdateSchema,
   runToolApprovalIdSchema,
   runStopSchema,
+  stagedWorkspaceHunkApplySchema,
+  stagedWorkspaceHunkRejectSchema,
+  stagedWorkspaceReviewSchema,
+  worktreeHunkApplySchema,
+  worktreeHunkRejectSchema,
+  worktreeReviewSchema,
   reviewItemIdSchema,
   skillIdSchema,
   skillSaveSchema,
   skillSuggestedInstallSchema,
-  skillSyncSchema,
   skillToggleSchema,
   voiceTranscriptionSchema,
   threadDraftSaveSchema,
@@ -74,7 +82,6 @@ import {
   threadFollowUpUpdateSchema,
   threadCreateSchema,
   threadExecutionPermissionSchema,
-  memoryWriteThreadSchema,
   mcpServerIdSchema,
   mcpRecommendedSetupSchema,
   mcpServerEnabledSchema,
@@ -82,10 +89,7 @@ import {
   subagentIdSchema,
   subagentListSchema,
   subagentSpawnSchema,
-  threadIdSchema,
-  workspaceBootstrapCreateDraftsSchema,
-  workspaceBootstrapStatusSchema,
-  workspaceBootstrapWriteDraftsSchema
+  threadIdSchema
 } from '../shared/schemas';
 import type { AppEvent } from '../shared/events';
 import { DatabaseService } from '../storage/database';
@@ -93,6 +97,7 @@ import { AutomationScheduler } from './services/automation-scheduler';
 import { AppUpdaterService } from './services/app-updater';
 import { DiagnosticsService } from './services/diagnostics';
 import { JobsService } from './services/jobs';
+import { LibraryWatchService } from './services/library-watch-service';
 import { OllamaRuntimeService } from './services/ollama-runtime';
 import { ProviderManager } from './services/provider-manager';
 import { SkillCatalogService } from './services/skills';
@@ -100,10 +105,11 @@ import { CollaborationService } from './services/collab';
 import { ComposerTextAttachmentService } from './services/composer-text-attachments';
 import { AutonomousTaskService } from './services/autonomous-tasks';
 import { McpRegistryService } from './services/mcp/registry';
-import { WorkspaceBootstrapService } from './services/workspace-bootstrap';
-import { VicodeBuildControlService } from './services/vicode-build-control';
 import { VoiceService } from './services/voice';
 import { SubagentOrchestratorService } from './services/subagents';
+import { ProjectKnowledgeIndexService } from './services/project-knowledge-index';
+import { isProjectKnowledgeIndexFresh } from './services/project-knowledge';
+import { createProjectKnowledgeSuggestedIndexDraft } from './services/project-knowledge-suggested-index';
 
 interface Services {
   db: DatabaseService;
@@ -111,14 +117,13 @@ interface Services {
   providers: ProviderManager;
   ollamaRuntime: OllamaRuntimeService;
   skills: SkillCatalogService;
+  libraryWatch?: LibraryWatchService;
   automations: AutomationScheduler;
-  vicodeBuild: VicodeBuildControlService;
   diagnostics: DiagnosticsService;
   mcp: McpRegistryService;
   jobs: JobsService;
   autonomousTasks?: AutonomousTaskService;
   subagents?: SubagentOrchestratorService;
-  workspaceBootstrap: WorkspaceBootstrapService;
   voice: VoiceService;
   collab?: CollaborationService;
   composerTextAttachments: ComposerTextAttachmentService;
@@ -128,10 +133,324 @@ const DEFAULT_WINDOWS_ACCENT = '#3f3f3f';
 const APP_ZOOM_STEP = 0.1;
 const APP_ZOOM_MIN = 0.75;
 const APP_ZOOM_MAX = 1.6;
+const LIBRARY_ENTRY_LIMIT = 48;
+const PROJECT_KNOWLEDGE_DIAGNOSTIC_PREVIEW_LIMIT = 5;
 
 function clampAppZoomFactor(value: number) {
   const bounded = Math.min(APP_ZOOM_MAX, Math.max(APP_ZOOM_MIN, value));
   return Math.round(bounded * 100) / 100;
+}
+
+function isReadableDirectory(path: string | null): path is string {
+  if (!path) {
+    return false;
+  }
+  try {
+    return existsSync(path) && statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function sourceSummary(
+  kind: LibrarySourceSummary['kind'],
+  label: string,
+  path: string | null,
+  entries: LibrarySourceEntry[],
+  emptyMessage: string
+): LibrarySourceSummary {
+  if (!path) {
+    return {
+      kind,
+      label,
+      path: null,
+      status: 'not_configured',
+      message: `${label} is not configured.`,
+      entries: []
+    };
+  }
+
+  if (!isReadableDirectory(path)) {
+    return {
+      kind,
+      label,
+      path,
+      status: 'missing',
+      message: `${label} folder is unavailable.`,
+      entries: []
+    };
+  }
+
+  return {
+    kind,
+    label,
+    path,
+    status: entries.length > 0 ? 'ready' : 'empty',
+    message: entries.length > 0 ? `${entries.length} item${entries.length === 1 ? '' : 's'} found.` : emptyMessage,
+    entries
+  };
+}
+
+function listTopLevelFolders(path: string | null): LibrarySourceEntry[] {
+  if (!isReadableDirectory(path)) {
+    return [];
+  }
+
+  return readdirSync(path, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+    .slice(0, LIBRARY_ENTRY_LIMIT)
+    .map((entry) => ({
+      id: `folder:${entry.name}`,
+      name: entry.name,
+      kind: 'folder',
+      path: join(path, entry.name)
+    }));
+}
+
+function listSkillBundles(path: string | null): LibrarySourceEntry[] {
+  if (!isReadableDirectory(path)) {
+    return [];
+  }
+
+  return readdirSync(path, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && existsSync(join(path, entry.name, 'SKILL.md')))
+    .slice(0, LIBRARY_ENTRY_LIMIT)
+    .map((entry) => ({
+      id: `skill:${entry.name}`,
+      name: entry.name,
+      kind: 'skill',
+      path: join(path, entry.name, 'SKILL.md')
+    }));
+}
+
+function listWikiEntries(path: string | null): LibrarySourceEntry[] {
+  if (!isReadableDirectory(path)) {
+    return [];
+  }
+
+  return readdirSync(path, { withFileTypes: true })
+    .filter((entry) => {
+      if (entry.name.startsWith('.') || entry.name.toLowerCase() === 'tmp') {
+        return false;
+      }
+      return entry.isDirectory() || extname(entry.name).toLowerCase() === '.md';
+    })
+    .slice(0, LIBRARY_ENTRY_LIMIT)
+    .map((entry) => ({
+      id: `${entry.isDirectory() ? 'wiki-folder' : 'wiki'}:${entry.name}`,
+      name: entry.isDirectory() ? entry.name : basename(entry.name, extname(entry.name)),
+      kind: entry.isDirectory() ? 'folder' : 'wiki',
+      path: join(path, entry.name)
+    }));
+}
+
+function buildLibrarySourcesSnapshot(preferences: Preferences) {
+  const userLibraryPath = preferences.userLibraryPath ? resolve(preferences.userLibraryPath) : null;
+  const skillsLibraryPath = preferences.skillsLibraryPath ? resolve(preferences.skillsLibraryPath) : null;
+  const llmWikiLibraryPath = preferences.llmWikiLibraryPath ? resolve(preferences.llmWikiLibraryPath) : null;
+
+  return {
+    userLibrary: sourceSummary(
+      'user_library',
+      'User Library',
+      userLibraryPath,
+      listTopLevelFolders(userLibraryPath),
+      'No folders found in the user library.'
+    ),
+    skills: sourceSummary(
+      'skills',
+      'Skills Folder',
+      skillsLibraryPath,
+      listSkillBundles(skillsLibraryPath),
+      'No SKILL.md bundles found.'
+    ),
+    llmWiki: sourceSummary(
+      'llm_wiki',
+      'Project Knowledge Folder',
+      llmWikiLibraryPath,
+      listWikiEntries(llmWikiLibraryPath),
+      'No markdown files or knowledge folders found.'
+    )
+  };
+}
+
+function projectKnowledgeIndexMessage(snapshot: {
+  indexedFileCount: number;
+  sectionCount: number;
+  diagnosticCount: number;
+  warningCount: number;
+}) {
+  const indexed = `${snapshot.indexedFileCount} indexed file${snapshot.indexedFileCount === 1 ? '' : 's'}`;
+  const sections = `${snapshot.sectionCount} section${snapshot.sectionCount === 1 ? '' : 's'}`;
+  if (snapshot.diagnosticCount === 0) {
+    return `${indexed}, ${sections}. No diagnostics.`;
+  }
+  const diagnostics = `${snapshot.diagnosticCount} diagnostic${snapshot.diagnosticCount === 1 ? '' : 's'}`;
+  const warnings = snapshot.warningCount > 0
+    ? `, ${snapshot.warningCount} warning${snapshot.warningCount === 1 ? '' : 's'}`
+    : '';
+  return `${indexed}, ${sections}. ${diagnostics}${warnings}.`;
+}
+
+function projectKnowledgeDiagnosticRank(severity: string) {
+  switch (severity) {
+    case 'error':
+      return 0;
+    case 'warning':
+      return 1;
+    default:
+      return 2;
+  }
+}
+
+function buildProjectKnowledgeIndexStatus(
+  db: DatabaseService,
+  preferences: Preferences = db.getPreferences()
+): ProjectKnowledgeIndexStatus {
+  const rootPath = preferences.llmWikiLibraryPath ? resolve(preferences.llmWikiLibraryPath) : null;
+  if (!rootPath) {
+    return {
+      status: 'not_configured',
+      path: null,
+      indexedFileCount: 0,
+      sectionCount: 0,
+      diagnosticCount: 0,
+      warningCount: 0,
+      diagnostics: [],
+      lastRefreshedAt: null,
+      lastError: null,
+      message: 'Project Knowledge index is not configured.'
+    };
+  }
+
+  if (!isReadableDirectory(rootPath)) {
+    return {
+      status: 'missing',
+      path: rootPath,
+      indexedFileCount: 0,
+      sectionCount: 0,
+      diagnosticCount: 0,
+      warningCount: 0,
+      diagnostics: [],
+      lastRefreshedAt: null,
+      lastError: null,
+      message: 'Project Knowledge folder is unavailable.'
+    };
+  }
+
+  const snapshot = db.getProjectKnowledgeIndexSnapshotByRootPath(rootPath);
+  if (!snapshot) {
+    return {
+      status: 'not_indexed',
+      path: rootPath,
+      indexedFileCount: 0,
+      sectionCount: 0,
+      diagnosticCount: 0,
+      warningCount: 0,
+      diagnostics: [],
+      lastRefreshedAt: null,
+      lastError: null,
+      message: 'Project Knowledge index has not been refreshed yet.'
+    };
+  }
+
+  const diagnostics = [...snapshot.diagnostics]
+    .sort((first, second) =>
+      projectKnowledgeDiagnosticRank(first.severity) - projectKnowledgeDiagnosticRank(second.severity)
+      || (first.relativePath ?? '').localeCompare(second.relativePath ?? '')
+      || first.code.localeCompare(second.code)
+    )
+    .slice(0, PROJECT_KNOWLEDGE_DIAGNOSTIC_PREVIEW_LIMIT)
+    .map((diagnostic) => ({
+      severity: diagnostic.severity,
+      code: diagnostic.code,
+      relativePath: diagnostic.relativePath,
+      message: diagnostic.message,
+      suggestedAction: diagnostic.suggestedAction
+    }));
+
+  const indexFresh = isProjectKnowledgeIndexFresh(rootPath, snapshot);
+  const status: ProjectKnowledgeIndexStatus = {
+    status: snapshot.root.lastError ? 'failed' : indexFresh ? 'ready' : 'stale',
+    path: rootPath,
+    indexedFileCount: snapshot.root.fileCount,
+    sectionCount: snapshot.root.sectionCount,
+    diagnosticCount: snapshot.root.diagnosticCount,
+    warningCount: snapshot.root.warningCount,
+    diagnostics,
+    lastRefreshedAt: snapshot.root.lastRefreshedAt,
+    lastError: snapshot.root.lastError,
+    message: ''
+  };
+  status.message = status.lastError
+    ?? (indexFresh
+      ? projectKnowledgeIndexMessage(status)
+      : 'Project Knowledge index needs refresh because the folder changed.');
+  return status;
+}
+
+function refreshProjectKnowledgeIndex(db: DatabaseService): ProjectKnowledgeIndexStatus {
+  const preferences = db.getPreferences();
+  const rootPath = preferences.llmWikiLibraryPath ? resolve(preferences.llmWikiLibraryPath) : null;
+  if (!rootPath || !isReadableDirectory(rootPath)) {
+    return buildProjectKnowledgeIndexStatus(db, preferences);
+  }
+
+  const service = new ProjectKnowledgeIndexService({
+    isFts5Available: () => db.isProjectKnowledgeFts5Available(),
+    replaceRootIndex: (input) => db.replaceProjectKnowledgeRootIndex(input)
+  });
+  service.refreshIndex({ rootPath });
+  return buildProjectKnowledgeIndexStatus(db, preferences);
+}
+
+function suggestProjectKnowledgeIndex(db: DatabaseService) {
+  const preferences = db.getPreferences();
+  const rootPath = preferences.llmWikiLibraryPath ? resolve(preferences.llmWikiLibraryPath) : null;
+  if (!rootPath) {
+    throw new Error('Project Knowledge folder is not configured.');
+  }
+  if (!isReadableDirectory(rootPath)) {
+    throw new Error('Project Knowledge folder is unavailable.');
+  }
+
+  let snapshot = db.getProjectKnowledgeIndexSnapshotByRootPath(rootPath);
+  if (!snapshot) {
+    refreshProjectKnowledgeIndex(db);
+    snapshot = db.getProjectKnowledgeIndexSnapshotByRootPath(rootPath);
+  }
+  if (!snapshot) {
+    throw new Error('Project Knowledge index is not available.');
+  }
+
+  return createProjectKnowledgeSuggestedIndexDraft(snapshot);
+}
+
+function suggestedIndexDraftFileName(draft: ProjectKnowledgeSuggestedIndexDraft) {
+  const timestamp = draft.generatedAt.replace(/[^0-9A-Za-z-]/g, '-');
+  return `Suggested-Project-Knowledge-INDEX-${timestamp}.md`;
+}
+
+async function openProjectKnowledgeSuggestedIndexDraft(db: DatabaseService) {
+  const draft = suggestProjectKnowledgeIndex(db);
+  const draftsRoot = join(app.getPath('userData'), 'state', 'project-knowledge-drafts');
+  mkdirSync(draftsRoot, { recursive: true });
+
+  const draftPath = join(draftsRoot, suggestedIndexDraftFileName(draft));
+  writeFileSync(draftPath, `${draft.content.trimEnd()}\n`, 'utf8');
+
+  const errorMessage = await shell.openPath(draftPath);
+  if (errorMessage) {
+    throw new Error(errorMessage);
+  }
+
+  return {
+    targetRelativePath: draft.targetRelativePath,
+    generatedAt: draft.generatedAt,
+    sourceCount: draft.sourceCount,
+    diagnosticCount: draft.diagnosticCount,
+    path: draftPath
+  };
 }
 
 function getMicrophoneAccessStatus(): MicrophoneAccessStatus {
@@ -192,6 +511,7 @@ export function registerIpc(
   const unsubscribeOllamaRuntime = services.ollamaRuntime?.onEvent(sendEvent) ?? (() => undefined);
   const unsubscribeCollab = COLLABORATION_ENABLED ? services.collab?.onEvent(sendEvent) ?? (() => undefined) : (() => undefined);
   const unsubscribeUpdater = services.updater?.onEvent(sendEvent) ?? (() => undefined);
+  const unsubscribeLibraryWatch = services.libraryWatch?.onEvent(sendEvent) ?? (() => undefined);
 
   ipcMain.handle('app:getBootstrap', async () => {
     const [bootstrap, providers] = await Promise.all([services.db.getBootstrapData(), services.providers.listProviders()]);
@@ -208,6 +528,13 @@ export function registerIpc(
   });
   ipcMain.handle('app:openExternal', async (_event, input) => {
     await shell.openExternal(externalUrlSchema.parse(input).url);
+  });
+  ipcMain.handle('app:openPath', async (_event, input) => {
+    const targetPath = filePathSchema.parse(input).path;
+    const errorMessage = await shell.openPath(targetPath);
+    if (errorMessage) {
+      throw new Error(errorMessage);
+    }
   });
   ipcMain.handle('app:revealPath', async (_event, input) => {
     shell.showItemInFolder(filePathSchema.parse(input).path);
@@ -250,41 +577,7 @@ export function registerIpc(
   ipcMain.handle('projects:create', (_event, input) => services.db.createProject(projectCreateSchema.parse(input)));
   ipcMain.handle('projects:update', (_event, input) => services.db.updateProject(projectUpdateSchema.parse(input)));
   ipcMain.handle('projects:remove', (_event, input) => services.db.deleteProject(projectIdSchema.parse(input).projectId));
-  ipcMain.handle('workspaceBootstrap:getStatus', (_event, input) => {
-    const data = workspaceBootstrapStatusSchema.parse(input);
-    return services.workspaceBootstrap.getStatus(services.db.getProject(data.projectId));
-  });
-  ipcMain.handle('workspaceBootstrap:getQuestionnaire', () => services.workspaceBootstrap.getQuestionnaire());
-  ipcMain.handle('workspaceBootstrap:dismissSuggestion', (_event, input) => {
-    const data = workspaceBootstrapStatusSchema.parse(input);
-    const project = services.db.getProject(data.projectId);
-    services.workspaceBootstrap.dismissSuggestion(project);
-    return services.workspaceBootstrap.getStatus(project);
-  });
-  ipcMain.handle('workspaceBootstrap:createDrafts', (_event, input) => {
-    const data = workspaceBootstrapCreateDraftsSchema.parse(input);
-    return services.workspaceBootstrap.createDrafts(services.db.getProject(data.projectId), data.answers, {
-      includeSoul: data.includeSoul,
-      includeDailyNote: data.includeDailyNote,
-      overwriteExisting: data.overwriteExisting
-    });
-  });
-  ipcMain.handle('workspaceBootstrap:writeDrafts', (_event, input) => {
-    const data = workspaceBootstrapWriteDraftsSchema.parse(input);
-    return services.workspaceBootstrap.writeDrafts(services.db.getProject(data.projectId), data.drafts, {
-      overwriteExisting: data.overwriteExisting
-    });
-  });
-  ipcMain.handle('memoryWrites:createDailyNoteReview', (_event, input) =>
-    services.jobs.createDailyNoteReview(memoryWriteThreadSchema.parse(input).threadId)
-  );
-  ipcMain.handle('memoryWrites:createMemoryPromotionReview', (_event, input) =>
-    services.jobs.createMemoryPromotionReview(memoryWriteThreadSchema.parse(input).threadId)
-  );
-  ipcMain.handle('memoryWrites:createUserPreferenceReview', (_event, input) =>
-    services.jobs.createUserPreferenceReview(memoryWriteThreadSchema.parse(input).threadId)
-  );
-  ipcMain.handle('threads:list', (_event, projectId: string) => services.db.listThreads(projectId));
+  ipcMain.handle('threads:list', (_event, projectId) => services.db.listThreads(projectIdValueSchema.parse(projectId)));
   ipcMain.handle('threads:listArchived', (_event, input) => services.db.listArchivedThreads(archivedThreadsListSchema.parse(input).projectId ?? null));
   ipcMain.handle('threads:open', (_event, input) => services.db.getThread(threadIdSchema.parse(input).threadId));
   ipcMain.handle('threads:summarizeForCollaboration', (_event, input) =>
@@ -340,7 +633,9 @@ export function registerIpc(
   });
   ipcMain.handle('threads:retry', async (_event, input) => services.providers.retryThread(threadIdSchema.parse(input).threadId));
   ipcMain.handle('composer:submit', async (_event, input) => {
-    const result = await services.providers.submitComposer(composerSubmitSchema.parse(input));
+    const submission = composerSubmitSchema.parse(input);
+    services.libraryWatch?.refreshSkillsIfPending();
+    const result = await services.providers.submitComposer(submission);
     if (result.disposition === 'started') {
       services.subagents?.attachRunToChildThread(result.thread.id, result.runId);
     }
@@ -358,6 +653,48 @@ export function registerIpc(
   ipcMain.handle('composer:stop', async (_event, input) => services.providers.stopRun(runStopSchema.parse(input).runId));
   ipcMain.handle('runs:approveToolApproval', async (_event, input) => services.providers.approveToolApproval(runToolApprovalIdSchema.parse(input).approvalId));
   ipcMain.handle('runs:rejectToolApproval', async (_event, input) => services.providers.rejectToolApproval(runToolApprovalIdSchema.parse(input).approvalId));
+  ipcMain.handle('runs:previewStagedWorkspaceChange', async (_event, input) =>
+    services.providers.previewStagedWorkspaceChange(stagedWorkspaceReviewSchema.parse(input))
+  );
+  ipcMain.handle('runs:applyStagedWorkspaceChange', async (_event, input) =>
+    services.providers.applyStagedWorkspaceChange(stagedWorkspaceReviewSchema.parse(input))
+  );
+  ipcMain.handle('runs:rejectStagedWorkspaceChange', async (_event, input) =>
+    services.providers.rejectStagedWorkspaceChange(stagedWorkspaceReviewSchema.parse(input))
+  );
+  ipcMain.handle('runs:revertStagedWorkspaceChange', async (_event, input) =>
+    services.providers.revertStagedWorkspaceChange(stagedWorkspaceReviewSchema.parse(input))
+  );
+  ipcMain.handle('runs:applyStagedWorkspaceHunks', async (_event, input) =>
+    services.providers.applyStagedWorkspaceHunks(stagedWorkspaceHunkApplySchema.parse(input))
+  );
+  ipcMain.handle('runs:rejectStagedWorkspaceHunks', async (_event, input) =>
+    services.providers.rejectStagedWorkspaceHunks(stagedWorkspaceHunkRejectSchema.parse(input))
+  );
+  ipcMain.handle('runs:revertStagedWorkspaceHunks', async (_event, input) =>
+    services.providers.revertStagedWorkspaceHunks(stagedWorkspaceReviewSchema.parse(input))
+  );
+  ipcMain.handle('runs:applyWorktreeReview', async (_event, input) =>
+    services.providers.applyWorktreeReview(worktreeReviewSchema.parse(input))
+  );
+  ipcMain.handle('runs:rejectWorktreeReview', async (_event, input) =>
+    services.providers.rejectWorktreeReview(worktreeReviewSchema.parse(input))
+  );
+  ipcMain.handle('runs:revertWorktreeReview', async (_event, input) =>
+    services.providers.revertWorktreeReview(worktreeReviewSchema.parse(input))
+  );
+  ipcMain.handle('runs:applyWorktreeHunks', async (_event, input) =>
+    services.providers.applyWorktreeHunks(worktreeHunkApplySchema.parse(input))
+  );
+  ipcMain.handle('runs:rejectWorktreeHunks', async (_event, input) =>
+    services.providers.rejectWorktreeHunks(worktreeHunkRejectSchema.parse(input))
+  );
+  ipcMain.handle('runs:revertWorktreeHunks', async (_event, input) =>
+    services.providers.revertWorktreeHunks(worktreeReviewSchema.parse(input))
+  );
+  ipcMain.handle('runs:cleanupWorktreeReview', async (_event, input) =>
+    services.providers.cleanupWorktreeReview(worktreeReviewSchema.parse(input))
+  );
   ipcMain.handle('planner:setMode', async (_event, input) => services.providers.setPlannerMode(plannerSetModeSchema.parse(input)));
   ipcMain.handle('planner:submit', async (_event, input) => services.providers.submitPlanner(plannerSubmitSchema.parse(input)));
   ipcMain.handle('planner:answer', async (_event, input) => services.providers.answerPlannerQuestions(plannerAnswerSchema.parse(input)));
@@ -372,12 +709,21 @@ export function registerIpc(
     const data = providerAuthAdoptSchema.parse(input);
     return services.providers.adoptAuth(data.providerId);
   });
-  ipcMain.handle('providers:clearAuth', async (_event, providerId: ProviderId) => services.providers.clearAuth(providerId));
+  ipcMain.handle('providers:clearAuth', async (_event, providerId) => services.providers.clearAuth(providerIdSchema.parse(providerId)));
   ipcMain.handle('providers:saveApiKey', async (_event, input) => {
     const data = providerApiKeySchema.parse(input);
     return services.providers.saveApiKey(data.providerId, data.apiKey);
   });
-  ipcMain.handle('providers:refresh', async (_event, providerId: ProviderId) => services.providers.getProvider(providerId, { forceRefresh: true }));
+  ipcMain.handle('providers:refresh', async (_event, providerId) =>
+    services.providers.getProvider(providerIdSchema.parse(providerId), { forceRefresh: true })
+  );
+  ipcMain.handle('providers:listCustom', () => services.providers.listCustomProviderSettings());
+  ipcMain.handle('providers:saveCustom', (_event, input) =>
+    services.providers.saveCustomProviderSettings(customProviderSettingsSaveSchema.parse(input))
+  );
+  ipcMain.handle('providers:removeCustom', (_event, input) =>
+    services.providers.deleteCustomProviderSettings(customProviderIdSchema.parse(input).providerId)
+  );
   ipcMain.handle('ollamaRuntime:getStatus', async () => services.ollamaRuntime.getSnapshot());
   ipcMain.handle('ollamaRuntime:start', async () => services.ollamaRuntime.startAndGetSnapshot());
   ipcMain.handle('ollamaRuntime:stop', async () => services.ollamaRuntime.stopAndGetSnapshot());
@@ -391,15 +737,17 @@ export function registerIpc(
     const data = skillToggleSchema.parse(input);
     return services.skills.toggleSkill(data.skillId, data.enabled);
   });
-  ipcMain.handle('skills:sync', (_event, input) => {
-    const data = skillSyncSchema.parse(input);
-    return services.skills.syncSkill(data.skillId, data.providerId, data.enabled);
-  });
   ipcMain.handle('skills:installSuggested', async (_event, input) => {
     const data = skillSuggestedInstallSchema.parse(input);
     return await services.skills.installSuggestedSkill(data);
   });
+  ipcMain.handle('skills:rescanLibrary', async () => services.skills.rescanLibrarySkills());
   ipcMain.handle('skills:remove', (_event, input) => services.skills.removeSkill(skillIdSchema.parse(input).skillId));
+  ipcMain.handle('library:getSources', () => buildLibrarySourcesSnapshot(services.db.getPreferences()));
+  ipcMain.handle('projectKnowledge:getIndexStatus', () => buildProjectKnowledgeIndexStatus(services.db));
+  ipcMain.handle('projectKnowledge:refreshIndex', () => refreshProjectKnowledgeIndex(services.db));
+  ipcMain.handle('projectKnowledge:suggestIndex', () => suggestProjectKnowledgeIndex(services.db));
+  ipcMain.handle('projectKnowledge:openSuggestedIndexDraft', () => openProjectKnowledgeSuggestedIndexDraft(services.db));
   ipcMain.handle('automations:list', () => services.db.listAutomations());
   ipcMain.handle('automations:listRuns', (_event, input) => services.db.listAutomationRuns(automationIdSchema.parse(input).automationId));
   ipcMain.handle('automations:save', (_event, input) => {
@@ -418,47 +766,6 @@ export function registerIpc(
     services.automations.refresh();
   });
   ipcMain.handle('automations:runNow', async (_event, input) => services.automations.runNow(automationIdSchema.parse(input).automationId));
-  ipcMain.handle('vicodeBuild:getSnapshot', (_event, input) =>
-    services.vicodeBuild.getSnapshot(vicodeBuildProjectSchema.parse(input).projectId)
-  );
-  ipcMain.handle('vicodeBuild:generatePlanDraft', (_event, input) => {
-    const data = vicodeBuildPlanDraftSchema.parse(input);
-    return services.vicodeBuild.generatePlanDraft(data.projectId, data.goal);
-  });
-  ipcMain.handle('vicodeBuild:createPlan', (_event, input) => {
-    const data = vicodeBuildPlanCreateSchema.parse(input);
-    return services.vicodeBuild.createPlan(data.projectId, {
-      goal: data.goal,
-      name: data.name,
-      worktreePath: data.worktreePath
-    });
-  });
-  ipcMain.handle('vicodeBuild:createPlanFromThread', (_event, input) => {
-    return services.vicodeBuild.createPlanFromThread(vicodeBuildPlanFromThreadSchema.parse(input).threadId);
-  });
-  ipcMain.handle('vicodeBuild:setTeamPaused', (_event, input) => {
-    const data = vicodeBuildTeamPauseSchema.parse(input);
-    return services.vicodeBuild.setTeamPaused(data.projectId, data.teamId, data.paused);
-  });
-  ipcMain.handle('vicodeBuild:wakeLane', (_event, input) => {
-    const data = vicodeBuildLaneActionSchema.parse(input);
-    return services.vicodeBuild.wakeLane(data.projectId, data.teamId, data.laneId);
-  });
-  ipcMain.handle('vicodeBuild:retryLane', (_event, input) => {
-    const data = vicodeBuildLaneActionSchema.parse(input);
-    return services.vicodeBuild.retryLane(data.projectId, data.teamId, data.laneId);
-  });
-  ipcMain.handle('vicodeBuild:clearInactivePlans', (_event, input) => {
-    const data = vicodeBuildClearPlansSchema.parse(input);
-    return services.vicodeBuild.clearInactivePlans(data.projectId);
-  });
-  ipcMain.handle('vicodeBuild:runVerification', (_event, input) => {
-    const data = vicodeBuildProjectSchema.parse(input);
-    if (!data.projectId) {
-      throw new Error('Project is required to run build verification.');
-    }
-    return services.vicodeBuild.runVerification(data.projectId);
-  });
   ipcMain.handle('jobs:list', () => services.jobs.listJobs());
   ipcMain.handle('jobs:listPendingReviews', () => services.jobs.listPendingReviews());
   ipcMain.handle('jobs:updateReviewDraft', (_event, input) => {
@@ -516,9 +823,11 @@ export function registerIpc(
     return services.subagents.getDetail(subagentIdSchema.parse(input).subagentId);
   });
   ipcMain.handle('settings:get', () => services.db.getPreferences());
-  ipcMain.handle('settings:save', (_event, input) => services.db.savePreferences(preferenceSaveSchema.parse(input)));
-  ipcMain.handle('settings:getPersonalization', () => services.db.getPersonalization());
-  ipcMain.handle('settings:savePersonalization', (_event, input) => services.db.savePersonalization(personalizationSaveSchema.parse(input)));
+  ipcMain.handle('settings:save', (_event, input) => {
+    const preferences = services.db.savePreferences(preferenceSaveSchema.parse(input));
+    services.libraryWatch?.refreshWatchedRoots();
+    return preferences;
+  });
   ipcMain.handle('diagnostics:export', async () => {
     const path = await services.diagnostics.export(await services.providers.listProviders());
     sendEvent({ type: 'diagnostics.ready', path });
@@ -526,6 +835,13 @@ export function registerIpc(
   });
   ipcMain.handle('diagnostics:exportThread', async (_event, input) => {
     const path = await services.diagnostics.exportThread(
+      threadIdSchema.parse(input).threadId,
+      await services.providers.listProviders()
+    );
+    return path;
+  });
+  ipcMain.handle('diagnostics:exportThreadReport', async (_event, input) => {
+    const path = await services.diagnostics.exportThreadReport(
       threadIdSchema.parse(input).threadId,
       await services.providers.listProviders()
     );
@@ -581,5 +897,6 @@ export function registerIpc(
     unsubscribeOllamaRuntime();
     unsubscribeCollab();
     unsubscribeUpdater();
+    unsubscribeLibraryWatch();
   };
 }

@@ -13,7 +13,7 @@ export function getPlannerSafetyCopy(policy: ProviderPlannerPolicy | null | unde
   if (policy.executionMode === 'full-access') {
     return {
       badge: 'Best effort',
-      note: 'Gemini planner currently runs with full-access execution. It can still ask questions, but read-only planning is not enforced yet.'
+      note: 'This planner run uses full-access execution. It can still ask questions, but read-only planning is not hard-enforced.'
     };
   }
 

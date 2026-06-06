@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { PROVIDER_IDS } from '../../shared/domain';
 import { getProviderTextNormalizationOptions, getProviderTextPolicy } from './provider-text-policy';
 
 describe('provider-text-policy', () => {
@@ -9,18 +10,18 @@ describe('provider-text-policy', () => {
     });
   });
 
-  it('keeps default provider text policies narrow when no special cleanup is needed', () => {
-    expect(getProviderTextNormalizationOptions('openai')).toEqual({});
-    expect(getProviderTextPolicy('openai').formatCompletionOutput).toBeNull();
+  it('applies provider-neutral final cleanup without provider-specific visible-text flags', () => {
+    for (const providerId of PROVIDER_IDS.filter((candidate) => candidate !== 'ollama')) {
+      expect(getProviderTextNormalizationOptions(providerId)).toEqual({});
+      expect(getProviderTextPolicy(providerId).formatCompletionOutput?.('hello , world !')).toBe('hello, world!');
+    }
   });
 
-  it('declares ollama completion formatting through the shared policy registry', () => {
+  it('declares ollama completion cleanup through the shared policy registry', () => {
     expect(
       getProviderTextPolicy('ollama').formatCompletionOutput?.(
-        'Sure! Here are some fun facts about Mars:- 🌍 **The Red Planet:** Mars looks red due to iron oxide.'
+        'Thinking: inspect first.\n<function_calls><invoke name="read_file"></invoke></function_calls>\nhello , world !'
       )
-    ).toBe(
-      'Sure! Here are some fun facts about Mars:\n\n- 🌍 **The Red Planet:** Mars looks red due to iron oxide.'
-    );
+    ).toBe('hello, world!');
   });
 });

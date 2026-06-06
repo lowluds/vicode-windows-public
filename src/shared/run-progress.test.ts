@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { ResolvedConversationTaskPacket } from './conversation-task-resolver';
 import type { PlannerPlan, RunEvent } from './domain';
 import {
   advanceRunProgress,
@@ -7,6 +8,7 @@ import {
   countCompletedRunProgressItems,
   deriveRunProgressFromProviderTodos,
   deriveRunProgressFromPlanner,
+  deriveRunProgressFromResolvedTaskPacket,
   deriveRunProgressSnapshots,
   failRunProgress,
   shouldAdvanceRunProgressFromActivity
@@ -27,6 +29,57 @@ function createPlan(overrides: Partial<PlannerPlan> = {}): PlannerPlan {
     },
     status: 'approved',
     createdAt: '2026-03-17T00:00:00.000Z',
+    ...overrides
+  };
+}
+
+function createResolvedTaskPacket(
+  overrides: Partial<ResolvedConversationTaskPacket> = {}
+): ResolvedConversationTaskPacket {
+  return {
+    trigger: 'inferred_proceed',
+    phase: 'ready_to_task',
+    executionPolicy: 'auto_execute',
+    confidence: 'high',
+    objective: 'Implement a small calculator app.',
+    sourceTurnIds: ['turn-1'],
+    decisionsUsed: [],
+    decisions: [],
+    rejectedOptions: [],
+    constraints: [],
+    nonGoals: [],
+    acceptanceCriteria: ['Keyboard input works.'],
+    expectedToolGroups: ['workspace_read', 'workspace_write', 'verification'],
+    slices: [
+      {
+        id: 'inspect-context',
+        title: 'Inspect resolved conversation context',
+        status: 'pending',
+        detail: null,
+        rationale: 'Use prior thread context.',
+        expectedOutcome: 'Context is ready for implementation.',
+        sourceTurnIds: ['turn-1']
+      },
+      {
+        id: 'implement-core',
+        title: 'Implement core workspace changes',
+        status: 'pending',
+        detail: null,
+        rationale: 'Apply the resolved task.',
+        expectedOutcome: 'The calculator behavior exists.',
+        sourceTurnIds: ['turn-1']
+      },
+      {
+        id: 'verify-result',
+        title: 'Run focused verification',
+        status: 'pending',
+        detail: null,
+        rationale: 'Prove the changed behavior.',
+        expectedOutcome: 'Focused checks pass.',
+        sourceTurnIds: ['turn-1']
+      }
+    ],
+    verification: ['Run npm test.'],
     ...overrides
   };
 }
@@ -56,6 +109,47 @@ describe('run progress derivation', () => {
     );
 
     expect(progress?.items.map((item) => item.label)).toEqual(['First task', 'Second task']);
+  });
+
+  it('keeps every approved planner task instead of truncating the execution contract', () => {
+    const progress = deriveRunProgressFromPlanner(
+      createPlan({
+        structuredPlan: {
+          title: 'Long plan',
+          summary: ['Summarize results'],
+          keyChanges: [
+            'Inspect workspace',
+            'Search the web',
+            'Read notes',
+            'Create index.html',
+            'Create styles.css',
+            'Create main.js',
+            'Run unit tests',
+            'Run visual check',
+            'Report outcome'
+          ],
+          testPlan: ['Run npm test'],
+          assumptions: []
+        }
+      }),
+      'executing_from_plan',
+      'run-1',
+      'thread-1'
+    );
+
+    expect(progress?.items.map((item) => item.label)).toEqual([
+      'Inspect workspace',
+      'Search the web',
+      'Read notes',
+      'Create index.html',
+      'Create styles.css',
+      'Create main.js',
+      'Run unit tests',
+      'Run visual check',
+      'Report outcome',
+      'Run npm test',
+      'Summarize results'
+    ]);
   });
 
   it('advances task state sequentially', () => {
@@ -114,6 +208,63 @@ describe('run progress derivation', () => {
     ]);
   });
 
+  it('derives progress rows from a resolved conversation task packet', () => {
+    const packet = createResolvedTaskPacket();
+
+    const progress = deriveRunProgressFromResolvedTaskPacket(packet, 'run-1', 'thread-1');
+
+    expect(progress).toMatchObject({
+      runId: 'run-1',
+      threadId: 'thread-1',
+      title: 'Resolved task'
+    });
+    expect(
+      progress?.items.map((item) => ({
+        label: item.label,
+        status: item.status
+      }))
+    ).toEqual([
+      { label: 'Inspect resolved conversation context', status: 'in_progress' },
+      { label: 'Implement core workspace changes', status: 'pending' },
+      { label: 'Run focused verification', status: 'pending' }
+    ]);
+  });
+
+  it('does not derive fake execution progress for non-auto task packets', () => {
+    expect(
+      deriveRunProgressFromResolvedTaskPacket(
+        createResolvedTaskPacket({
+          executionPolicy: 'ask_clarifying_question',
+          confidence: 'low',
+          expectedToolGroups: ['workspace_read'],
+          clarificationQuestion: 'What should I implement?'
+        }),
+        'run-1',
+        'thread-1'
+      )
+    ).toBeNull();
+    expect(
+      deriveRunProgressFromResolvedTaskPacket(
+        createResolvedTaskPacket({
+          executionPolicy: 'approval_required',
+          riskReason: 'This task needs approval before execution.'
+        }),
+        'run-1',
+        'thread-1'
+      )
+    ).toBeNull();
+    expect(
+      deriveRunProgressFromResolvedTaskPacket(
+        createResolvedTaskPacket({
+          phase: 'task_plan',
+          executionPolicy: 'plan_mode_wait'
+        }),
+        'run-1',
+        'thread-1'
+      )
+    ).toBeNull();
+  });
+
   it('replays persisted progress snapshots from raw run events', () => {
     const events: RunEvent[] = [
       {
@@ -140,8 +291,8 @@ describe('run progress derivation', () => {
               phase: 'waiting_for_answers',
               title: 'Delegated planner context',
               note: 'The delegated planner needs a clarifying answer before it should continue drafting the plan.',
-              includedContext: ['AGENTS.md', 'codex.md'],
-              excludedContext: ['SOUL.md', 'USER.md', 'auto memory']
+              includedContext: ['Project instructions', 'Provider compatibility notes'],
+              excludedContext: ['Full project memory', 'Main-thread history']
             },
             contextPressure: {
               severity: 'warning',

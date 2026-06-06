@@ -3,14 +3,13 @@ import { createProviderRecord, getProviderMetadata } from '../shared/providers';
 import type {
   AppearanceMode,
   ExecutionPermission,
-  PersonalizationSettings,
   Preferences,
   ProviderId
 } from '../shared/domain';
 
 export const DEFAULT_PREFERENCES: Preferences = {
   selectedProjectId: null,
-  defaultProviderId: 'openai',
+  defaultProviderId: 'ollama',
   defaultModelByProvider: createProviderRecord((providerId) => getProviderMetadata(providerId).defaultModelId),
   defaultReasoningEffortByProvider: createProviderRecord((providerId) => getProviderMetadata(providerId).defaultReasoningEffort),
   defaultThinkingByProvider: createProviderRecord((providerId) => getProviderMetadata(providerId).defaultThinking),
@@ -24,13 +23,10 @@ export const DEFAULT_PREFERENCES: Preferences = {
   accentColor: null,
   onboardingComplete: false,
   lastOpenedThreadId: null,
-  microphoneAllowed: false
-};
-
-export const DEFAULT_PERSONALIZATION: PersonalizationSettings = {
-  globalInstructions: '',
-  providerInstructions: createProviderRecord(() => ''),
-  useWorkspaceInstructions: true
+  microphoneAllowed: false,
+  userLibraryPath: null,
+  skillsLibraryPath: null,
+  llmWikiLibraryPath: null
 };
 
 type Row = Record<string, unknown>;
@@ -74,7 +70,10 @@ export class SettingsRepository {
       accentColor: typeof row.accent_color === 'string' && row.accent_color.trim() ? (row.accent_color as string) : null,
       onboardingComplete: Boolean(row.onboarding_complete),
       lastOpenedThreadId: (row.last_opened_thread_id as string | null) ?? null,
-      microphoneAllowed: Boolean(row.microphone_allowed)
+      microphoneAllowed: Boolean(row.microphone_allowed),
+      userLibraryPath: typeof row.user_library_path === 'string' && row.user_library_path.trim() ? row.user_library_path as string : null,
+      skillsLibraryPath: typeof row.skills_library_path === 'string' && row.skills_library_path.trim() ? row.skills_library_path as string : null,
+      llmWikiLibraryPath: typeof row.llm_wiki_library_path === 'string' && row.llm_wiki_library_path.trim() ? row.llm_wiki_library_path as string : null
     };
     return this.sanitizePreferenceReferences(next);
   }
@@ -127,7 +126,10 @@ export class SettingsRepository {
              accent_color = @accentColor,
              onboarding_complete = @onboardingComplete,
              last_opened_thread_id = @lastOpenedThreadId,
-             microphone_allowed = @microphoneAllowed
+             microphone_allowed = @microphoneAllowed,
+             user_library_path = @userLibraryPath,
+             skills_library_path = @skillsLibraryPath,
+             llm_wiki_library_path = @llmWikiLibraryPath
          WHERE id = 1`
       )
       .run({
@@ -158,47 +160,11 @@ export class SettingsRepository {
         accentColor: next.accentColor,
         onboardingComplete: next.onboardingComplete ? 1 : 0,
         lastOpenedThreadId: next.lastOpenedThreadId,
-        microphoneAllowed: next.microphoneAllowed ? 1 : 0
+        microphoneAllowed: next.microphoneAllowed ? 1 : 0,
+        userLibraryPath: next.userLibraryPath,
+        skillsLibraryPath: next.skillsLibraryPath,
+        llmWikiLibraryPath: next.llmWikiLibraryPath
       });
-    return next;
-  }
-
-  getPersonalization(): PersonalizationSettings {
-    const rows = this.db.prepare('SELECT key, value FROM personalization').all() as Array<{ key: string; value: string }>;
-    const values = Object.fromEntries(rows.map((row) => [row.key, row.value]));
-    return {
-      globalInstructions: values.global_instructions ?? DEFAULT_PERSONALIZATION.globalInstructions,
-      providerInstructions: createProviderRecord(
-        (providerId) => values[`${providerId}_instructions`] ?? DEFAULT_PERSONALIZATION.providerInstructions[providerId]
-      ),
-      useWorkspaceInstructions:
-        values.use_workspace_instructions === undefined
-          ? DEFAULT_PERSONALIZATION.useWorkspaceInstructions
-          : values.use_workspace_instructions === '1'
-    };
-  }
-
-  savePersonalization(input: Partial<PersonalizationSettings>): PersonalizationSettings {
-    const current = this.getPersonalization();
-    const next: PersonalizationSettings = {
-      globalInstructions: input.globalInstructions ?? current.globalInstructions,
-      providerInstructions: {
-        ...current.providerInstructions,
-        ...input.providerInstructions
-      },
-      useWorkspaceInstructions: input.useWorkspaceInstructions ?? current.useWorkspaceInstructions
-    };
-    const now = new Date().toISOString();
-    const upsert = this.db.prepare(
-      `INSERT INTO personalization (key, value, updated_at)
-       VALUES (@key, @value, @updatedAt)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
-    );
-    upsert.run({ key: 'global_instructions', value: next.globalInstructions, updatedAt: now });
-    for (const [providerId, instructions] of Object.entries(next.providerInstructions) as Array<[ProviderId, string]>) {
-      upsert.run({ key: `${providerId}_instructions`, value: instructions, updatedAt: now });
-    }
-    upsert.run({ key: 'use_workspace_instructions', value: next.useWorkspaceInstructions ? '1' : '0', updatedAt: now });
     return next;
   }
 

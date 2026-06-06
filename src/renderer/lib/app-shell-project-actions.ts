@@ -18,8 +18,6 @@ type ProjectDraftLike = {
   trusted: boolean;
 };
 
-type WorkspaceBootstrapStatusLike = unknown;
-
 export interface AppShellProjectActionsHost {
   getProjects(): Project[];
   getSelectedProjectId(): string | null;
@@ -46,7 +44,6 @@ export interface AppShellProjectActionsHost {
   }): Promise<ThreadDetail>;
   setPlannerMode(input: { threadId: string; mode: 'plan' }): Promise<ThreadDetail>;
   archiveThread(threadId: string): Promise<void>;
-  getWorkspaceBootstrapStatus(projectId: string): Promise<WorkspaceBootstrapStatusLike>;
   savePreferences(input: Partial<Preferences>): Promise<Preferences>;
   refreshThreads(projectId: string | null): Promise<void>;
   refreshArchivedThreads(projectId?: string | null): Promise<void>;
@@ -66,7 +63,6 @@ export interface AppShellProjectActionsHost {
   setMissingWorkspaceProjectId(value: string | null | ((current: string | null) => string | null)): void;
   setExpandedProjectIds(value: string[] | ((current: string[]) => string[])): void;
   setProjectDraft(value: ProjectDraftLike): void;
-  setWorkspaceBootstrapStatus(value: WorkspaceBootstrapStatusLike | null): void;
   setRemovingProjectId(value: string | null | ((current: string | null) => string | null)): void;
   setArchivedThreads(value: ThreadSummary[] | ((current: ThreadSummary[]) => ThreadSummary[])): void;
   setPreferences(value: Preferences | null | ((current: Preferences | null) => Preferences | null)): void;
@@ -74,10 +70,6 @@ export interface AppShellProjectActionsHost {
   setActiveThread(value: ThreadDetail | null): void;
   setActiveRunId(value: string | null): void;
   setAttachedSkillIds(value: string[]): void;
-  setWorkspaceBootstrapModalOpen(value: boolean): void;
-  setWorkspaceBootstrapDraftBundle(value: unknown | null): void;
-  setWorkspaceBootstrapSelectedDraftPaths(value: string[]): void;
-  setWorkspaceBootstrapActiveDraftPath(value: string | null): void;
 }
 
 function insertProjectLocally(host: AppShellProjectActionsHost, project: Project) {
@@ -138,15 +130,6 @@ export async function repairWorkspaceProjectPath(host: AppShellProjectActionsHos
   host.setProjects((current) => current.map((item) => (item.id === updatedProject.id ? updatedProject : item)));
   host.setMissingWorkspaceProjectId((current) => (current === updatedProject.id ? null : current));
 
-  if (host.getSelectedProjectId() === updatedProject.id) {
-    try {
-      const status = await host.getWorkspaceBootstrapStatus(updatedProject.id);
-      host.setWorkspaceBootstrapStatus(status);
-    } catch {
-      host.setWorkspaceBootstrapStatus(null);
-    }
-  }
-
   host.showToast('info', `Repaired workspace path for ${updatedProject.name}.`);
 }
 
@@ -176,14 +159,6 @@ export async function trustWorkspaceProject(host: AppShellProjectActionsHost, tr
     trusted
   });
   host.setProjects((current) => current.map((item) => (item.id === project.id ? project : item)));
-  if (workspaceProject.id === project.id) {
-    try {
-      const status = await host.getWorkspaceBootstrapStatus(project.id);
-      host.setWorkspaceBootstrapStatus(status);
-    } catch {
-      host.setWorkspaceBootstrapStatus(null);
-    }
-  }
 }
 
 export async function setProjectTrust(host: AppShellProjectActionsHost, projectId: string, trusted: boolean) {
@@ -192,14 +167,6 @@ export async function setProjectTrust(host: AppShellProjectActionsHost, projectI
     trusted
   });
   host.setProjects((current) => current.map((item) => (item.id === project.id ? project : item)));
-  if (host.getSelectedProjectId() === project.id) {
-    try {
-      const status = await host.getWorkspaceBootstrapStatus(project.id);
-      host.setWorkspaceBootstrapStatus(status);
-    } catch {
-      host.setWorkspaceBootstrapStatus(null);
-    }
-  }
   host.showToast('info', trusted ? `${project.name} is now trusted.` : `${project.name} is now untrusted.`);
 }
 
@@ -359,11 +326,6 @@ export async function removeProject(host: AppShellProjectActionsHost, projectId:
       host.setActiveThread(null);
       host.setActiveRunId(null);
       host.setAttachedSkillIds([]);
-      host.setWorkspaceBootstrapStatus(null);
-      host.setWorkspaceBootstrapModalOpen(false);
-      host.setWorkspaceBootstrapDraftBundle(null);
-      host.setWorkspaceBootstrapSelectedDraftPaths([]);
-      host.setWorkspaceBootstrapActiveDraftPath(null);
     }
 
     if (deletingSelectedProject && nextSelectedProjectId) {

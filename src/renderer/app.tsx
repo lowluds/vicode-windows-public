@@ -25,15 +25,19 @@ import type {
   ComposerMode,
   ComposerSubmitInput,
   ComposerSubmitResult,
+  CustomProviderSettings,
+  CustomProviderSettingsSaveInput,
   ExecutionPermission,
+  HarnessIsolationMode,
   ImageAttachment,
   JobDefinition,
+  LibrarySourcesSnapshot,
   OllamaPullProgress,
-  PersonalizationSettings,
   PlannerPlan,
   PlannerQuestionAnswer,
   Preferences,
   Project,
+  ProjectKnowledgeIndexStatus,
   ProviderDescriptor,
   ProviderId,
   ProviderReasoningEffort,
@@ -44,24 +48,26 @@ import type {
   SettingsSection,
   SkillDefinition,
   SkillSaveInput,
+  StagedWorkspaceHunkApplyInput,
+  StagedWorkspaceHunkRejectInput,
+  StagedWorkspaceHunkRevertInput,
+  StagedWorkspaceReviewInput,
   SubagentSummary,
   TextAttachment,
   ThreadDetail,
   ThreadFollowUp,
   ThreadSummary,
-  VicodeBuildLaneId,
-  VicodeBuildSnapshot,
-  VicodeBuildVerificationResult
+  WorktreeCleanupInput,
+  WorktreeHunkApplyInput,
+  WorktreeHunkRejectInput,
+  WorktreeHunkRevertInput,
+  WorktreeReviewInput
 } from '../shared/domain';
 import type { AppEvent } from '../shared/events';
 import type {
   MicrophoneAccessStatus,
   OllamaRuntimeSnapshot,
-  StorageDiagnostics,
-  WorkspaceBootstrapAnswers,
-  WorkspaceBootstrapDraftBundle,
-  WorkspaceBootstrapQuestion,
-  WorkspaceBootstrapStatus
+  StorageDiagnostics
 } from '../shared/ipc';
 import {
   deriveRunActivityMap,
@@ -79,14 +85,21 @@ import {
   upsertRecentThread
 } from './lib/thread-presentation';
 import {
-  applyPendingLiveRunDeltas,
   applyRawRunEventToThread,
   applyRunReplaceToThread,
   applyRunStartedToThread,
   applyThreadSummaryToActiveThread,
-  clearRunProgressEntry,
-  queuePendingLiveRunDelta as queuePendingLiveRunDeltaEntry
+  clearRunProgressEntry
 } from './lib/thread-live-event-reducer';
+import {
+  applyActiveThreadDeltas,
+  clearActiveThreadEventBuffer,
+  createActiveThreadEventBuffer,
+  drainActiveThreadDeltas,
+  hasActiveThreadDeltas,
+  queueActiveThreadDelta,
+  setActiveThreadEventBufferThread
+} from './lib/active-thread-event-reducer';
 import { bootstrapAppShell } from './lib/app-shell-bootstrap';
 import {
   refreshAppShellBootstrapState,
@@ -96,6 +109,7 @@ import {
   openThreadInShell,
   refreshArchivedThreads as refreshArchivedThreadsInShell,
   refreshThreads as refreshThreadsInShell,
+  selectRestorableProjectThread,
   selectProjectInShell,
   toggleProjectThreadsInShell
 } from './lib/app-shell-thread-selection';
@@ -114,24 +128,60 @@ import {
   trustWorkspaceProject
 } from './lib/app-shell-project-actions';
 import {
-  buildPlanReasoningLabel,
-  buildPlanSetupPrompt,
-  deriveBuildPlanSetupTitle,
-  getBuildPlanThreadReadiness,
-  isBuildPlanSetupThread,
-  modelBadgeClassName
-} from './lib/build-plan';
+  applyStagedWorkspaceChangeInShell,
+  applyStagedWorkspaceHunksInShell,
+  applyWorktreeHunksInShell,
+  applyWorktreeReviewInShell,
+  cleanupWorktreeReviewInShell,
+  rejectStagedWorkspaceChangeInShell,
+  rejectStagedWorkspaceHunksInShell,
+  rejectWorktreeHunksInShell,
+  rejectWorktreeReviewInShell,
+  revertStagedWorkspaceChangeInShell,
+  revertStagedWorkspaceHunksInShell,
+  revertWorktreeHunksInShell,
+  revertWorktreeReviewInShell,
+  type AppShellRunReviewActionsHost
+} from './lib/app-shell-run-review-actions';
+import {
+  adoptProviderAuthInShell,
+  beginProviderInstallInShell,
+  clearAllProviderAuthInShell,
+  clearProviderAuthInShell,
+  connectProviderInShell,
+  deleteCustomProviderInShell,
+  deleteOllamaModelInShell,
+  pullOllamaModelInShell,
+  refreshCustomProvidersInShell,
+  refreshOllamaRuntimeStatusInShell,
+  refreshProviderInShell,
+  refreshProvidersInShell,
+  saveCustomProviderInShell,
+  saveProviderApiKeyInShell,
+  stopOllamaRuntimeInShell,
+  type AppShellProviderActionsHost
+} from './lib/app-shell-provider-actions';
+import {
+  compactRunEventsInShell,
+  exportActiveThreadDiagnosticsInShell,
+  exportActiveThreadReportInShell,
+  exportDiagnosticsInShell,
+  loadStorageDiagnosticsInShell,
+  maintainStorageInShell,
+  refreshStorageDiagnosticsIfVisibleInShell,
+  type AppShellDiagnosticsActionsHost
+} from './lib/app-shell-diagnostics-actions';
 import { deriveVisiblePlannerArtifacts } from './lib/planner-visibility';
 import { deriveCurrentRunId, isActiveThreadStatus } from './lib/active-run';
 import { hasAnyActiveThreadRun } from './lib/app-update';
-import { applyOptimisticComposerTurn } from './lib/composer-submit';
+import { applyOptimisticComposerTurn, buildComposerSubmitInput } from './lib/composer-submit';
 import { deriveLatestProviderContextWindowUsage, estimateContextWindow } from './lib/context-window';
-import { formatRunFailureToastMessage, formatUserErrorMessage, parseWorkspaceUnavailableError } from './lib/error-format';
+import { formatUserErrorMessage, parseWorkspaceUnavailableError } from './lib/error-format';
 import { resolveDefaultProviderId, resolveProviderModelId } from './lib/provider-defaults';
 import {
   SIDEBAR_COLLAPSED_WIDTH,
+  SIDEBAR_CONTENT_REVEAL_WIDTH,
   SIDEBAR_DEFAULT_WIDTH,
-  SIDEBAR_MIN_WIDTH,
   resolveTitlebarLeadingWidth,
   resolveStoredSidebarCollapsed
 } from './lib/sidebar-layout';
@@ -151,10 +201,9 @@ import {
 import { AppSidebar } from './components/AppSidebar';
 import { ChatUtilityPane } from './components/ChatUtilityPane';
 import { PlannerPlanCard, PlannerPlanStatusRow, PlannerQuestionCard } from './components/PlannerArtifacts';
-import { ToolApprovalPanel } from './components/ToolApprovalPanel';
+import { ToolApprovalPanel, formatApprovalToolLabel } from './components/ToolApprovalPanel';
 import type { ComposerActivityItem } from './components/ComposerActivityShelf';
 import { folderLabel } from './lib/folder-label';
-import { LandingPage } from './components/LandingPage';
 import { EmptyThreadHero } from './components/EmptyThreadHero';
 import { LandingBeams } from './components/LandingBeams';
 import { InlineNotice } from './components/InlineNotice';
@@ -171,7 +220,8 @@ import {
   providerCapabilities,
   providerDisplayName,
   providerModelRecommendationLabel,
-  providerModelTriggerSummary
+  providerModelTriggerSummary,
+  resolveProviderThinkingDefault
 } from '../shared/providers';
 import {
   applyRunProgressSnapshotEvent,
@@ -180,23 +230,29 @@ import {
 } from '../shared/run-progress';
 import { splitPromptMentionedSkills } from '../shared/skills';
 import { WindowsTitleBar } from './components/WindowsTitleBar';
+import { ThemedWolfLogo } from './components/ThemedWolfLogo';
 import {
   AutomationsRouteContainer,
-  BuildControlRouteContainer,
   SettingsRouteContainer,
   SkillsRouteContainer,
   ThreadRouteContainer,
   type AutomationDraftState,
-  type AutomationTemplate,
-  type BuildPlanLaunchState
+  type AutomationTemplate
 } from './routes';
 import { AccessIcon, ArrowLeftIcon, BookIcon, CheckIcon, CloseIcon, FolderIcon, NoteIcon } from './components/icons';
 import { cx } from './components/ui/utils';
-import wolfLogo from './assets/wolf-logo.png';
 import { createEmptyCollaborationBootstrap, type CollaborationSection } from './lib/collaboration';
 
-type Route = 'thread' | 'collab' | 'skills' | 'build-control' | 'automations' | 'settings' | 'ui-dev';
+type ThreadDeleteTarget = {
+  id: string;
+  title: string;
+  projectId: string | null;
+};
+
+type Route = 'thread' | 'collab' | 'skills' | 'automations' | 'settings' | 'ui-dev';
 type ComposerEffort = 'Low' | 'Medium' | 'High' | 'Extra high';
+
+const standaloneChatProjectName = 'Chats';
 
 interface ComposerState {
   prompt: string;
@@ -205,6 +261,7 @@ interface ComposerState {
   thinkingEnabled: boolean;
   mode: ComposerMode;
   executionPermission: ExecutionPermission;
+  isolationMode: HarnessIsolationMode;
   imageAttachments: ImageAttachment[];
   textAttachments: TextAttachment[];
 }
@@ -257,105 +314,8 @@ function findParentThreadIdForSubagentChild(
   return null;
 }
 
-function shouldShowStartupWelcome(payload: BootstrapData) {
-  return !payload.preferences.onboardingComplete && payload.projects.length === 0 && !payload.preferences.lastOpenedThreadId;
-}
-
-function createEmptyWorkspaceBootstrapAnswers(): WorkspaceBootstrapAnswers {
-  return {
-    projectIntent: '',
-    optimizationPriority: '',
-    communicationStyle: '',
-    approvalBoundary: '',
-    repoConstraints: '',
-    wantsSoul: false,
-    todayFocus: '',
-    recentDecisions: [],
-    openQuestions: [],
-    followUps: []
-  };
-}
-
-function compactBootstrapPrefill(value: string | null | undefined, maxLength = 180) {
-  const normalized = value?.replace(/\s+/gu, ' ').trim() ?? '';
-  if (!normalized) {
-    return '';
-  }
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-  return `${normalized.slice(0, maxLength).trimEnd()}...`;
-}
-
-function deriveApprovalBoundaryPrefill(executionPermission: ExecutionPermission | null | undefined) {
-  if (executionPermission === 'full_access') {
-    return 'destructive changes, dependency installs, or actions outside the workspace';
-  }
-  return 'risky actions, destructive changes, or large refactors';
-}
-
-function deriveProjectIntentPrefill(project: Project | null) {
-  const name = project?.name.trim();
-  if (!name) {
-    return '';
-  }
-
-  const folderPath = project?.folderPath?.trim();
-  if (folderPath && name.toLowerCase() === folderPath.toLowerCase()) {
-    return '';
-  }
-  if (/^[a-z]:[\\/]/iu.test(name) || name.includes('\\') || name.includes('/')) {
-    return '';
-  }
-
-  return compactBootstrapPrefill(name);
-}
-
-function createWorkspaceBootstrapAnswerDefaults(input: {
-  selectedProject: Project | null;
-  preferences: Preferences | null;
-  personalization: PersonalizationSettings;
-}): WorkspaceBootstrapAnswers {
-  const preferredProviderId = input.selectedProject?.defaultProviderId ?? input.preferences?.defaultProviderId ?? null;
-  const preferredModelId = preferredProviderId
-    ? input.selectedProject?.defaultModelByProvider[preferredProviderId]
-      ?? input.preferences?.defaultModelByProvider[preferredProviderId]
-      ?? null
-    : null;
-  const durablePreferences = [
-    preferredProviderId ? `Default provider for this workspace: ${preferredProviderId}.` : null,
-    preferredModelId && preferredProviderId ? `Preferred ${preferredProviderId} model: ${preferredModelId}.` : null,
-    `Trusted project files are ${input.personalization.useWorkspaceInstructions ? 'enabled' : 'disabled'} in app settings.`
-  ].filter((value): value is string => Boolean(value));
-
-  return {
-    ...createEmptyWorkspaceBootstrapAnswers(),
-    projectIntent: deriveProjectIntentPrefill(input.selectedProject),
-    communicationStyle: compactBootstrapPrefill(input.personalization.globalInstructions),
-    approvalBoundary: deriveApprovalBoundaryPrefill(input.preferences?.defaultExecutionPermission),
-    durablePreferences
-  };
-}
-
-function formatWorkspaceBootstrapMissingFiles(status: WorkspaceBootstrapStatus | null) {
-  const missingFiles = status?.missingFiles ?? [];
-  if (missingFiles.length === 0) {
-    return null;
-  }
-
-  const requiredFiles = missingFiles.filter((fileName) => fileName !== 'SOUL.md');
-  const optionalFiles = missingFiles.filter((fileName) => fileName === 'SOUL.md');
-  return [
-    requiredFiles.length > 0 ? `Missing: ${requiredFiles.join(', ')}` : null,
-    optionalFiles.length > 0 ? `Optional: ${optionalFiles.join(', ')}` : null
-  ].filter(Boolean).join('; ');
-}
-
-function splitDraftList(value: string) {
-  return value
-    .split(/\r?\n/u)
-    .map((entry) => entry.trim())
-    .filter(Boolean);
+function shouldShowStartupWelcome() {
+  return false;
 }
 
 function isMissingThreadError(error: unknown) {
@@ -457,26 +417,14 @@ export function App() {
   const [subagentsByThreadId, setSubagentsByThreadId] = useState<Record<string, SubagentSummary[]>>({});
   const [skills, setSkills] = useState<SkillDefinition[]>([]);
   const [automations, setAutomations] = useState<AutomationDefinition[]>([]);
-  const [vicodeBuildSnapshot, setVicodeBuildSnapshot] = useState<VicodeBuildSnapshot | null>(null);
-  const [vicodeBuildVerification, setVicodeBuildVerification] = useState<VicodeBuildVerificationResult | null>(null);
-  const [vicodeBuildBusyAction, setVicodeBuildBusyAction] = useState<string | null>(null);
-  const [buildPlanDialogOpen, setBuildPlanDialogOpen] = useState(false);
-  const [buildPlanLaunch, setBuildPlanLaunch] = useState<BuildPlanLaunchState>({
-    goal: '',
-    providerId: 'openai',
-    modelId: getProviderMetadata('openai').defaultModelId,
-    reasoningEffort: getProviderMetadata('openai').defaultReasoningEffort
-  });
   const [jobs, setJobs] = useState<JobDefinition[]>([]);
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
   const [providers, setProviders] = useState<ProviderDescriptor[]>([]);
+  const [customProviders, setCustomProviders] = useState<CustomProviderSettings[]>([]);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
-  const [personalization, setPersonalization] = useState<PersonalizationSettings>({
-    globalInstructions: '',
-    providerInstructions: createProviderRecord(() => ''),
-    useWorkspaceInstructions: true
-  });
   const [appMeta, setAppMeta] = useState<AppMeta | null>(null);
+  const [librarySources, setLibrarySources] = useState<LibrarySourcesSnapshot | null>(null);
+  const [projectKnowledgeIndexStatus, setProjectKnowledgeIndexStatus] = useState<ProjectKnowledgeIndexStatus | null>(null);
   const [appUpdateState, setAppUpdateState] = useState<AppUpdateState | null>(null);
   const [storageDiagnostics, setStorageDiagnostics] = useState<StorageDiagnostics | null>(null);
   const [archivedThreads, setArchivedThreads] = useState<ThreadSummary[]>([]);
@@ -491,11 +439,12 @@ export function App() {
   const [pendingNativeCommandId, setPendingNativeCommandId] = useState<NativeComposerCommandId | null>(null);
   const [composer, setComposer] = useState<ComposerState>({
     prompt: '',
-    providerId: 'openai',
-    modelId: getProviderMetadata('openai').defaultModelId,
-    thinkingEnabled: true,
+    providerId: 'ollama',
+    modelId: getProviderMetadata('ollama').defaultModelId,
+    thinkingEnabled: resolveProviderThinkingDefault('ollama'),
     mode: 'default',
     executionPermission: 'default',
+    isolationMode: 'direct_workspace',
     imageAttachments: [],
     textAttachments: []
   });
@@ -505,6 +454,8 @@ export function App() {
   const [runProgressByRunId, setRunProgressByRunId] = useState<Record<string, RunProgressState>>({});
   const [pendingRunToolApprovals, setPendingRunToolApprovals] = useState<RunToolApprovalRequest[]>([]);
   const [toolApprovalResolvingId, setToolApprovalResolvingId] = useState<string | null>(null);
+  const [stagedWorkspaceReviewResolvingKey, setStagedWorkspaceReviewResolvingKey] = useState<string | null>(null);
+  const [worktreeReviewResolvingKey, setWorktreeReviewResolvingKey] = useState<string | null>(null);
   const [ollamaPullProgress, setOllamaPullProgress] = useState<OllamaPullProgress | null>(null);
   const [ollamaRuntimeStatus, setOllamaRuntimeStatus] = useState<OllamaRuntimeSnapshot | null>(null);
   const [composerSubmitting, setComposerSubmitting] = useState(false);
@@ -518,20 +469,10 @@ export function App() {
     folderPath: '',
     trusted: false
   });
-  const [workspaceBootstrapStatus, setWorkspaceBootstrapStatus] = useState<WorkspaceBootstrapStatus | null>(null);
-  const [workspaceBootstrapQuestions, setWorkspaceBootstrapQuestions] = useState<WorkspaceBootstrapQuestion[]>([]);
-  const [workspaceBootstrapModalOpen, setWorkspaceBootstrapModalOpen] = useState(false);
-  const [workspaceBootstrapDraftBundle, setWorkspaceBootstrapDraftBundle] = useState<WorkspaceBootstrapDraftBundle | null>(null);
-  const [workspaceBootstrapAnswers, setWorkspaceBootstrapAnswers] = useState<WorkspaceBootstrapAnswers>(() => createEmptyWorkspaceBootstrapAnswers());
-  const [workspaceBootstrapIncludeSoul, setWorkspaceBootstrapIncludeSoul] = useState(false);
-  const [workspaceBootstrapIncludeDailyNote, setWorkspaceBootstrapIncludeDailyNote] = useState(false);
-  const [workspaceBootstrapSelectedDraftPaths, setWorkspaceBootstrapSelectedDraftPaths] = useState<string[]>([]);
-  const [workspaceBootstrapActiveDraftPath, setWorkspaceBootstrapActiveDraftPath] = useState<string | null>(null);
-  const [workspaceBootstrapBusy, setWorkspaceBootstrapBusy] = useState(false);
   const [reviewDraftEdits, setReviewDraftEdits] = useState<Record<string, string>>({});
   const [reviewDraftSavingId, setReviewDraftSavingId] = useState<string | null>(null);
   const [automationDraft, setAutomationDraft] = useState<AutomationDraftState>(() =>
-    createAutomationDraft('openai', getProviderMetadata('openai').defaultModelId)
+    createAutomationDraft('ollama', getProviderMetadata('ollama').defaultModelId)
   );
   const [automationEditorOpen, setAutomationEditorOpen] = useState(false);
   const [automationDeleteId, setAutomationDeleteId] = useState<string | null>(null);
@@ -547,14 +488,14 @@ export function App() {
   const installPollingRef = useRef<Partial<Record<ProviderId, number>>>({});
   const selectedProjectIdRef = useRef<string | null>(null);
   const activeThreadIdRef = useRef<string | null>(null);
-  const pendingLiveRunDeltasRef = useRef(new Map<string, { threadId: string; runId: string; delta: string }>());
+  const activeThreadEventBufferRef = useRef(createActiveThreadEventBuffer());
   const pendingLiveRunDeltaFrameRef = useRef<number | null>(null);
   const pendingReviewSectionRef = useRef<HTMLDivElement | null>(null);
   const pendingReviewToastShownRef = useRef(false);
   const pendingReviewRevealRequestedRef = useRef(false);
   const downloadedUpdateToastVersionRef = useRef<string | null>(null);
   const reviewItemsRef = useRef<ReviewItem[]>([]);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteThreadTarget, setDeleteThreadTarget] = useState<ThreadDeleteTarget | null>(null);
 
   const bootstrapHost = {
     getExpandedProjectIds: () => expandedProjectIds,
@@ -592,7 +533,6 @@ export function App() {
     setPendingRunToolApprovals,
     setToolApprovalResolvingId,
     setPreferences,
-    setPersonalization,
     setSelectedProjectId,
     setExpandedProjectIds,
     setThreadsByProject,
@@ -616,6 +556,7 @@ export function App() {
         thinkingEnabled: input.thinkingEnabled,
         mode: 'default',
         executionPermission: input.executionPermission,
+        isolationMode: 'direct_workspace',
         imageAttachments: [],
         textAttachments: []
       }));
@@ -687,7 +628,6 @@ export function App() {
     }) => window.vicode.threads.create(input),
     setPlannerMode: (input: { threadId: string; mode: 'plan' }) => window.vicode.planner.setMode(input),
     archiveThread: (threadId: string) => window.vicode.threads.archive(threadId),
-    getWorkspaceBootstrapStatus: (projectId: string) => window.vicode.workspaceBootstrap.getStatus(projectId),
     savePreferences: (input: Partial<Preferences>) => window.vicode.settings.save(input),
     refreshThreads,
     refreshArchivedThreads,
@@ -703,21 +643,120 @@ export function App() {
     setMissingWorkspaceProjectId,
     setExpandedProjectIds,
     setProjectDraft,
-    setWorkspaceBootstrapStatus,
     setRemovingProjectId,
     setArchivedThreads,
     setPreferences,
     setSelectedProjectId,
     setActiveThread,
     setActiveRunId,
-    setAttachedSkillIds,
-    setWorkspaceBootstrapModalOpen,
-    setWorkspaceBootstrapDraftBundle,
-    setWorkspaceBootstrapSelectedDraftPaths,
-    setWorkspaceBootstrapActiveDraftPath
+    setAttachedSkillIds
   };
 
+  const runReviewActionsHost = {
+    runs: {
+      applyStagedWorkspaceChange: (input: StagedWorkspaceReviewInput) =>
+        window.vicode.runs.applyStagedWorkspaceChange(input),
+      rejectStagedWorkspaceChange: (input: StagedWorkspaceReviewInput) =>
+        window.vicode.runs.rejectStagedWorkspaceChange(input),
+      revertStagedWorkspaceChange: (input: StagedWorkspaceReviewInput) =>
+        window.vicode.runs.revertStagedWorkspaceChange(input),
+      applyStagedWorkspaceHunks: (input: StagedWorkspaceHunkApplyInput) =>
+        window.vicode.runs.applyStagedWorkspaceHunks(input),
+      rejectStagedWorkspaceHunks: (input: StagedWorkspaceHunkRejectInput) =>
+        window.vicode.runs.rejectStagedWorkspaceHunks(input),
+      revertStagedWorkspaceHunks: (input: StagedWorkspaceHunkRevertInput) =>
+        window.vicode.runs.revertStagedWorkspaceHunks(input),
+      applyWorktreeReview: (input: WorktreeReviewInput) => window.vicode.runs.applyWorktreeReview(input),
+      rejectWorktreeReview: (input: WorktreeReviewInput) => window.vicode.runs.rejectWorktreeReview(input),
+      revertWorktreeReview: (input: WorktreeReviewInput) => window.vicode.runs.revertWorktreeReview(input),
+      applyWorktreeHunks: (input: WorktreeHunkApplyInput) => window.vicode.runs.applyWorktreeHunks(input),
+      rejectWorktreeHunks: (input: WorktreeHunkRejectInput) => window.vicode.runs.rejectWorktreeHunks(input),
+      revertWorktreeHunks: (input: WorktreeHunkRevertInput) => window.vicode.runs.revertWorktreeHunks(input),
+      cleanupWorktreeReview: (input: WorktreeCleanupInput) => window.vicode.runs.cleanupWorktreeReview(input)
+    },
+    applyReviewThread: (thread: ThreadDetail) => {
+      activeThreadIdRef.current = thread.id;
+      setActiveThread(thread);
+      setRunProgressByRunId(deriveRunProgressSnapshots(thread.rawOutput));
+      setActiveRunId((current) => deriveCurrentRunId(thread, current));
+      setAttachedSkillIds(extractThreadSkillIds(thread));
+    },
+    setStagedWorkspaceReviewResolvingKey,
+    setWorktreeReviewResolvingKey,
+    showToast: (level: 'info' | 'warning' | 'error', message: string) => showToast(level, message)
+  } satisfies AppShellRunReviewActionsHost;
+
+  const providerActionsHost = {
+    providers: {
+      startAuth: (providerId: ProviderId, mode?: 'cli' | 'api_key', options?: { force?: boolean }) =>
+        window.vicode.providers.startAuth(providerId, mode, options),
+      adoptAuth: (providerId: ProviderId) => window.vicode.providers.adoptAuth(providerId),
+      clearAuth: (providerId: ProviderId) => window.vicode.providers.clearAuth(providerId),
+      refresh: (providerId: ProviderId) => window.vicode.providers.refresh(providerId),
+      list: () => window.vicode.providers.list(),
+      listCustom: () => window.vicode.providers.listCustom(),
+      saveCustom: (input: CustomProviderSettingsSaveInput) => window.vicode.providers.saveCustom(input),
+      removeCustom: (providerId: string) => window.vicode.providers.removeCustom(providerId),
+      saveApiKey: (providerId: ProviderId, apiKey: string) => window.vicode.providers.saveApiKey(providerId, apiKey)
+    },
+    ollamaRuntime: {
+      getStatus: () => window.vicode.ollamaRuntime.getStatus(),
+      start: () => window.vicode.ollamaRuntime.start(),
+      stop: () => window.vicode.ollamaRuntime.stop(),
+      pullModel: (model: string) => window.vicode.ollamaRuntime.pullModel(model),
+      deleteModel: (model: string) => window.vicode.ollamaRuntime.deleteModel(model)
+    },
+    installPollingTimers: installPollingRef.current,
+    getVisibleProviders: () => visibleProviders,
+    getComposerProviderState: () => ({
+      providerId: composer.providerId,
+      modelId: composer.modelId
+    }),
+    getApiKey: (providerId: ProviderId) => apiKeys[providerId],
+    now: () => Date.now(),
+    openInstallUrl: (url: string) => window.open(url, '_blank', 'noopener,noreferrer'),
+    setInstallPollingInterval: (callback: () => void, delayMs: number) => window.setInterval(callback, delayMs),
+    clearInstallPollingInterval: (timerId: number) => window.clearInterval(timerId),
+    setProviders,
+    setCustomProviders,
+    setApiKeys,
+    setComposerModelId: (providerId: ProviderId, modelId: string) =>
+      setComposer((current) => (current.providerId === providerId ? { ...current, modelId } : current)),
+    setOllamaPullProgress,
+    setOllamaRuntimeStatus,
+    showToast: (level: 'info' | 'warning' | 'error', message: string) => showToast(level, message)
+  } satisfies AppShellProviderActionsHost;
+
+  const diagnosticsActionsHost = {
+    diagnostics: {
+      export: () => window.vicode.diagnostics.export(),
+      exportThread: (threadId: string) => window.vicode.diagnostics.exportThread(threadId),
+      exportThreadReport: (threadId: string) => window.vicode.diagnostics.exportThreadReport(threadId),
+      getStorage: () => window.vicode.diagnostics.getStorage(),
+      compactRunEvents: () => window.vicode.diagnostics.compactRunEvents(),
+      maintainStorage: (input?: { vacuum?: boolean }) => window.vicode.diagnostics.maintainStorage(input)
+    },
+    getActiveThread: () => activeThread,
+    getRoute: () => route,
+    getSettingsSection: () => settingsSection,
+    getStorageDiagnostics: () => storageDiagnostics,
+    setStorageDiagnostics,
+    showToast: (level: 'info' | 'warning' | 'error', message: string) => showToast(level, message)
+  } satisfies AppShellDiagnosticsActionsHost;
+
   const nativeTheme = useAppThemeSync(preferences);
+
+  useEffect(() => {
+    if (!ready) {
+      return;
+    }
+    void refreshLibrarySources();
+  }, [
+    ready,
+    preferences?.userLibraryPath,
+    preferences?.skillsLibraryPath,
+    preferences?.llmWikiLibraryPath
+  ]);
 
   useThreadDraftSync({
     activeThreadId: activeThread?.id ?? null,
@@ -774,18 +813,23 @@ export function App() {
 
   function flushPendingLiveRunDeltas() {
     clearPendingLiveRunDeltaFrame();
-    if (pendingLiveRunDeltasRef.current.size === 0) {
+    setActiveThreadEventBufferThread(activeThreadEventBufferRef.current, activeThreadIdRef.current);
+    if (!hasActiveThreadDeltas(activeThreadEventBufferRef.current)) {
       return;
     }
 
-    const pending = Array.from(pendingLiveRunDeltasRef.current.values());
-    pendingLiveRunDeltasRef.current.clear();
     const createdAt = new Date().toISOString();
-    setActiveThread((current) => applyPendingLiveRunDeltas(current, pending, createdAt));
+    const pending = drainActiveThreadDeltas(activeThreadEventBufferRef.current);
+    setActiveThread((current) => applyActiveThreadDeltas(current, pending, createdAt));
   }
 
   function queuePendingLiveRunDelta(threadId: string, runId: string, delta: string) {
-    queuePendingLiveRunDeltaEntry(pendingLiveRunDeltasRef.current, threadId, runId, delta);
+    setActiveThreadEventBufferThread(activeThreadEventBufferRef.current, activeThreadIdRef.current);
+    const queued = queueActiveThreadDelta(activeThreadEventBufferRef.current, { threadId, runId, delta });
+    if (!queued) {
+      return;
+    }
+
     if (pendingLiveRunDeltaFrameRef.current !== null) {
       return;
     }
@@ -801,12 +845,12 @@ export function App() {
   }, [reviewItems]);
 
   useEffect(() => {
-    pendingLiveRunDeltasRef.current.clear();
+    setActiveThreadEventBufferThread(activeThreadEventBufferRef.current, activeThread?.id ?? null);
     clearPendingLiveRunDeltaFrame();
   }, [activeThread?.id]);
 
   useEffect(() => () => {
-    pendingLiveRunDeltasRef.current.clear();
+    clearActiveThreadEventBuffer(activeThreadEventBufferRef.current);
     clearPendingLiveRunDeltaFrame();
   }, []);
 
@@ -816,12 +860,14 @@ export function App() {
     route === 'thread' &&
     showStartupWelcome &&
     !activeThread;
-  const showPrimarySidebar = shellReady && !showWelcomeScreen && route !== 'settings';
+  const contentRoute = route === 'settings' ? lastContentRoute : route;
+  const showPrimarySidebar = shellReady && !showWelcomeScreen;
   const effectiveSidebarWidth = shellReady && !showWelcomeScreen
     ? sidebarCollapsed
       ? SIDEBAR_COLLAPSED_WIDTH
       : sidebarWidth
     : 0;
+  const sidebarIconOnly = !sidebarCollapsed && effectiveSidebarWidth < SIDEBAR_CONTENT_REVEAL_WIDTH;
   const titlebarLeadingWidth = resolveTitlebarLeadingWidth(sidebarCollapsed || showWelcomeScreen || !shellReady, sidebarWidth);
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
@@ -860,11 +906,6 @@ export function App() {
     [automationDraft.providerId, visibleProviders]
   );
   const automationModelOptions = automationProvider?.models ?? [];
-  const buildPlanLaunchProvider = useMemo(
-    () => visibleProviders.find((provider) => provider.id === buildPlanLaunch.providerId) ?? null,
-    [buildPlanLaunch.providerId, visibleProviders]
-  );
-  const buildPlanLaunchModelOptions = buildPlanLaunchProvider?.models ?? [];
   const automationDeleteTarget = automationDeleteId
     ? automations.find((automation) => automation.id === automationDeleteId) ?? null
     : null;
@@ -951,32 +992,6 @@ export function App() {
     });
   }, [composer.modelId, composer.providerId, installedComposerSkills, visibleProviders]);
 
-  useEffect(() => {
-    setBuildPlanLaunch((current) => {
-      const nextProviderId = visibleProviders.some((provider) => provider.id === current.providerId)
-        ? current.providerId
-        : resolveDefaultProviderId(visibleProviders, composer.providerId);
-      const nextModelId = resolveProviderModelId(visibleProviders, nextProviderId, current.modelId);
-      const nextReasoningEffort =
-        nextProviderId === current.providerId
-          ? current.reasoningEffort
-          : getProviderMetadata(nextProviderId).defaultReasoningEffort;
-      if (
-        nextProviderId === current.providerId
-        && nextModelId === current.modelId
-        && nextReasoningEffort === current.reasoningEffort
-      ) {
-        return current;
-      }
-      return {
-        ...current,
-        providerId: nextProviderId,
-        modelId: nextModelId,
-        reasoningEffort: nextReasoningEffort
-      };
-    });
-  }, [composer.providerId, visibleProviders]);
-
   const visibleThreadTurns = useMemo(
     () => (activeThread ? activeThread.turns.filter((turn) => isVisibleTranscriptTurn(turn)) : []),
     [activeThread]
@@ -993,14 +1008,14 @@ export function App() {
     [visibleThreadTurns]
   );
   const transcriptRunAnchorTurnId = useMemo(() => {
-    if (activePlannerTurnState === 'executing_from_plan' && activePlannerPlan?.createdTurnId) {
-      return activePlannerPlan.createdTurnId;
+    if (activePlannerTurnState === 'executing_from_plan') {
+      return lastVisibleUserTurnId;
     }
     if (activeDisplayedRunId && activeThread && hasAssistantTurnForRun(activeThread, activeDisplayedRunId)) {
       return [...activeThread.turns].reverse().find((turn) => turn.role === 'assistant' && turn.runId === activeDisplayedRunId)?.id ?? lastVisibleUserTurnId;
     }
     return lastVisibleUserTurnId;
-  }, [activeDisplayedRunId, activePlannerPlan?.createdTurnId, activePlannerTurnState, activeThread, lastVisibleUserTurnId]);
+  }, [activeDisplayedRunId, activePlannerTurnState, activeThread, lastVisibleUserTurnId]);
   const activeRunProgress = useMemo(
     () =>
       (activeDisplayedRunId ? runProgressByRunId[activeDisplayedRunId] ?? null : null) ??
@@ -1048,44 +1063,30 @@ export function App() {
         )
       });
     } else if (activePlannerPlan) {
+      const plannerProgressSummary =
+        activePlannerPlan.status === 'approved' && activeRunProgress?.items.length
+          ? `${activeRunProgress.items.filter((item) => item.status === 'completed').length}/${activeRunProgress.items.length} complete`
+          : '';
       items.push({
         id: 'planner-plan',
         title: 'Build plan',
-        summary: '',
-        defaultOpen: activePlannerPlan.status !== 'approved',
+        summary: plannerProgressSummary,
+        defaultOpen: activePlannerPlan.status !== 'approved' || activePlannerTurnState === 'executing_from_plan',
         variant: 'plain',
         content:
           activePlannerPlan.status === 'approved' ? (
             <PlannerPlanStatusRow
               plan={activePlannerPlan}
-              approvedStatusText={
-                isBuildPlanSetupThread(activeThread)
-                  ? 'Approved. Autonomous Builds handoff started from this setup thread.'
-                  : undefined
-              }
+              runProgress={activeRunProgress}
             />
           ) : (
             <PlannerPlanCard
               plan={activePlannerPlan}
               plannerPolicy={activeThreadProvider?.plannerPolicy ?? null}
               renderedMarkdown={activePlannerPlan.proposedPlanMarkdown}
-              approving={planApproving || vicodeBuildBusyAction === 'create-plan-from-thread'}
+              approving={planApproving}
               submitting={plannerSubmitting}
-              approveLabel={
-                isBuildPlanSetupThread(activeThread)
-                  ? 'Accept and start Autonomous Builds'
-                  : undefined
-              }
-              approvedCardText={
-                isBuildPlanSetupThread(activeThread)
-                  ? 'This plan was approved and handed off into Autonomous Builds.'
-                  : undefined
-              }
-              onApprove={
-                isBuildPlanSetupThread(activeThread)
-                  ? createBuildPlanFromActiveThread
-                  : () => approvePlannerPlan(activePlannerPlan)
-              }
+              onApprove={() => approvePlannerPlan(activePlannerPlan)}
               onRequestChanges={requestPlannerChanges}
               onCancelPlan={cancelPlannerSession}
             />
@@ -1094,14 +1095,10 @@ export function App() {
     }
 
     if (activeRunToolApproval) {
-      const approvalSummary =
-        activeRunToolApproval.toolName === 'use_mcp_tool' && activeRunToolApproval.command.startsWith('MCP ')
-          ? activeRunToolApproval.command.replace(/^MCP\s+/u, '')
-          : activeRunToolApproval.toolName;
       items.push({
         id: 'tool-approval',
         title: 'Pending approval',
-        summary: approvalSummary,
+        summary: formatApprovalToolLabel(activeRunToolApproval),
         defaultOpen: true,
         content: (
           <ToolApprovalPanel
@@ -1129,11 +1126,12 @@ export function App() {
   }, [
     activePlannerPlan,
     activePlannerQuestions,
+    activePlannerTurnState,
+    activeRunProgress,
     activeRunToolApproval,
     activeThread,
     activeThreadProvider?.plannerPolicy,
     approveRunToolApproval,
-    createBuildPlanFromActiveThread,
     enableWorkspaceAutoApproveAndApprove,
     plannerSubmitting,
     planApproving,
@@ -1142,7 +1140,6 @@ export function App() {
     skills,
     submitPlannerAnswers,
     toolApprovalResolvingId,
-    vicodeBuildBusyAction,
     workspaceProject
   ]);
   const activeRunTranscriptItems = useMemo(
@@ -1169,6 +1166,9 @@ export function App() {
           }
           if (item.kind === 'change_artifact') {
             return `${item.kind}:${item.id}:${item.artifact.files.length}:${item.label}`;
+          }
+          if (item.kind === 'staged_workspace_change') {
+            return `${item.kind}:${item.id}:${item.change.status}:${item.change.changedPaths.length}:${item.change.insertions}:${item.change.deletions}`;
           }
           return `${item.kind}:${item.id}:${item.label}`;
         })
@@ -1210,14 +1210,12 @@ export function App() {
     listAutomations: () => window.vicode.automations.list(),
     listJobs: () => window.vicode.jobs.list(),
     listPendingReviews: () => window.vicode.jobs.listPendingReviews(),
-    getBuildSnapshot: (projectId) => window.vicode.vicodeBuild.getSnapshot(projectId),
     listThreadSubagents: (threadId) => window.vicode.subagents.list(threadId),
     listThreadAutonomousTasks: (threadId) => window.vicode.threads.listAutonomousTasks(threadId),
     openThread,
     setAutomations,
     setJobs,
     setReviewItems,
-    setVicodeBuildSnapshot,
     setSubagentsByThreadId,
     setAutonomousTasksByThreadId,
     setStartupThreadRestoreState
@@ -1346,12 +1344,9 @@ export function App() {
         setRoute('skills');
       } else if (event.key === '3') {
         event.preventDefault();
-        setRoute('build-control');
-      } else if (event.key === '4') {
-        event.preventDefault();
         setSettingsSection('general');
         toggleSettingsRoute();
-      } else if (COLLABORATION_ENABLED && event.key === '5') {
+      } else if (COLLABORATION_ENABLED && event.key === '4') {
         event.preventDefault();
         setCollaborationSection('chat');
         setRoute('collab');
@@ -1688,7 +1683,7 @@ export function App() {
     );
   }
 
-  function applyOpenedThread(detail: ThreadDetail) {
+  function applyOpenedThread(detail: ThreadDetail, options?: { preserveRoute?: boolean }) {
     const hasLiveComposerDraft =
       (composerRef.current?.value ?? composer.prompt).trim().length > 0 ||
       composer.imageAttachments.length > 0 ||
@@ -1706,7 +1701,9 @@ export function App() {
     setRunProgressByRunId(deriveRunProgressSnapshots(detail.rawOutput));
     setActiveRunId(deriveCurrentRunId(detail, null));
     setAttachedSkillIds(extractThreadSkillIds(detail));
-    setRoute('thread');
+    if (!options?.preserveRoute) {
+      setRoute('thread');
+    }
     setComposerEffort(
       composerEffortFromPreference(
         detail.providerId,
@@ -1774,6 +1771,54 @@ export function App() {
 
   async function createThreadForProject(projectId: string) {
     await createThreadForProjectInShell(projectActionsHost, projectId);
+  }
+
+  async function ensureStandaloneChatProject() {
+    const existingProject = projects.find((project) => !project.folderPath) ?? null;
+    if (existingProject) {
+      return existingProject;
+    }
+
+    const project = await window.vicode.projects.create({
+      name: standaloneChatProjectName,
+      folderPath: null,
+      trusted: true
+    });
+    setProjects((current) =>
+      current.some((item) => item.id === project.id) ? current : [project, ...current]
+    );
+    setThreadsByProject((current) =>
+      current[project.id] ? current : { ...current, [project.id]: [] }
+    );
+    return project;
+  }
+
+  async function activateChatsLibrary() {
+    const project = await ensureStandaloneChatProject();
+    await selectProject(project.id, { preserveMainView: true });
+    if (activeThread?.projectId === project.id) {
+      setShowStartupWelcome(false);
+      setRoute('thread');
+      return;
+    }
+
+    const projectThreads = await window.vicode.threads.list(project.id);
+    setThreadsByProject((current) => ({ ...current, [project.id]: projectThreads }));
+    const threadId = selectRestorableProjectThread(
+      projectThreads,
+      preferences?.lastOpenedThreadId
+    );
+    if (threadId) {
+      await openThread(threadId);
+      return;
+    }
+
+    await selectProject(project.id);
+  }
+
+  async function createChatThread() {
+    const project = await ensureStandaloneChatProject();
+    await createThreadForProject(project.id);
   }
 
   async function renameProject(projectId: string) {
@@ -1848,8 +1893,6 @@ export function App() {
               emptyPromptMessage: 'Add some prose before enhancing the prompt.'
             }
           ),
-        startBuildPlanSetupThread: (input) => startBuildPlanSetupThread(input),
-        createBuildPlanFromActiveThread,
         setComposerMode,
         setComposerPrompt: (nextPrompt) =>
           setComposer((current) => ({
@@ -1926,8 +1969,6 @@ export function App() {
                 emptyPromptMessage: 'Add some prose before enhancing the prompt.'
               }
             ),
-          startBuildPlanSetupThread: (input) => startBuildPlanSetupThread(input),
-          createBuildPlanFromActiveThread,
           setComposerMode,
           setComposerPrompt: (nextPrompt) =>
             setComposer((current) => ({
@@ -1988,37 +2029,27 @@ export function App() {
       );
       return false;
     }
-    if (
-      composer.mode === 'default' &&
-      isBuildPlanSetupThread(activeThread) &&
-      getBuildPlanThreadReadiness(activeThread).enabled
-    ) {
-      showToast(
-        'warning',
-        'This setup thread is ready for Autonomous Builds handoff. Use Accept and start Autonomous Builds, or Create build plan from this thread, instead of running normal execution here.'
-      );
-      return false;
-    }
     if (composer.providerId !== 'ollama' && composer.imageAttachments.length > 0 && activeModel?.supportsVision === false) {
       showToast('warning', `${activeModel.label} does not support image input. Choose a vision-capable model first.`);
       return false;
     }
-    const input: ComposerSubmitInput = {
+    const input: ComposerSubmitInput = buildComposerSubmitInput({
       projectId: composerProjectId,
       threadId: activeThreadIdRef.current ?? activeThread?.id ?? null,
-      prompt: effectivePrompt.trim(),
+      prompt: effectivePrompt,
       providerId: composer.providerId,
       modelId: composer.modelId,
       reasoningEffort: resolveComposerReasoningEffort(composer.providerId, composerEffort),
       thinkingEnabled: providerCapabilities(composer.providerId).supportsThinkingToggle ? composer.thinkingEnabled : undefined,
       executionPermission: composer.executionPermission,
+      isolationMode: composer.isolationMode,
       skillIds: mergeComposerSkillIds(
         attachedSkillIds,
         splitPromptMentionedSkills(effectivePrompt, availableComposerSkills).mentionedSkillIds
       ),
       imageAttachments: composer.imageAttachments,
       textAttachments: composer.textAttachments
-    };
+    });
     const submittedPrompt = input.prompt;
     const submittedImageAttachments = [...(input.imageAttachments ?? [])];
     const submittedTextAttachments = [...(input.textAttachments ?? [])];
@@ -2033,6 +2064,7 @@ export function App() {
             {
               prompt: input.prompt,
               executionPermission: input.executionPermission,
+              isolationMode: input.isolationMode,
               skillIds: input.skillIds,
               imageAttachments: input.imageAttachments ?? [],
               textAttachments: input.textAttachments ?? []
@@ -2182,7 +2214,13 @@ export function App() {
     }
   }
 
-  async function enhanceComposerPrompt() {
+  async function enhanceComposerPrompt(promptOverride?: string) {
+    const prompt = promptOverride ?? composer.prompt;
+    if (composer.providerId === 'openai_compatible' && prompt.trim()) {
+      showToast('warning', 'Prompt enhancement is not available for Custom API yet.');
+      return;
+    }
+
     await enhanceComposerPromptFlow(
       {
         enhancePrompt: (input) => window.vicode.composer.enhancePrompt(input),
@@ -2197,7 +2235,7 @@ export function App() {
         focusComposer: () => requestAnimationFrame(() => composerRef.current?.focus())
       },
       {
-        prompt: composer.prompt,
+        prompt,
         projectId: composerProjectId,
         providerId: composer.providerId,
         modelId: composer.modelId,
@@ -2222,7 +2260,7 @@ export function App() {
       const activeComposerProvider = visibleProviders.find((provider) => provider.id === composer.providerId) ?? null;
       if (mode === 'plan' && !activeComposerProvider?.plannerPolicy.supported) {
         showToast(
-          'info',
+          'warning',
           `${activeComposerProvider?.label ?? providerDisplayName(composer.providerId)} does not support native Plan mode yet. Use /plan with a request to apply a planning prompt instead.`
         );
         return composer.mode;
@@ -2306,15 +2344,6 @@ export function App() {
 
     setPlanApproving(true);
     try {
-      if (isBuildPlanSetupThread(activeThread) && getBuildPlanThreadReadiness(activeThread).enabled) {
-        const snapshot = await window.vicode.vicodeBuild.createPlanFromThread(activeThread.id);
-        setVicodeBuildSnapshot(snapshot);
-        await refreshThreads(activeThread.projectId);
-        await openThread(activeThread.id);
-        showToast('info', 'Build plan created from this setup thread. Planner started in Autonomous Builds.');
-        return;
-      }
-
       const result = await window.vicode.planner.approvePlan({
         threadId: activeThread.id,
         planId: plan.id
@@ -2425,25 +2454,6 @@ export function App() {
     });
   }
 
-  function selectProviderThinking(thinkingEnabled: boolean) {
-    setComposer((current) => ({
-      ...current,
-      thinkingEnabled
-    }));
-
-    if (!providerCapabilities(composer.providerId).supportsThinkingToggle) {
-      return;
-    }
-
-    void saveDefaultPreferences({
-      defaultThinkingByProvider: createProviderRecord((providerId) =>
-        composer.providerId === providerId
-          ? thinkingEnabled
-          : preferences?.defaultThinkingByProvider[providerId] ?? getProviderMetadata(providerId).defaultThinking
-      )
-    });
-  }
-
   async function setExecutionPermission(executionPermission: ExecutionPermission) {
     if (composer.executionPermission === executionPermission) {
       return;
@@ -2476,6 +2486,10 @@ export function App() {
       setComposer((current) => ({ ...current, executionPermission: previous }));
       showToast('error', formatUserErrorMessage(error, 'Failed to update execution permissions.'));
     }
+  }
+
+  function setIsolationMode(isolationMode: HarnessIsolationMode) {
+    setComposer((current) => ({ ...current, isolationMode }));
   }
 
   function selectComposerEffort(effort: ComposerEffort) {
@@ -2624,18 +2638,40 @@ export function App() {
     }
   }
 
-  async function renameThread() {
-    if (!activeThread) {
+  function findKnownThread(threadId: string | null) {
+    if (!threadId) {
+      return null;
+    }
+
+    if (activeThread?.id === threadId) {
+      return activeThread;
+    }
+
+    return Object.values(threadsByProject)
+      .flat()
+      .find((item) => item.id === threadId) ?? null;
+  }
+
+  async function renameThread(threadId: string | null = activeThread?.id ?? null) {
+    if (!threadId) {
       return;
     }
-    const title = window.prompt('Rename thread', activeThread.title)?.trim();
+
+    const targetThread = findKnownThread(threadId);
+    const title = window.prompt('Rename thread', targetThread?.title ?? 'Untitled thread')?.trim();
     if (!title) {
       return;
     }
-    const thread = await window.vicode.threads.rename(activeThread.id, title);
+
+    const thread = await window.vicode.threads.rename(threadId, title);
     setRecentThreads((current) => upsertRecentThread(current, thread));
-    await refreshThreads(selectedProjectId);
-    await openThread(activeThread.id);
+    if (activeThread?.id === threadId) {
+      setActiveThread((current) => current ? { ...current, title } : current);
+      await refreshThreads(thread.projectId);
+      await openThread(threadId);
+    } else {
+      await refreshThreads(thread.projectId);
+    }
   }
 
   async function archiveThread(threadId: string | null = activeThread?.id ?? null) {
@@ -2674,16 +2710,48 @@ export function App() {
     }
   }
 
-  async function deleteThread() {
-    if (!activeThread) {
+  function requestDeleteThread(threadId: string | null = activeThread?.id ?? null) {
+    if (!threadId) {
       return;
     }
-    await window.vicode.threads.remove(activeThread.id);
-    setRecentThreads((current) => current.filter((item) => item.id !== activeThread.id));
-    await refreshThreads(selectedProjectId);
+
+    const targetThread = findKnownThread(threadId);
+    setDeleteThreadTarget({
+      id: threadId,
+      title: targetThread?.title ?? 'this thread',
+      projectId: targetThread?.projectId ?? selectedProjectId
+    });
+  }
+
+  async function deleteThread(threadId: string | null = deleteThreadTarget?.id ?? activeThread?.id ?? null) {
+    if (!threadId) {
+      return;
+    }
+
+    const targetThread = findKnownThread(threadId);
+    const ownerProjectId = targetThread?.projectId ?? selectedProjectId;
+
+    await window.vicode.threads.remove(threadId);
+    setThreadsByProject((current) =>
+      Object.fromEntries(
+        Object.entries(current).map(([projectId, threads]) => [
+          projectId,
+          threads.filter((item) => item.id !== threadId)
+        ])
+      )
+    );
+    setRecentThreads((current) => current.filter((item) => item.id !== threadId));
+    if (activeThread?.id === threadId) {
+      activeThreadIdRef.current = null;
+      setActiveThread(null);
+    }
+    if (ownerProjectId) {
+      await refreshThreads(ownerProjectId);
+    } else {
+      await refreshThreads(selectedProjectId);
+    }
     await refreshArchivedThreads();
     await refreshStorageDiagnosticsIfVisible();
-    setActiveThread(null);
   }
 
   async function duplicateThread() {
@@ -2708,6 +2776,46 @@ export function App() {
     setSkills(await window.vicode.skills.list());
   }
 
+  async function refreshLibrarySources() {
+    const [sourcesResult, indexStatusResult] = await Promise.allSettled([
+      window.vicode.library.getSources(),
+      window.vicode.projectKnowledge.getIndexStatus()
+    ]);
+    setLibrarySources(sourcesResult.status === 'fulfilled' ? sourcesResult.value : null);
+    setProjectKnowledgeIndexStatus(indexStatusResult.status === 'fulfilled' ? indexStatusResult.value : null);
+  }
+
+  async function refreshProjectKnowledgeIndex() {
+    try {
+      const status = await window.vicode.projectKnowledge.refreshIndex();
+      setProjectKnowledgeIndexStatus(status);
+      await refreshLibrarySources();
+      showToast(status.status === 'ready' ? 'info' : 'warning', status.status === 'ready' ? 'Project Knowledge index refreshed.' : status.message);
+    } catch (error) {
+      showToast('error', formatUserErrorMessage(error, 'Failed to refresh Project Knowledge index.'));
+    }
+  }
+
+  async function openProjectKnowledgeSuggestedIndexDraft(): Promise<void> {
+    try {
+      await window.vicode.projectKnowledge.openSuggestedIndexDraft();
+      showToast('info', 'Suggested Index draft opened as Markdown.');
+    } catch (error) {
+      showToast('error', formatUserErrorMessage(error, 'Failed to open Suggested Index draft.'));
+    }
+  }
+
+  async function rescanSkillLibrary() {
+    try {
+      const nextSkills = await window.vicode.skills.rescanLibrary();
+      setSkills(nextSkills);
+      await refreshLibrarySources();
+      showToast('info', 'Skill library rescanned.');
+    } catch (error) {
+      showToast('error', formatUserErrorMessage(error, 'Failed to rescan the skill library.'));
+    }
+  }
+
   async function saveSkill(input: SkillSaveInput) {
     const skill = await window.vicode.skills.save(input);
     setSkills((current) => [skill, ...current.filter((item) => item.id !== skill.id)]);
@@ -2721,13 +2829,6 @@ export function App() {
     if (!enabled) {
       setAttachedSkillIds((current) => current.filter((item) => item !== skillId));
     }
-    return skill;
-  }
-
-  async function syncSkill(skillId: string, providerId: ProviderId, enabled: boolean) {
-    const skill = await window.vicode.skills.sync(skillId, providerId, enabled);
-    setSkills((current) => current.map((item) => (item.id === skill.id ? skill : item)));
-    showToast('info', `${skill.name} ${enabled ? `exported to ${providerDisplayName(providerId)}` : 'export removed'}.`);
     return skill;
   }
 
@@ -2826,233 +2927,6 @@ export function App() {
       showPendingReviewToast(result.reviewItem, result.alreadyPending ? reviewItemsRef.current.length : reviewItemsRef.current.length + 1);
     } catch (error) {
       showToast('warning', formatUserErrorMessage(error, 'Unable to queue automation.'));
-    }
-  }
-
-  async function refreshVicodeBuildSnapshot() {
-    setVicodeBuildSnapshot(await window.vicode.vicodeBuild.getSnapshot(selectedProjectId));
-  }
-
-  function openBuildPlanDialog() {
-    setBuildPlanLaunch({
-      goal: '',
-      providerId: composer.providerId,
-      modelId: resolveProviderModelId(visibleProviders, composer.providerId, composer.modelId),
-      reasoningEffort: resolveComposerReasoningEffort(composer.providerId, composerEffort)
-    });
-    setBuildPlanDialogOpen(true);
-  }
-
-  function closeBuildPlanDialog() {
-    setBuildPlanDialogOpen(false);
-  }
-
-  async function startBuildPlanSetupThread(input: {
-    goal: string;
-    providerId: ProviderId;
-    modelId: string;
-    reasoningEffort: ProviderReasoningEffort | null;
-    closeDialog?: boolean;
-    successMessage?: string;
-    errorMessage?: string;
-  }) {
-    if (!selectedProjectId) {
-      showToast('warning', 'Select a project before starting Autonomous Builds.');
-      return;
-    }
-    if (!input.goal.trim()) {
-      showToast('warning', 'Describe the goal for Autonomous Builds first.');
-      return;
-    }
-
-    const setupProvider = visibleProviders.find((provider) => provider.id === input.providerId) ?? null;
-    if (!setupProvider?.plannerPolicy.supported) {
-      showToast(
-        'warning',
-        `${setupProvider?.label ?? providerDisplayName(input.providerId)} does not support native Plan mode for Autonomous Builds setup yet.`
-      );
-      return;
-    }
-
-    setVicodeBuildBusyAction('launch-plan');
-    try {
-      const createdThread = await window.vicode.threads.create({
-        projectId: selectedProjectId,
-        title: deriveBuildPlanSetupTitle(input.goal),
-        providerId: input.providerId,
-        modelId: input.modelId,
-        executionPermission: composer.executionPermission
-      });
-      const result = await window.vicode.planner.submit({
-        projectId: selectedProjectId,
-        threadId: createdThread.id,
-        prompt: buildPlanSetupPrompt(input.goal),
-        providerId: input.providerId,
-        modelId: input.modelId,
-        reasoningEffort: input.reasoningEffort,
-        thinkingEnabled: providerCapabilities(input.providerId).supportsThinkingToggle
-          ? composer.thinkingEnabled
-          : undefined,
-        executionPermission: composer.executionPermission,
-        skillIds: [],
-        imageAttachments: [],
-        textAttachments: []
-      });
-      setShowStartupWelcome(false);
-      syncThreadProjectSelection(result.thread.projectId);
-      setActiveThread(result.thread);
-      setRecentThreads((current) => upsertRecentThread(current, result.thread));
-      setActiveRunId(result.runId);
-      setComposer((current) => ({
-        ...current,
-        mode: result.thread.planner.composerMode,
-        executionPermission: result.thread.executionPermission
-      }));
-      await refreshThreads(result.thread.projectId);
-      if (input.closeDialog) {
-        closeBuildPlanDialog();
-      }
-      showToast('info', input.successMessage ?? 'Autonomous Builds setup thread started in Plan mode.');
-    } catch (error) {
-      showToast('warning', formatUserErrorMessage(error, input.errorMessage ?? 'Unable to start the Autonomous Builds setup thread.'));
-    } finally {
-      setVicodeBuildBusyAction(null);
-    }
-  }
-
-  async function launchBuildPlanSetupThread() {
-    await startBuildPlanSetupThread({
-      goal: buildPlanLaunch.goal,
-      providerId: buildPlanLaunch.providerId,
-      modelId: buildPlanLaunch.modelId,
-      reasoningEffort: buildPlanLaunch.reasoningEffort,
-      closeDialog: true
-    });
-  }
-
-  async function createBuildPlanFromActiveThread() {
-    const readiness = getBuildPlanThreadReadiness(activeThread);
-    if (!readiness.enabled) {
-      showToast('warning', readiness.reason);
-      return;
-    }
-
-    setVicodeBuildBusyAction('create-plan-from-thread');
-    try {
-      const snapshot = await window.vicode.vicodeBuild.createPlanFromThread(activeThread.id);
-      setVicodeBuildSnapshot(snapshot);
-      await refreshThreads(activeThread.projectId);
-      await openThread(activeThread.id);
-      showToast('info', 'Build plan created from this thread. Planner started in the same thread.');
-    } catch (error) {
-      showToast('warning', formatUserErrorMessage(error, 'Unable to create the build plan from this thread.'));
-    } finally {
-      setVicodeBuildBusyAction(null);
-    }
-  }
-
-  async function setVicodeBuildTeamPaused(teamId: string, paused: boolean) {
-    if (!selectedProjectId) {
-      showToast('warning', 'Select the Vicode project before controlling build lanes.');
-      return;
-    }
-    const actionKey = `${paused ? 'pause' : 'resume'}:${teamId}`;
-    setVicodeBuildBusyAction(actionKey);
-    try {
-      const snapshot = await window.vicode.vicodeBuild.setTeamPaused({
-        projectId: selectedProjectId,
-        teamId: teamId as never,
-        paused
-      });
-      setVicodeBuildSnapshot(snapshot);
-      showToast('info', paused ? 'Build team paused.' : 'Build team resumed.');
-    } catch (error) {
-      showToast('warning', formatUserErrorMessage(error, 'Unable to update build team state.'));
-    } finally {
-      setVicodeBuildBusyAction(null);
-    }
-  }
-
-  async function wakeVicodeBuildLane(teamId: string, laneId: VicodeBuildLaneId) {
-    if (!selectedProjectId) {
-      showToast('warning', 'Select the Vicode project before waking build lanes.');
-      return;
-    }
-    const actionKey = `wake:${teamId}:${laneId}`;
-    setVicodeBuildBusyAction(actionKey);
-    try {
-      const snapshot = await window.vicode.vicodeBuild.wakeLane({
-        projectId: selectedProjectId,
-        teamId: teamId as never,
-        laneId
-      });
-      setVicodeBuildSnapshot(snapshot);
-      showToast('info', 'Lane wake submitted. Open the lane thread to inspect the run.');
-    } catch (error) {
-      showToast('warning', formatUserErrorMessage(error, 'Unable to wake build lane.'));
-    } finally {
-      setVicodeBuildBusyAction(null);
-    }
-  }
-
-  async function retryVicodeBuildLane(teamId: string, laneId: VicodeBuildLaneId) {
-    if (!selectedProjectId) {
-      return;
-    }
-    const actionKey = `retry:${teamId}:${laneId}`;
-    setVicodeBuildBusyAction(actionKey);
-    try {
-      const snapshot = await window.vicode.vicodeBuild.retryLane({
-        projectId: selectedProjectId,
-        teamId,
-        laneId
-      });
-      setVicodeBuildSnapshot(snapshot);
-    } finally {
-      setVicodeBuildBusyAction(null);
-    }
-  }
-
-  async function openVicodeBuildLaneThread(threadId: string) {
-    try {
-      await openThread(threadId);
-    } catch (error) {
-      showToast('warning', formatUserErrorMessage(error, 'Unable to open the lane thread.'));
-    }
-  }
-
-  async function runVicodeBuildVerification() {
-    if (!selectedProjectId) {
-      showToast('warning', 'Select the Vicode project before running verification.');
-      return;
-    }
-    setVicodeBuildBusyAction('verify');
-    try {
-      const result = await window.vicode.vicodeBuild.runVerification(selectedProjectId);
-      setVicodeBuildVerification(result);
-      showToast('info', result.ok ? 'Autonomous build verification passed.' : 'Autonomous build verification needs attention.');
-      await refreshVicodeBuildSnapshot();
-    } catch (error) {
-      showToast('warning', formatUserErrorMessage(error, 'Unable to run autonomous build verification.'));
-    } finally {
-      setVicodeBuildBusyAction(null);
-    }
-  }
-
-  async function clearInactiveVicodeBuildPlans() {
-    if (!selectedProjectId) {
-      showToast('warning', 'Select the Vicode project before clearing old build plans.');
-      return;
-    }
-    setVicodeBuildBusyAction('clear-inactive');
-    try {
-      const snapshot = await window.vicode.vicodeBuild.clearInactivePlans(selectedProjectId);
-      setVicodeBuildSnapshot(snapshot);
-      showToast('info', 'Old inactive build plans were cleared from this workspace.');
-    } catch (error) {
-      showToast('warning', formatUserErrorMessage(error, 'Unable to clear old build plans.'));
-    } finally {
-      setVicodeBuildBusyAction(null);
     }
   }
 
@@ -3191,185 +3065,39 @@ export function App() {
   }
 
   async function connectProvider(providerId: ProviderId, mode?: 'cli' | 'api_key', options?: { force?: boolean }) {
-    if (providerId === 'ollama') {
-      const snapshot = await window.vicode.ollamaRuntime.start();
-      setOllamaRuntimeStatus(snapshot);
-      const provider = await window.vicode.providers.refresh(providerId);
-      setProviders((current) => current.map((item) => (item.id === provider.id ? provider : item)));
-      showToast(
-        'info',
-        snapshot.managedByApp
-          ? 'Local Ollama is starting in Vicode.'
-          : provider.message ?? 'Local Ollama start requested.'
-      );
-      return;
-    }
-
-    const provider = await window.vicode.providers.startAuth(providerId, mode, options);
-    setProviders((current) => current.map((item) => (item.id === provider.id ? provider : item)));
-    showToast(provider.authState === 'missing_cli' ? 'warning' : 'info', provider.message ?? `${provider.label} auth flow started.`);
+    await connectProviderInShell(providerActionsHost, providerId, mode, options);
   }
 
   async function adoptProviderAuth(providerId: ProviderId) {
-    const provider = await window.vicode.providers.adoptAuth(providerId);
-    setProviders((current) => current.map((item) => (item.id === provider.id ? provider : item)));
-    showToast(provider.authState === 'connected' ? 'info' : 'warning', provider.message ?? `${provider.label} setup updated.`);
-  }
-
-  function providerInstallUrl(providerId: ProviderId) {
-    return providerId === 'openai'
-      ? 'https://github.com/openai/codex'
-      : providerId === 'gemini'
-        ? 'https://github.com/google-gemini/gemini-cli'
-        : providerId === 'ollama'
-          ? 'https://docs.ollama.com/windows'
-        : providerId === 'qwen'
-          ? 'https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/'
-          : 'https://moonshotai.github.io/kimi-cli/en/';
+    await adoptProviderAuthInShell(providerActionsHost, providerId);
   }
 
   function beginProviderInstall(providerId: ProviderId) {
-    window.open(providerInstallUrl(providerId), '_blank', 'noopener,noreferrer');
-    const providerName = providerDisplayName(providerId);
-    showToast(
-      'info',
-      providerId === 'qwen'
-        ? 'Install Qwen Code with `npm install -g @qwen-code/qwen-code@latest`, then return to Vicode. The app will keep checking for it.'
-        : providerId === 'ollama'
-          ? 'Install Ollama, then return to Vicode.'
-        : providerId === 'kimi'
-          ? 'Install Kimi Code with `npm install -g @moonshot-ai/kimi-code@latest`, then return to Vicode. The app will keep checking for it.'
-        : `Install ${providerName}, then return to Vicode.`
-    );
-
-    const existingTimer = installPollingRef.current[providerId];
-    if (existingTimer) {
-      window.clearInterval(existingTimer);
-    }
-
-    const startedAt = Date.now();
-    const timer = window.setInterval(() => {
-      void window.vicode.providers
-        .refresh(providerId)
-        .then((provider) => {
-          setProviders((current) => current.map((item) => (item.id === provider.id ? provider : item)));
-
-          if (!provider.installed && Date.now() - startedAt < 60_000) {
-            return;
-          }
-
-          window.clearInterval(timer);
-          delete installPollingRef.current[providerId];
-
-          if (provider.installed) {
-            showToast(
-              'info',
-              providerId === 'ollama'
-                ? provider.authState === 'connected'
-                  ? 'Ollama is installed and ready.'
-                  : 'Ollama was found. Start it or refresh to load models.'
-                : provider.authState === 'connected'
-                  ? `${providerName} was found and is ready.`
-                  : `${providerName} was found. You can sign in now.`
-            );
-          }
-        })
-        .catch(() => {
-          if (Date.now() - startedAt >= 60_000) {
-            window.clearInterval(timer);
-            delete installPollingRef.current[providerId];
-          }
-        });
-    }, 2500);
-
-    installPollingRef.current[providerId] = timer;
+    beginProviderInstallInShell(providerActionsHost, providerId);
   }
 
   async function clearProviderAuth(providerId: ProviderId) {
-    const provider = await window.vicode.providers.clearAuth(providerId);
-    setProviders((current) => current.map((item) => (item.id === provider.id ? provider : item)));
-    setApiKeys((current) => ({ ...current, [providerId]: '' }));
-    showToast('info', `${provider.label} disconnected.`);
+    await clearProviderAuthInShell(providerActionsHost, providerId);
   }
 
   async function refreshProvider(providerId: ProviderId) {
-    const provider = await window.vicode.providers.refresh(providerId);
-    setProviders((current) => current.map((item) => (item.id === provider.id ? provider : item)));
-    if (providerId === 'ollama') {
-      await refreshOllamaRuntimeStatus();
-    }
-    const previousModelId = composer.providerId === provider.id ? composer.modelId : null;
-    const nextModelId = previousModelId
-      ? resolveProviderModelId([provider], provider.id, previousModelId, { promoteStaleDefault: true })
-      : null;
-    setComposer((current) => (nextModelId && current.providerId === provider.id ? { ...current, modelId: nextModelId } : current));
-    if (previousModelId && nextModelId && previousModelId !== nextModelId) {
-      showToast('info', `${provider.label} switched to ${provider.models.find((model) => model.id === nextModelId)?.label ?? nextModelId}.`);
-      return;
-    }
-    showToast('info', `${provider.label} refreshed.`);
+    await refreshProviderInShell(providerActionsHost, providerId);
   }
 
   async function refreshOllamaRuntimeStatus() {
-    try {
-      setOllamaRuntimeStatus(await window.vicode.ollamaRuntime.getStatus());
-    } catch {
-      setOllamaRuntimeStatus(null);
-    }
+    await refreshOllamaRuntimeStatusInShell(providerActionsHost);
   }
 
   async function pullOllamaModel(model: string) {
-    const trimmedModel = model.trim();
-    if (!trimmedModel) {
-      showToast('warning', 'Model name is required.');
-      return;
-    }
-
-    try {
-      setOllamaPullProgress(null);
-      const result = await window.vicode.ollamaRuntime.pullModel(trimmedModel);
-      const provider = await window.vicode.providers.refresh('ollama');
-      setProviders((current) => current.map((item) => (item.id === provider.id ? provider : item)));
-      showToast('info', `Pulled ${result.model}. ${result.models.length} local model${result.models.length === 1 ? '' : 's'} available.`);
-    } catch (error) {
-      showToast('error', formatUserErrorMessage(error, `Unable to pull ${trimmedModel}.`));
-    } finally {
-      setOllamaPullProgress(null);
-    }
+    await pullOllamaModelInShell(providerActionsHost, model);
   }
 
   async function deleteOllamaModel(model: string) {
-    const trimmedModel = model.trim();
-    if (!trimmedModel) {
-      showToast('warning', 'Model name is required.');
-      return;
-    }
-
-    try {
-      const result = await window.vicode.ollamaRuntime.deleteModel(trimmedModel);
-      const provider = await window.vicode.providers.refresh('ollama');
-      setProviders((current) => current.map((item) => (item.id === provider.id ? provider : item)));
-      showToast('info', `Deleted ${result.model}. ${result.models.length} local model${result.models.length === 1 ? '' : 's'} remain.`);
-    } catch (error) {
-      showToast('error', formatUserErrorMessage(error, `Unable to delete ${trimmedModel}.`));
-    }
+    await deleteOllamaModelInShell(providerActionsHost, model);
   }
 
   async function stopOllamaRuntime() {
-    try {
-      const snapshot = await window.vicode.ollamaRuntime.stop();
-      setOllamaRuntimeStatus(snapshot);
-      const provider = await window.vicode.providers.refresh('ollama');
-      setProviders((current) => current.map((item) => (item.id === provider.id ? provider : item)));
-      showToast(
-        'info',
-        snapshot.reachable
-          ? 'Ollama is still reachable outside Vicode control.'
-          : 'Stopped the Vicode-managed Ollama runtime.'
-      );
-    } catch (error) {
-      showToast('error', formatUserErrorMessage(error, 'Unable to stop the Ollama local runtime.'));
-    }
+    await stopOllamaRuntimeInShell(providerActionsHost);
   }
 
   async function approveRunToolApproval(approvalId: string) {
@@ -3404,30 +3132,80 @@ export function App() {
     }
   }
 
+  async function applyStagedWorkspaceChange(input: StagedWorkspaceReviewInput) {
+    await applyStagedWorkspaceChangeInShell(runReviewActionsHost, input);
+  }
+
+  async function rejectStagedWorkspaceChange(input: StagedWorkspaceReviewInput) {
+    await rejectStagedWorkspaceChangeInShell(runReviewActionsHost, input);
+  }
+
+  async function revertStagedWorkspaceChange(input: StagedWorkspaceReviewInput) {
+    await revertStagedWorkspaceChangeInShell(runReviewActionsHost, input);
+  }
+
+  async function applyStagedWorkspaceHunks(input: StagedWorkspaceHunkApplyInput) {
+    await applyStagedWorkspaceHunksInShell(runReviewActionsHost, input);
+  }
+
+  async function rejectStagedWorkspaceHunks(input: StagedWorkspaceHunkRejectInput) {
+    await rejectStagedWorkspaceHunksInShell(runReviewActionsHost, input);
+  }
+
+  async function revertStagedWorkspaceHunks(input: StagedWorkspaceHunkRevertInput) {
+    await revertStagedWorkspaceHunksInShell(runReviewActionsHost, input);
+  }
+
+  async function applyWorktreeReview(input: WorktreeReviewInput) {
+    await applyWorktreeReviewInShell(runReviewActionsHost, input);
+  }
+
+  async function rejectWorktreeReview(input: WorktreeReviewInput) {
+    await rejectWorktreeReviewInShell(runReviewActionsHost, input);
+  }
+
+  async function revertWorktreeReview(input: WorktreeReviewInput) {
+    await revertWorktreeReviewInShell(runReviewActionsHost, input);
+  }
+
+  async function applyWorktreeHunks(input: WorktreeHunkApplyInput) {
+    await applyWorktreeHunksInShell(runReviewActionsHost, input);
+  }
+
+  async function rejectWorktreeHunks(input: WorktreeHunkRejectInput) {
+    await rejectWorktreeHunksInShell(runReviewActionsHost, input);
+  }
+
+  async function revertWorktreeHunks(input: WorktreeHunkRevertInput) {
+    await revertWorktreeHunksInShell(runReviewActionsHost, input);
+  }
+
+  async function cleanupWorktreeReview(input: WorktreeCleanupInput) {
+    await cleanupWorktreeReviewInShell(runReviewActionsHost, input);
+  }
+
   async function clearAllProviderAuth() {
-    const clearedProviders = await Promise.all(visibleProviders.map((provider) => window.vicode.providers.clearAuth(provider.id)));
-    setProviders((current) =>
-      current.map((item) => clearedProviders.find((provider) => provider.id === item.id) ?? item)
-    );
-    setApiKeys(createProviderRecord(() => ''));
-    showToast('info', 'Providers disconnected.');
+    await clearAllProviderAuthInShell(providerActionsHost);
+  }
+
+  async function refreshProviders() {
+    await refreshProvidersInShell(providerActionsHost);
+  }
+
+  async function refreshCustomProviders() {
+    await refreshCustomProvidersInShell(providerActionsHost);
+  }
+
+  async function saveCustomProvider(input: CustomProviderSettingsSaveInput) {
+    return saveCustomProviderInShell(providerActionsHost, input);
+  }
+
+  async function deleteCustomProvider(providerId: string) {
+    await deleteCustomProviderInShell(providerActionsHost, providerId);
   }
 
   async function saveProviderApiKey(providerId: ProviderId) {
-    const trimmedApiKey = apiKeys[providerId].trim();
-    if (!trimmedApiKey) {
-      showToast('warning', 'API key is required.');
-      return;
-    }
-    const provider = await window.vicode.providers.saveApiKey(providerId, trimmedApiKey);
-    setProviders((current) => current.map((item) => (item.id === provider.id ? provider : item)));
-    setApiKeys((current) => ({ ...current, [providerId]: trimmedApiKey }));
-    showToast(
-      'info',
-      providerId === 'ollama'
-        ? 'Ollama API key stored. Hosted Ollama models can run without a local install.'
-        : `${provider.label} API key stored as a local fallback.`
-    );
+    await saveProviderApiKeyInShell(providerActionsHost, providerId);
   }
 
   async function saveDefaultPreferences(input: Partial<Preferences>) {
@@ -3456,6 +3234,11 @@ export function App() {
       preferences?.defaultModelByProvider.kimi ??
       providers.find((provider) => provider.id === 'kimi')?.models[0]?.id ??
       getProviderMetadata('kimi').defaultModelId;
+    const openAICompatibleModel =
+      input.defaultModelByProvider?.openai_compatible ??
+      preferences?.defaultModelByProvider.openai_compatible ??
+      visibleProviders.find((provider) => provider.id === 'openai_compatible')?.models[0]?.id ??
+      getProviderMetadata('openai_compatible').defaultModelId;
     const openAIReasoningEffort =
       input.defaultReasoningEffortByProvider?.openai ??
       preferences?.defaultReasoningEffortByProvider.openai ??
@@ -3496,106 +3279,89 @@ export function App() {
       input.defaultThinkingByProvider?.kimi ??
       preferences?.defaultThinkingByProvider.kimi ??
       false;
+    const hasInputKey = (key: keyof Preferences) =>
+      Object.prototype.hasOwnProperty.call(input, key);
+    const userLibraryPath = hasInputKey('userLibraryPath')
+      ? (input.userLibraryPath ?? null)
+      : (preferences?.userLibraryPath ?? null);
+    const skillsLibraryPath = hasInputKey('skillsLibraryPath')
+      ? (input.skillsLibraryPath ?? null)
+      : (preferences?.skillsLibraryPath ?? null);
+    const llmWikiLibraryPath = hasInputKey('llmWikiLibraryPath')
+      ? (input.llmWikiLibraryPath ?? null)
+      : (preferences?.llmWikiLibraryPath ?? null);
 
     setPreferences(
       await window.vicode.settings.save({
-        defaultProviderId: input.defaultProviderId ?? preferences?.defaultProviderId ?? 'openai',
+        defaultProviderId: input.defaultProviderId ?? preferences?.defaultProviderId ?? 'ollama',
         defaultModelByProvider: {
           openai: openAIModel,
           gemini: geminiModel,
           qwen: qwenModel,
           ollama: ollamaModel,
-          kimi: kimiModel
+          kimi: kimiModel,
+          openai_compatible: openAICompatibleModel
         },
         defaultReasoningEffortByProvider: {
           openai: openAIReasoningEffort,
           gemini: geminiReasoningEffort,
           qwen: qwenReasoningEffort,
           ollama: ollamaReasoningEffort,
-          kimi: kimiReasoningEffort
+          kimi: kimiReasoningEffort,
+          openai_compatible: preferences?.defaultReasoningEffortByProvider.openai_compatible ?? null
         },
         defaultThinkingByProvider: {
           openai: openAIThinking,
           gemini: geminiThinking,
           qwen: qwenThinking,
           ollama: ollamaThinking,
-          kimi: kimiThinking
+          kimi: kimiThinking,
+          openai_compatible: preferences?.defaultThinkingByProvider.openai_compatible ?? false
         },
         defaultExecutionPermission: input.defaultExecutionPermission ?? preferences?.defaultExecutionPermission ?? 'default',
         followUpBehavior: input.followUpBehavior ?? preferences?.followUpBehavior ?? 'queue',
         appearanceMode: input.appearanceMode ?? preferences?.appearanceMode ?? 'system',
         accentMode: input.accentMode ?? preferences?.accentMode ?? 'system',
         accentColor: input.accentColor ?? preferences?.accentColor ?? null,
-        onboardingComplete: input.onboardingComplete ?? preferences?.onboardingComplete ?? false
+        generatedMemoryUseEnabled: input.generatedMemoryUseEnabled ?? preferences?.generatedMemoryUseEnabled ?? false,
+        generatedMemoryGenerationEnabled:
+          input.generatedMemoryGenerationEnabled ?? preferences?.generatedMemoryGenerationEnabled ?? true,
+        onboardingComplete: input.onboardingComplete ?? preferences?.onboardingComplete ?? false,
+        lastOpenedThreadId: input.lastOpenedThreadId ?? preferences?.lastOpenedThreadId ?? null,
+        microphoneAllowed: input.microphoneAllowed ?? preferences?.microphoneAllowed ?? false,
+        userLibraryPath,
+        skillsLibraryPath,
+        llmWikiLibraryPath
       })
     );
   }
 
   async function exportDiagnostics() {
-    showToast('info', `Diagnostics exported to ${await window.vicode.diagnostics.export()}`);
+    await exportDiagnosticsInShell(diagnosticsActionsHost);
   }
 
   async function exportActiveThreadDiagnostics() {
-    if (!activeThread) {
-      showToast('warning', 'Open a thread first.');
-      return;
-    }
+    await exportActiveThreadDiagnosticsInShell(diagnosticsActionsHost);
+  }
 
-    try {
-      const path = await window.vicode.diagnostics.exportThread(activeThread.id);
-      showToast('info', `Thread diagnostics exported to ${path}`);
-    } catch (error) {
-      showToast('error', formatUserErrorMessage(error, 'Failed to export thread diagnostics.'));
-    }
+  async function exportActiveThreadReport() {
+    await exportActiveThreadReportInShell(diagnosticsActionsHost);
   }
 
   async function loadStorageDiagnostics() {
-    try {
-      setStorageDiagnostics(await window.vicode.diagnostics.getStorage());
-    } catch {
-      setStorageDiagnostics(null);
-    }
+    await loadStorageDiagnosticsInShell(diagnosticsActionsHost);
   }
 
   async function refreshStorageDiagnosticsIfVisible() {
-    if (
-      (route === 'settings' && (settingsSection === 'diagnostics' || settingsSection === 'storage')) ||
-      storageDiagnostics !== null
-    ) {
-      await loadStorageDiagnostics();
-    }
+    await refreshStorageDiagnosticsIfVisibleInShell(diagnosticsActionsHost);
   }
 
   async function compactRunEvents() {
-    try {
-      const result = await window.vicode.diagnostics.compactRunEvents();
-      await loadStorageDiagnostics();
-      showToast(
-        'info',
-        result.deltaEventsDeleted > 0
-          ? `Compacted ${result.deltaEventsDeleted} delta events across ${result.runsCompacted} archived runs and checkpointed SQLite. Reclaimed ${result.reclaimedBytes.toLocaleString()} bytes immediately.`
-          : result.reclaimedBytes > 0
-            ? `No archived terminal runs older than ${result.cutoffDays} days were eligible for compaction, but SQLite checkpointing still reclaimed ${result.reclaimedBytes.toLocaleString()} bytes.`
-          : `No archived terminal runs older than ${result.cutoffDays} days were eligible for compaction.`
-      );
-    } catch (error) {
-      showToast('error', formatUserErrorMessage(error, 'Failed to compact old run events.'));
-    }
+    await compactRunEventsInShell(diagnosticsActionsHost);
   }
 
   async function maintainStorage(input?: { vacuum?: boolean }) {
-    try {
-      const result = await window.vicode.diagnostics.maintainStorage(input);
-      await loadStorageDiagnostics();
-      showToast(
-        'info',
-        result.vacuumApplied
-          ? `Deep cleanup finished. Reclaimed ${result.reclaimedBytes.toLocaleString()} bytes after compaction, WAL checkpoint, and VACUUM.`
-          : `SQLite maintenance finished. Reclaimed ${result.reclaimedBytes.toLocaleString()} bytes.`
-      );
-    } catch (error) {
-      showToast('error', formatUserErrorMessage(error, 'Failed to run SQLite maintenance.'));
-    }
+    await maintainStorageInShell(diagnosticsActionsHost, input);
   }
 
   useEffect(() => {
@@ -3611,11 +3377,20 @@ export function App() {
     void loadStorageDiagnostics();
   }, [loading, route, settingsSection, storageDiagnostics]);
 
+  useEffect(() => {
+    if (loading || route !== 'settings' || settingsSection !== 'providers') {
+      return;
+    }
+
+    void refreshCustomProviders().catch(() => {
+      setCustomProviders([]);
+    });
+  }, [loading, route, settingsSection]);
+
   const hasProjects = projects.length > 0;
   const showEmptyThreadOpenProjectAction = !hasProjects;
   const showWorkspaceRepairAction = Boolean(workspaceProject?.folderPath && workspaceProject.id === missingWorkspaceProjectId);
   const showWorkspaceTrustAction = Boolean(workspaceProject?.folderPath && !workspaceProject.trusted);
-  const showWorkspaceBootstrapAction = Boolean(workspaceProject?.folderPath && workspaceBootstrapStatus?.needsBootstrap);
   const activeThreadActions =
     activeThread && workspaceProject
       ? {
@@ -3624,7 +3399,7 @@ export function App() {
           duplicate: duplicateThread,
           retry: retryThread,
           archive: async () => archiveThread(activeThread.id),
-          remove: () => setDeleteDialogOpen(true)
+          remove: () => requestDeleteThread(activeThread.id)
         }
       : null;
   const titlebarWorkspaceAction = showWorkspaceRepairAction
@@ -3643,16 +3418,7 @@ export function App() {
           onClick: () => void trustProject(true),
           tone: 'default' as const
         }
-      : showWorkspaceBootstrapAction
-        ? {
-            label: 'Project setup',
-            tooltip: 'Set up project instructions and memory for trusted runs. You review files before saving.',
-            icon: <FolderIcon />,
-            onClick: () => void openWorkspaceBootstrap(),
-            testId: 'workspace-bootstrap-open',
-            tone: 'default' as const
-          }
-        : null;
+      : null;
   const showTranscriptRailCentered = activeThread ? transcriptTurns.length === 0 : startupThreadRestoreState !== 'pending';
   const emptyThreadHero = (
     <EmptyThreadHero
@@ -3667,249 +3433,6 @@ export function App() {
       <p>Restoring your last thread for this workspace.</p>
     </div>
   );
-
-  async function savePersonalization(input: Partial<PersonalizationSettings>) {
-    const next = await window.vicode.settings.savePersonalization(input);
-    setPersonalization(next);
-    showToast('info', 'Personalization saved.');
-  }
-
-  async function resetPersonalization() {
-    setPersonalization(await window.vicode.settings.getPersonalization());
-    showToast('info', 'Personalization reset.');
-  }
-
-  async function openWorkspaceBootstrap() {
-    if (!workspaceProject) {
-      showToast('warning', 'Select a trusted project first.');
-      return;
-    }
-
-    try {
-      const [status, questions] = await Promise.all([
-        window.vicode.workspaceBootstrap.getStatus(workspaceProject.id),
-        workspaceBootstrapQuestions.length > 0
-          ? Promise.resolve(workspaceBootstrapQuestions)
-          : window.vicode.workspaceBootstrap.getQuestionnaire()
-      ]);
-      setWorkspaceBootstrapStatus(status);
-      setWorkspaceBootstrapQuestions(questions);
-      setWorkspaceBootstrapAnswers(
-        createWorkspaceBootstrapAnswerDefaults({
-          selectedProject: workspaceProject,
-          preferences,
-          personalization
-        })
-      );
-      setWorkspaceBootstrapIncludeSoul(false);
-      setWorkspaceBootstrapIncludeDailyNote(false);
-      setWorkspaceBootstrapDraftBundle(null);
-      setWorkspaceBootstrapSelectedDraftPaths([]);
-      setWorkspaceBootstrapActiveDraftPath(null);
-      setWorkspaceBootstrapModalOpen(true);
-    } catch (error) {
-      showToast('error', formatUserErrorMessage(error, 'Unable to open workspace bootstrap.'));
-    }
-  }
-
-  async function dismissWorkspaceBootstrapSuggestion() {
-    if (!selectedProject) {
-      return;
-    }
-
-    try {
-      const status = await window.vicode.workspaceBootstrap.dismissSuggestion(selectedProject.id);
-      setWorkspaceBootstrapStatus(status);
-      showToast('info', 'Workspace bootstrap suggestion dismissed for this project.');
-    } catch (error) {
-      showToast('error', formatUserErrorMessage(error, 'Unable to dismiss workspace bootstrap suggestion.'));
-    }
-  }
-
-  function updateWorkspaceBootstrapAnswer<K extends keyof WorkspaceBootstrapAnswers>(key: K, value: WorkspaceBootstrapAnswers[K]) {
-    setWorkspaceBootstrapAnswers((current) => ({ ...current, [key]: value }));
-  }
-
-  function updateWorkspaceBootstrapDraft(relativePath: string, content: string) {
-    setWorkspaceBootstrapDraftBundle((current) => {
-      if (!current) {
-        return current;
-      }
-
-      return {
-        ...current,
-        drafts: current.drafts.map((draft) => (draft.relativePath === relativePath ? { ...draft, content } : draft))
-      };
-    });
-  }
-
-  async function generateWorkspaceBootstrapDrafts() {
-    if (!selectedProject) {
-      return;
-    }
-
-    setWorkspaceBootstrapBusy(true);
-    try {
-      const bundle = await window.vicode.workspaceBootstrap.createDrafts({
-        projectId: selectedProject.id,
-        answers: {
-          ...workspaceBootstrapAnswers,
-          wantsSoul: workspaceBootstrapIncludeSoul,
-          recentDecisions: splitDraftList((workspaceBootstrapAnswers.recentDecisions ?? []).join('\n')),
-          openQuestions: splitDraftList((workspaceBootstrapAnswers.openQuestions ?? []).join('\n')),
-          followUps: splitDraftList((workspaceBootstrapAnswers.followUps ?? []).join('\n'))
-        },
-        includeSoul: workspaceBootstrapIncludeSoul,
-        includeDailyNote: workspaceBootstrapIncludeDailyNote
-      });
-      setWorkspaceBootstrapDraftBundle(bundle);
-      setWorkspaceBootstrapSelectedDraftPaths(bundle.drafts.map((draft) => draft.relativePath));
-      setWorkspaceBootstrapActiveDraftPath(bundle.drafts[0]?.relativePath ?? null);
-    } catch (error) {
-      showToast('error', formatUserErrorMessage(error, 'Unable to generate workspace drafts.'));
-    } finally {
-      setWorkspaceBootstrapBusy(false);
-    }
-  }
-
-  async function regenerateWorkspaceBootstrapDraft(relativePath: string) {
-    if (!selectedProject || !workspaceBootstrapDraftBundle) {
-      return;
-    }
-
-    setWorkspaceBootstrapBusy(true);
-    try {
-      const regeneratedBundle = await window.vicode.workspaceBootstrap.createDrafts({
-        projectId: selectedProject.id,
-        answers: {
-          ...workspaceBootstrapAnswers,
-          wantsSoul: workspaceBootstrapIncludeSoul,
-          recentDecisions: splitDraftList((workspaceBootstrapAnswers.recentDecisions ?? []).join('\n')),
-          openQuestions: splitDraftList((workspaceBootstrapAnswers.openQuestions ?? []).join('\n')),
-          followUps: splitDraftList((workspaceBootstrapAnswers.followUps ?? []).join('\n'))
-        },
-        includeSoul: workspaceBootstrapIncludeSoul,
-        includeDailyNote: workspaceBootstrapIncludeDailyNote,
-        overwriteExisting: true
-      });
-      const regeneratedDraft = regeneratedBundle.drafts.find((draft) => draft.relativePath === relativePath);
-      if (!regeneratedDraft) {
-        showToast('warning', 'Unable to regenerate that draft with the current bootstrap options.');
-        return;
-      }
-
-      setWorkspaceBootstrapDraftBundle((current) => {
-        if (!current) {
-          return current;
-        }
-        return {
-          ...current,
-          status: regeneratedBundle.status,
-          inspection: regeneratedBundle.inspection,
-          drafts: current.drafts.map((draft) => (draft.relativePath === relativePath ? regeneratedDraft : draft))
-        };
-      });
-      showToast('info', `Regenerated ${regeneratedDraft.fileName}.`);
-    } catch (error) {
-      showToast('error', formatUserErrorMessage(error, 'Unable to regenerate workspace draft.'));
-    } finally {
-      setWorkspaceBootstrapBusy(false);
-    }
-  }
-
-  async function writeWorkspaceBootstrapDrafts() {
-    if (!selectedProject || !workspaceBootstrapDraftBundle) {
-      return;
-    }
-
-    const drafts = workspaceBootstrapDraftBundle.drafts.filter((draft) =>
-      workspaceBootstrapSelectedDraftPaths.includes(draft.relativePath)
-    );
-    if (drafts.length === 0) {
-      showToast('warning', 'Select at least one workspace file to write.');
-      return;
-    }
-
-    setWorkspaceBootstrapBusy(true);
-    try {
-      const writtenPaths = await window.vicode.workspaceBootstrap.writeDrafts({
-        projectId: selectedProject.id,
-        drafts
-      });
-      setWorkspaceBootstrapModalOpen(false);
-      setWorkspaceBootstrapDraftBundle(null);
-      const status = await window.vicode.workspaceBootstrap.getStatus(selectedProject.id);
-      setWorkspaceBootstrapStatus(status);
-      showToast('info', writtenPaths.length === 1 ? 'Workspace file written.' : `Wrote ${writtenPaths.length} workspace files.`);
-    } catch (error) {
-      showToast('error', formatUserErrorMessage(error, 'Unable to write workspace files.'));
-    } finally {
-      setWorkspaceBootstrapBusy(false);
-    }
-  }
-
-  async function captureDailyNoteFromThread() {
-    if (!activeThread) {
-      return;
-    }
-
-    try {
-      const result = await window.vicode.memoryWrites.createDailyNoteReview(activeThread.id);
-      setJobs((current) => [result.job, ...current.filter((item) => item.id !== result.job.id)]);
-      if (result.reviewItem.status === 'pending') {
-        setReviewItems((current) => [result.reviewItem, ...current.filter((item) => item.id !== result.reviewItem.id)]);
-        showPendingReviewToast(result.reviewItem, result.alreadyPending ? reviewItemsRef.current.length : reviewItemsRef.current.length + 1);
-      } else {
-        showToast('info', result.reviewItem.decision?.alreadyApplied ? 'Daily note was already saved.' : 'Daily note saved.');
-      }
-    } catch (error) {
-      showToast('error', formatUserErrorMessage(error, 'Unable to save a daily note from this thread.'));
-    }
-  }
-
-  async function promoteThreadToMemory() {
-    if (!activeThread) {
-      return;
-    }
-
-    try {
-      const result = await window.vicode.memoryWrites.createMemoryPromotionReview(activeThread.id);
-      setJobs((current) => [result.job, ...current.filter((item) => item.id !== result.job.id)]);
-      if (result.reviewItem.status === 'pending') {
-        setReviewItems((current) => [result.reviewItem, ...current.filter((item) => item.id !== result.reviewItem.id)]);
-        showPendingReviewToast(result.reviewItem, result.alreadyPending ? reviewItemsRef.current.length : reviewItemsRef.current.length + 1);
-      } else {
-        showToast(
-          'info',
-          result.reviewItem.decision?.alreadyApplied ? 'MEMORY.md was already updated.' : 'Updated MEMORY.md.'
-        );
-      }
-    } catch (error) {
-      showToast('error', formatUserErrorMessage(error, 'Unable to update MEMORY.md from this thread.'));
-    }
-  }
-
-  async function suggestUserPreferenceFromThread() {
-    if (!activeThread) {
-      return;
-    }
-
-    try {
-      const result = await window.vicode.memoryWrites.createUserPreferenceReview(activeThread.id);
-      setJobs((current) => [result.job, ...current.filter((item) => item.id !== result.job.id)]);
-      if (result.reviewItem.status === 'pending') {
-        setReviewItems((current) => [result.reviewItem, ...current.filter((item) => item.id !== result.reviewItem.id)]);
-        showPendingReviewToast(result.reviewItem, result.alreadyPending ? reviewItemsRef.current.length : reviewItemsRef.current.length + 1);
-      } else {
-        showToast(
-          'info',
-          result.reviewItem.decision?.alreadyApplied ? 'USER.md was already updated.' : 'Updated USER.md.'
-        );
-      }
-    } catch (error) {
-      showToast('error', formatUserErrorMessage(error, 'Unable to update USER.md from this thread.'));
-    }
-  }
 
   async function openProjectFolderLocation(projectId: string) {
     const project = projects.find((entry) => entry.id === projectId);
@@ -3969,10 +3492,6 @@ export function App() {
     setRoute((current) => (current === 'skills' ? 'thread' : 'skills'));
   }
 
-  function openBuildControlRoute() {
-    setRoute('build-control');
-  }
-
   function openAutomationsRoute() {
     setRoute((current) => (current === 'automations' ? 'thread' : 'automations'));
   }
@@ -4004,15 +3523,19 @@ export function App() {
     }
   }
 
-  function dismissWelcomeScreen() {
-    setShowStartupWelcome(false);
-    setRoute('thread');
-    if (!preferences?.onboardingComplete) {
-      void saveDefaultPreferences({ onboardingComplete: true });
-    }
-  }
-
   async function handleEvent(event: AppEvent) {
+    if (event.type === 'library.skillsChanged') {
+      await refreshSkills();
+      await refreshLibrarySources();
+      return;
+    }
+    if (event.type === 'library.projectKnowledgeChanged') {
+      if (event.status) {
+        setProjectKnowledgeIndexStatus(event.status);
+      }
+      await refreshLibrarySources();
+      return;
+    }
     if (event.type === 'ollama.pullProgress') {
       setOllamaPullProgress(event.progress);
       return;
@@ -4175,12 +3698,6 @@ export function App() {
     if (event.type === 'run.status' && ['completed', 'failed', 'aborted'].includes(event.status)) {
       if (event.threadId === activeThreadIdRef.current) {
         flushPendingLiveRunDeltas();
-        if (event.status === 'failed' && event.message) {
-          showToast('error', formatRunFailureToastMessage(event.message));
-        }
-        if (event.status === 'aborted') {
-          showToast('warning', event.message ?? 'Run stopped before completion.');
-        }
       }
       setRunProgressByRunId((current) => clearRunProgressEntry(current, event.runId));
       setActiveRunId((current) => (current === event.runId ? null : current));
@@ -4292,7 +3809,7 @@ export function App() {
           }
         },
         {
-          label: isManualWrite ? 'Approve and write' : 'Approve and run',
+          label: isManualWrite ? 'Approve' : 'Approve and run',
           tone: 'primary',
           onAction: () => {
             void resolveReviewFromToast(nextPending.id, 'approved');
@@ -4341,10 +3858,6 @@ export function App() {
     focusPendingReviewToast(target.id, pendingCountOverride);
   }
 
-  const activeWorkspaceBootstrapDraft = workspaceBootstrapDraftBundle?.drafts.find(
-    (draft) => draft.relativePath === workspaceBootstrapActiveDraftPath
-  ) ?? null;
-
   useEffect(() => {
     if (reviewItems.length === 0) {
       pendingReviewToastShownRef.current = false;
@@ -4358,34 +3871,6 @@ export function App() {
     pendingReviewToastShownRef.current = true;
     showPendingReviewToast(reviewItems[0]);
   }, [reviewItems.length, shellReady]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadWorkspaceBootstrapStatus() {
-      if (!workspaceProject) {
-        setWorkspaceBootstrapStatus(null);
-        return;
-      }
-
-      try {
-        const status = await window.vicode.workspaceBootstrap.getStatus(workspaceProject.id);
-        if (!cancelled) {
-          setWorkspaceBootstrapStatus(status);
-        }
-      } catch {
-        if (!cancelled) {
-          setWorkspaceBootstrapStatus(null);
-        }
-      }
-    }
-
-    void loadWorkspaceBootstrapStatus();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceProject]);
 
   async function saveProjectRuntimeCommandPolicy(
     projectId: string,
@@ -4487,7 +3972,7 @@ export function App() {
     <TooltipProvider>
     <div
       ref={appShellRef}
-      className={`app-shell h-screen min-h-screen w-full overflow-hidden bg-[color:var(--ui-app-bg)] text-[color:var(--ui-text-title)]${showWelcomeScreen ? ' app-shell-welcome' : ''}${shellReady && !showWelcomeScreen && route === 'thread' ? ' app-shell-thread' : ''}${shellReady && !showWelcomeScreen && route === 'settings' ? ' app-shell-settings' : ''}`}
+      className={`app-shell h-screen min-h-screen w-full overflow-hidden bg-[color:var(--ui-app-bg)] text-[color:var(--ui-text-title)]${showWelcomeScreen ? ' app-shell-welcome' : ''}${shellReady && !showWelcomeScreen && contentRoute === 'thread' ? ' app-shell-thread' : ''}${shellReady && !showWelcomeScreen && route === 'settings' ? ' app-shell-settings-overlay' : ''}`}
       style={{
         ['--vicode-sidebar-width' as string]: `${effectiveSidebarWidth}px`,
         ['--windows-titlebar-leading-width' as string]: `${titlebarLeadingWidth}px`
@@ -4502,6 +3987,8 @@ export function App() {
           isAgentWorking={Boolean(activeRunId)}
           collaboration={collaboration}
           appUpdateState={appUpdateState}
+          sidebarCollapsed={sidebarCollapsed}
+          toggleSidebar={toggleSidebarCollapsed}
           openSettings={toggleTitlebarSettingsSection}
           openAutomations={openAutomationsRoute}
           openSkills={openSkillsRoute}
@@ -4510,7 +3997,7 @@ export function App() {
       ) : null}
 
       <div className="app-workspace-shell">
-        {showPrimarySidebar ? (
+        {showPrimarySidebar && (!sidebarCollapsed || sidebarResizing) ? (
           <div
             ref={sidebarShellRef}
             className={`sidebar-shell flex shrink-0${sidebarCollapsed ? ' is-collapsed' : ''}${sidebarResizing ? ' is-resizing' : ''}`}
@@ -4523,6 +4010,8 @@ export function App() {
             <AppSidebar
               route={route}
               openProjectFromPicker={openProjectFromPicker}
+              activateChatsLibrary={activateChatsLibrary}
+              createChatThread={createChatThread}
               createThreadForProject={createThreadForProject}
               renameProject={renameProject}
               archiveProjectThreads={archiveProjectThreads}
@@ -4530,6 +4019,11 @@ export function App() {
               removingProjectId={removingProjectId}
               setProjectTrust={setProjectTrust}
               projects={projects}
+              preferences={preferences}
+              skills={skills}
+              attachedSkillIds={attachedSkillIds}
+              composerContextWindow={composerContextWindow}
+              librarySources={librarySources}
               expandedProjectIds={expandedProjectIds}
               toggleProjectThreads={toggleProjectThreads}
               collapseAllProjectThreads={collapseAllProjectThreads}
@@ -4539,22 +4033,28 @@ export function App() {
               activeThreadId={activeThread?.id ?? null}
               activeThreadActions={activeThreadActions}
               openThread={openThread}
+              renameThread={renameThread}
               archiveThread={archiveThread}
+              deleteThread={requestDeleteThread}
+              toggleAttachedSkill={toggleAttachedSkill}
+              openSkillsRoute={openSkillsRoute}
+              openLibrarySettings={() => openSettingsSection('library')}
+              rescanSkillLibrary={rescanSkillLibrary}
               openProjectFolderLocation={openProjectFolderLocation}
-              openSettings={() => openSettingsSection('general')}
               sidebarCollapsed={sidebarCollapsed}
+              sidebarIconOnly={sidebarIconOnly}
               toggleSidebar={toggleSidebarCollapsed}
             />
           </div>
         ) : null}
-        {showPrimarySidebar && !sidebarCollapsed ? (
+        {showPrimarySidebar ? (
           <div
             data-testid="sidebar-resize-rail"
             className={cx('sidebar-resize-rail', sidebarResizing && 'is-active')}
             role="separator"
             aria-label="Resize sidebar"
             aria-orientation="vertical"
-            aria-valuemin={SIDEBAR_MIN_WIDTH}
+            aria-valuemin={SIDEBAR_COLLAPSED_WIDTH}
             aria-valuemax={sidebarResizeMaxWidth}
             aria-valuenow={sidebarWidth}
           >
@@ -4567,7 +4067,7 @@ export function App() {
         ) : null}
 
         <main
-          className={`main-surface min-w-0 flex-1 overflow-hidden${loading ? ' main-surface-loading' : ''}${showWelcomeScreen ? ' main-surface-welcome' : ''}${shellReady && !showWelcomeScreen && route === 'thread' ? ' main-surface-thread' : ''}${shellReady && !showWelcomeScreen && route === 'settings' ? ' main-surface-settings' : ''}`}
+          className={`main-surface min-w-0 flex-1 overflow-hidden${loading ? ' main-surface-loading' : ''}${showWelcomeScreen ? ' main-surface-welcome' : ''}${shellReady && !showWelcomeScreen && contentRoute === 'thread' ? ' main-surface-thread' : ''}${shellReady && !showWelcomeScreen && route === 'settings' ? ' main-surface-settings-overlay' : ''}`}
         >
         {loading ? (
           <div className="loading-state loading-state-boot">
@@ -4576,7 +4076,7 @@ export function App() {
               <div className="loading-boot-overlay" aria-hidden="true" />
               <div className="loading-boot-content">
                 <div className="loading-boot-brand">
-                  <img className="loading-boot-logo" src={wolfLogo} alt="Vicode logo" />
+                  <ThemedWolfLogo className="loading-boot-logo" />
                   <h1 className="loading-boot-title">Vicode</h1>
                 </div>
                 <div className="loading-boot-status">
@@ -4585,9 +4085,6 @@ export function App() {
               </div>
             </div>
           </div>
-        ) : null}
-        {showWelcomeScreen ? (
-          <LandingPage onGetStarted={dismissWelcomeScreen} />
         ) : null}
         {shellReady && !showWelcomeScreen && toast ? (
           <InlineNotice
@@ -4598,7 +4095,7 @@ export function App() {
             onDismiss={dismissToast}
           />
         ) : null}
-        {shellReady && !showWelcomeScreen && route === 'thread' ? (
+        {shellReady && !showWelcomeScreen && contentRoute === 'thread' ? (
           <ThreadRouteContainer
             activeDisplayedRunId={activeDisplayedRunId}
             activeRunActivity={activeRunActivity}
@@ -4607,12 +4104,16 @@ export function App() {
             activeThread={activeThread}
             addComposerImageFiles={addComposerImageFiles}
             addComposerTextAttachment={addComposerTextAttachment}
+            applyStagedWorkspaceChange={applyStagedWorkspaceChange}
+            applyStagedWorkspaceHunks={applyStagedWorkspaceHunks}
+            applyWorktreeReview={applyWorktreeReview}
+            applyWorktreeHunks={applyWorktreeHunks}
+            cleanupWorktreeReview={cleanupWorktreeReview}
             attachedSkillIds={attachedSkillIds}
             availableComposerSkills={availableComposerSkills}
             canCreateTextAttachments={Boolean(composerProjectId && workspaceProject?.folderPath && workspaceProject.trusted)}
             composer={composer}
             composerActivityItems={composerActivityItems}
-            composerContextWindow={composerContextWindow}
             composerEffort={composerEffort}
             composerProjectId={composerProjectId}
             composerRef={composerRef}
@@ -4629,6 +4130,14 @@ export function App() {
             pendingNativeCommandId={pendingNativeCommandId}
             plannerSubmitting={plannerSubmitting}
             refreshProvider={refreshProvider}
+            rejectStagedWorkspaceChange={rejectStagedWorkspaceChange}
+            rejectStagedWorkspaceHunks={rejectStagedWorkspaceHunks}
+            rejectWorktreeReview={rejectWorktreeReview}
+            rejectWorktreeHunks={rejectWorktreeHunks}
+            revertStagedWorkspaceChange={revertStagedWorkspaceChange}
+            revertStagedWorkspaceHunks={revertStagedWorkspaceHunks}
+            revertWorktreeReview={revertWorktreeReview}
+            revertWorktreeHunks={revertWorktreeHunks}
             removeComposerImageAttachment={removeComposerImageAttachment}
             removeComposerTextAttachment={removeComposerTextAttachment}
             resolveThreadTitle={resolveThreadTitle}
@@ -4638,18 +4147,19 @@ export function App() {
             selectedProject={selectedProject}
             selectComposerEffort={selectComposerEffort}
             selectComposerModel={selectComposerModel}
-            selectProviderThinking={selectProviderThinking}
             setActiveImageAttachment={setActiveImageAttachment}
             setComposerPrompt={(prompt) => setComposer((current) => ({ ...current, prompt }))}
             setExecutionPermission={setExecutionPermission}
+            setIsolationMode={setIsolationMode}
             setPendingNativeCommandId={setPendingNativeCommandId}
             showToast={showToast}
             showTranscriptRailCentered={showTranscriptRailCentered}
             skills={skills}
             startupThreadRestoreState={startupThreadRestoreState}
+            stagedWorkspaceReviewResolvingKey={stagedWorkspaceReviewResolvingKey}
+            worktreeReviewResolvingKey={worktreeReviewResolvingKey}
             stopPrompt={stopPrompt}
             submitPrompt={submitPrompt}
-            thinkingEnabled={composer.thinkingEnabled}
             toggleAttachedSkill={toggleAttachedSkill}
             toggleComposerMode={toggleComposerMode}
             transcriptRef={transcriptRef}
@@ -4664,7 +4174,7 @@ export function App() {
             workspaceProject={workspaceProject}
           />
         ) : null}
-        {COLLABORATION_ENABLED && shellReady && !showWelcomeScreen && route === 'collab' ? (
+        {COLLABORATION_ENABLED && shellReady && !showWelcomeScreen && contentRoute === 'collab' ? (
           <ChatUtilityPane
             standalone
             onBack={() => setRoute('thread')}
@@ -4693,58 +4203,9 @@ export function App() {
             onCreateHandoff={createCollaborationHandoff}
           />
         ) : null}
-        {shellReady && route === 'settings' ? (
-        <SettingsRouteContainer
-            section={settingsSection}
-            setSection={setSettingsSection}
-            onBack={toggleSettingsRoute}
-            providers={visibleProviders}
-            preferences={preferences}
-            personalization={personalization}
-            savePreferences={saveDefaultPreferences}
-            savePersonalization={savePersonalization}
-            resetPersonalization={resetPersonalization}
-            apiKeys={apiKeys}
-            setApiKeys={setApiKeys}
-          connectProvider={connectProvider}
-          adoptProviderAuth={adoptProviderAuth}
-          beginProviderInstall={beginProviderInstall}
-            clearProviderAuth={clearProviderAuth}
-            refreshProvider={refreshProvider}
-            pullOllamaModel={pullOllamaModel}
-            ollamaPullProgress={ollamaPullProgress}
-            ollamaRuntimeStatus={ollamaRuntimeStatus}
-            stopOllamaRuntime={stopOllamaRuntime}
-            deleteOllamaModel={deleteOllamaModel}
-            saveProviderApiKey={saveProviderApiKey}
-            exportDiagnostics={exportDiagnostics}
-            clearAllProviderAuth={clearAllProviderAuth}
-            appMeta={appMeta}
-            appUpdateState={appUpdateState}
-            checkForAppUpdates={checkForAppUpdates}
-            restartToUpdate={requestRestartToUpdate}
-            storageDiagnostics={storageDiagnostics}
-            refreshStorageDiagnostics={loadStorageDiagnostics}
-            compactRunEvents={compactRunEvents}
-            maintainStorage={maintainStorage}
-            selectedProject={workspaceProject}
-            saveProjectRuntimeCommandPolicy={saveProjectRuntimeCommandPolicy}
-            saveProjectRuntimeNetworkPolicy={saveProjectRuntimeNetworkPolicy}
-            workspaceBootstrapStatus={workspaceBootstrapStatus}
-            openWorkspaceBootstrap={openWorkspaceBootstrap}
-            activeThreadTitle={activeThread?.title ?? null}
-            captureDailyNoteFromThread={captureDailyNoteFromThread}
-            promoteThreadToMemory={promoteThreadToMemory}
-            suggestUserPreferenceFromThread={suggestUserPreferenceFromThread}
-            archivedThreads={archivedThreads}
-            projects={projects}
-            restoreArchivedThread={restoreArchivedThread}
-            deleteArchivedThread={deleteArchivedThread}
-          />
-        ) : null}
-        {shellReady && route === 'ui-dev' && import.meta.env.DEV ? <UiDevSurface /> : null}
+        {shellReady && contentRoute === 'ui-dev' && import.meta.env.DEV ? <UiDevSurface /> : null}
 
-        {shellReady && route === 'skills' ? (
+        {shellReady && contentRoute === 'skills' ? (
           <SkillsRouteContainer
             skills={skills}
             selectedProject={selectedProject}
@@ -4756,38 +4217,12 @@ export function App() {
             onCreatePlugin={() => void openCreatorInComposer('plugin')}
             onBack={() => setRoute('thread')}
             toggleSkill={toggleSkill}
-            syncSkill={syncSkill}
             removeSkill={removeSkill}
             toggleAttachedSkill={toggleAttachedSkill}
             showToast={showToast}
           />
         ) : null}
-        {shellReady && route === 'build-control' ? (
-          <BuildControlRouteContainer
-            snapshot={vicodeBuildSnapshot}
-            verification={vicodeBuildVerification}
-            busyAction={vicodeBuildBusyAction}
-            onRefresh={() => void refreshVicodeBuildSnapshot()}
-            onCreatePlan={openBuildPlanDialog}
-            onClearInactivePlans={clearInactiveVicodeBuildPlans}
-            onSetTeamPaused={setVicodeBuildTeamPaused}
-            onWakeLane={wakeVicodeBuildLane}
-            onRetryLane={retryVicodeBuildLane}
-            onOpenThread={openVicodeBuildLaneThread}
-            onRunVerification={runVicodeBuildVerification}
-            onBack={() => setRoute('thread')}
-            dialogOpen={buildPlanDialogOpen}
-            setDialogOpen={setBuildPlanDialogOpen}
-            closeDialog={closeBuildPlanDialog}
-            launchBuildPlanSetupThread={launchBuildPlanSetupThread}
-            buildPlanLaunch={buildPlanLaunch}
-            setBuildPlanLaunch={setBuildPlanLaunch}
-            visibleProviders={visibleProviders}
-            buildPlanLaunchModelOptions={buildPlanLaunchModelOptions}
-            buildPlanLaunchProvider={buildPlanLaunchProvider}
-          />
-        ) : null}
-        {shellReady && route === 'automations' ? (
+        {shellReady && contentRoute === 'automations' ? (
           <AutomationsRouteContainer
             onBack={() => setRoute('thread')}
             selectedProject={selectedProject ? { id: selectedProject.id, name: selectedProject.name } : null}
@@ -4831,192 +4266,60 @@ export function App() {
           />
         ) : null}
       </main>
-      </div>
-      <ModalDialog
-        open={workspaceBootstrapModalOpen}
-        onOpenChange={(open) => {
-          setWorkspaceBootstrapModalOpen(open);
-          if (!open) {
-            setWorkspaceBootstrapDraftBundle(null);
-            setWorkspaceBootstrapSelectedDraftPaths([]);
-            setWorkspaceBootstrapActiveDraftPath(null);
-          }
-        }}
-        title="Set up project"
-        description="Vicode drafts project instructions, preferences, and memory files for trusted runs. You review and edit files before saving."
-        className="workspace-bootstrap-dialog"
-        actions={
-          <>
-            <ActionButton
-              tone="quiet"
-              onClick={() => {
-                setWorkspaceBootstrapModalOpen(false);
-                setWorkspaceBootstrapDraftBundle(null);
-              }}
-            >
-              Cancel
-            </ActionButton>
-            {workspaceBootstrapDraftBundle ? (
-              <PrimaryButton onClick={() => void writeWorkspaceBootstrapDrafts()} disabled={workspaceBootstrapBusy} data-testid="workspace-bootstrap-write">
-                Save selected files
-              </PrimaryButton>
-            ) : (
-              <PrimaryButton onClick={() => void generateWorkspaceBootstrapDrafts()} disabled={workspaceBootstrapBusy} data-testid="workspace-bootstrap-generate">
-                Draft files for me
-              </PrimaryButton>
-            )}
-          </>
-        }
-      >
-        <div className="workspace-bootstrap-body" data-testid="workspace-bootstrap-dialog">
-          <div className="workspace-bootstrap-summary">
-            <strong>{selectedProject?.name ?? 'No project selected'}</strong>
-            <p>{workspaceBootstrapStatus?.reason ?? workspaceBootstrapStatus?.folderPath ?? 'A trusted project workspace is required.'}</p>
-            {formatWorkspaceBootstrapMissingFiles(workspaceBootstrapStatus) ? (
-              <p className="subtle-row">{formatWorkspaceBootstrapMissingFiles(workspaceBootstrapStatus)}</p>
-            ) : null}
-          </div>
-            <div className="workspace-bootstrap-summary">
-              <strong>Review first</strong>
-              <p>
-                Vicode scans this trusted folder, checks which project files already exist, then drafts only the missing files. After saving, <code>AGENTS.md</code>, <code>USER.md</code>, and optional <code>SOUL.md</code> load directly into trusted runs. <code>MEMORY.md</code> and daily notes are recalled only when relevant.
-              </p>
-            </div>
-            <div className="workspace-bootstrap-summary">
-              <strong>Files</strong>
-              <div className="workspace-bootstrap-file-guide" aria-label="Project setup file guide">
-                <div>
-                  <strong>AGENTS.md</strong>
-                  <span>Repo rules, commands, boundaries, and quality expectations.</span>
-                </div>
-                <div>
-                  <strong>USER.md</strong>
-                  <span>Your durable preferences for communication, risk, planning, and delivery.</span>
-                </div>
-                <div>
-                  <strong>MEMORY.md</strong>
-                  <span>Stable project facts, decisions, and constraints that should survive threads.</span>
-                </div>
-                <div>
-                  <strong>SOUL.md</strong>
-                  <span>Optional tone and identity layer. Skip it if repo instructions are enough.</span>
-                </div>
-              </div>
-            </div>
-
-          {!workspaceBootstrapDraftBundle ? (
-            <div className="workspace-bootstrap-form">
-              {workspaceBootstrapQuestions.map((question) => {
-                const value = question.id === 'wantsSoul'
-                  ? (workspaceBootstrapIncludeSoul ? 'yes' : 'no')
-                  : String((workspaceBootstrapAnswers[question.id as keyof WorkspaceBootstrapAnswers] as string | undefined) ?? '');
-
-                if (question.id === 'wantsSoul') {
-                  return (
-                    <label key={question.id} className="settings-field">
-                      <span>{question.prompt}</span>
-                      <SelectField
-                        value={value}
-                        onChange={(event) => {
-                          const wantsSoul = event.target.value === 'yes';
-                          setWorkspaceBootstrapIncludeSoul(wantsSoul);
-                          updateWorkspaceBootstrapAnswer('wantsSoul', wantsSoul);
-                        }}
-                      >
-                        <option value="no">No</option>
-                        <option value="yes">Yes</option>
-                      </SelectField>
-                    </label>
-                  );
-                }
-
-                return (
-                  <label key={question.id} className="settings-field">
-                    <span>{question.prompt}</span>
-                    <TextArea
-                      className="workspace-bootstrap-textarea"
-                      value={value}
-                      onChange={(event) =>
-                        updateWorkspaceBootstrapAnswer(
-                          question.id as keyof WorkspaceBootstrapAnswers,
-                          event.target.value
-                        )
-                      }
-                      placeholder="Add only the durable guidance that materially changes agent behavior."
-                    />
-                  </label>
-                );
-              })}
-              <label className="settings-toggle-row">
-                <input
-                  type="checkbox"
-                  checked={workspaceBootstrapIncludeDailyNote}
-                  onChange={(event) => setWorkspaceBootstrapIncludeDailyNote(event.target.checked)}
-                />
-                <span>Create today's daily note draft as part of bootstrap.</span>
-              </label>
-            </div>
-          ) : (
-            <div className="workspace-bootstrap-review">
-              <div className="workspace-bootstrap-inspection">
-                <div className="skill-meta">
-                  <span>{workspaceBootstrapDraftBundle.inspection.repoStack}</span>
-                  <span>{workspaceBootstrapDraftBundle.inspection.platformFocus}</span>
-                  <span>{workspaceBootstrapDraftBundle.inspection.packageManager}</span>
-                </div>
-                <p>{workspaceBootstrapDraftBundle.inspection.repoPurpose}</p>
-                <p className="subtle-row">These first drafts were generated by Vicode. Edit any file before saving it into this workspace.</p>
-              </div>
-              <div className="workspace-bootstrap-draft-list">
-                {workspaceBootstrapDraftBundle.drafts.map((draft) => (
-                  <label key={draft.relativePath} className="workspace-bootstrap-draft-item">
-                    <input
-                      type="checkbox"
-                      checked={workspaceBootstrapSelectedDraftPaths.includes(draft.relativePath)}
-                      onChange={(event) =>
-                        setWorkspaceBootstrapSelectedDraftPaths((current) =>
-                          event.target.checked
-                            ? [...new Set([...current, draft.relativePath])]
-                            : current.filter((path) => path !== draft.relativePath)
-                        )
-                      }
-                    />
-                    <ActionButton
-                      tone={workspaceBootstrapActiveDraftPath === draft.relativePath ? 'default' : 'quiet'}
-                      onClick={() => setWorkspaceBootstrapActiveDraftPath(draft.relativePath)}
-                    >
-                      {draft.fileName}
-                    </ActionButton>
-                  </label>
-                ))}
-              </div>
-              {activeWorkspaceBootstrapDraft ? (
-                <label className="settings-field">
-                  <div className="workspace-bootstrap-editor-header">
-                    <span>{activeWorkspaceBootstrapDraft.fileName}</span>
-                    <ActionButton
-                      size="compact"
-                      tone="quiet"
-                      onClick={() => void regenerateWorkspaceBootstrapDraft(activeWorkspaceBootstrapDraft.relativePath)}
-                      disabled={workspaceBootstrapBusy}
-                      data-testid="workspace-bootstrap-regenerate"
-                    >
-                      Regenerate this file
-                    </ActionButton>
-                  </div>
-                  <TextArea
-                    className="workspace-bootstrap-editor"
-                    data-testid="workspace-bootstrap-editor"
-                    value={activeWorkspaceBootstrapDraft.content}
-                    onChange={(event) => updateWorkspaceBootstrapDraft(activeWorkspaceBootstrapDraft.relativePath, event.target.value)}
-                  />
-                </label>
-              ) : null}
-            </div>
-          )}
+      {shellReady && route === 'settings' ? (
+        <div className="settings-route-overlay" role="dialog" aria-label="Settings">
+          <SettingsRouteContainer
+            section={settingsSection}
+            setSection={setSettingsSection}
+            onBack={toggleSettingsRoute}
+            providers={visibleProviders}
+            customProviders={customProviders}
+            preferences={preferences}
+            librarySources={librarySources}
+            projectKnowledgeIndexStatus={projectKnowledgeIndexStatus}
+            savePreferences={saveDefaultPreferences}
+            refreshLibrarySources={refreshLibrarySources}
+            refreshProjectKnowledgeIndex={refreshProjectKnowledgeIndex}
+            openProjectKnowledgeSuggestedIndexDraft={openProjectKnowledgeSuggestedIndexDraft}
+            rescanSkillLibrary={rescanSkillLibrary}
+            apiKeys={apiKeys}
+            setApiKeys={setApiKeys}
+            connectProvider={connectProvider}
+            adoptProviderAuth={adoptProviderAuth}
+            beginProviderInstall={beginProviderInstall}
+            clearProviderAuth={clearProviderAuth}
+            refreshProvider={refreshProvider}
+            saveCustomProvider={saveCustomProvider}
+            deleteCustomProvider={deleteCustomProvider}
+            pullOllamaModel={pullOllamaModel}
+            ollamaPullProgress={ollamaPullProgress}
+            ollamaRuntimeStatus={ollamaRuntimeStatus}
+            stopOllamaRuntime={stopOllamaRuntime}
+            deleteOllamaModel={deleteOllamaModel}
+            saveProviderApiKey={saveProviderApiKey}
+            exportDiagnostics={exportDiagnostics}
+            exportActiveThreadReport={exportActiveThreadReport}
+            clearAllProviderAuth={clearAllProviderAuth}
+            appMeta={appMeta}
+            appUpdateState={appUpdateState}
+            checkForAppUpdates={checkForAppUpdates}
+            restartToUpdate={requestRestartToUpdate}
+            storageDiagnostics={storageDiagnostics}
+            refreshStorageDiagnostics={loadStorageDiagnostics}
+            compactRunEvents={compactRunEvents}
+            maintainStorage={maintainStorage}
+            selectedProject={workspaceProject}
+            saveProjectRuntimeCommandPolicy={saveProjectRuntimeCommandPolicy}
+            saveProjectRuntimeNetworkPolicy={saveProjectRuntimeNetworkPolicy}
+            activeThreadTitle={activeThread?.title ?? null}
+            archivedThreads={archivedThreads}
+            projects={projects}
+            restoreArchivedThread={restoreArchivedThread}
+            deleteArchivedThread={deleteArchivedThread}
+          />
         </div>
-      </ModalDialog>
-
+      ) : null}
+      </div>
       <ModalDialog
         open={Boolean(activeImageAttachment)}
         onOpenChange={(open) => {
@@ -5045,17 +4348,21 @@ export function App() {
         ) : null}
       </ModalDialog>
       <ConfirmDialog
-        open={deleteDialogOpen}
-        onOpenChange={setDeleteDialogOpen}
+        open={Boolean(deleteThreadTarget)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteThreadTarget(null);
+          }
+        }}
         title="Delete thread permanently?"
         description={
-          activeThread
-            ? `Archive keeps history and hides it from active lists. Delete permanently removes "${activeThread.title}" from Vicode's local app store and cannot be undone.`
+          deleteThreadTarget
+            ? `Archive keeps history and hides it from active lists. Delete permanently removes "${deleteThreadTarget.title}" from Vicode's local app store and cannot be undone.`
             : 'Archive keeps history and hides it from active lists. Delete permanently removes the saved thread from Vicode and cannot be undone.'
         }
         confirmLabel="Delete permanently"
         tone="danger"
-        onConfirm={() => void deleteThread()}
+        onConfirm={() => void deleteThread(deleteThreadTarget?.id ?? null)}
       />
       <ConfirmDialog
         open={microphoneConsentOpen}

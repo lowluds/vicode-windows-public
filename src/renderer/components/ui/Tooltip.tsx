@@ -19,7 +19,7 @@ export function TooltipContent({
       <RadixTooltip.Content
         sideOffset={sideOffset}
       className={cx(
-        'ui-tooltip-content z-50 rounded-[var(--ui-radius-sm)] border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-menu-bg)] px-2.5 py-1.5 text-[12px] font-medium text-[color:var(--ui-text-title)] shadow-[var(--ui-shadow-apple)]',
+        'ui-tooltip-content z-[100] rounded-[var(--ui-radius-sm)] border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-menu-bg)] px-2.5 py-1.5 text-[12px] font-medium text-[color:var(--ui-text-title)] shadow-[var(--ui-shadow-apple)]',
         className
       )}
         {...props}

@@ -86,6 +86,85 @@ describe('workspace changes', () => {
     );
   });
 
+  it('can label snapshot diffs as worktree-specific artifacts', () => {
+    const workspace = createWorkspace({
+      'src/app.ts': 'export const value = "before";\n'
+    });
+
+    const snapshot = captureWorkspaceSnapshot(workspace);
+    expect(snapshot).not.toBeNull();
+
+    writeFileSync(join(workspace, 'src/app.ts'), 'export const value = "after";\n', 'utf8');
+
+    const artifact = deriveRunChangeArtifact(snapshot, workspace, { source: 'worktree_diff' });
+    expect(artifact).toMatchObject({
+      source: 'worktree_diff',
+      summary: {
+        filesChanged: 1,
+        insertions: 1,
+        deletions: 1
+      }
+    });
+  });
+
+  it('normalizes CRLF input while keeping changed line numbers stable', () => {
+    const workspace = createWorkspace({
+      'src/app.ts': ['const one = 1;', 'const two = 2;', 'const three = 3;', ''].join('\r\n')
+    });
+
+    const snapshot = captureWorkspaceSnapshot(workspace);
+    expect(snapshot).not.toBeNull();
+
+    writeFileSync(
+      join(workspace, 'src/app.ts'),
+      ['const one = 1;', 'const two = 22;', 'const three = 3;', ''].join('\n'),
+      'utf8'
+    );
+
+    const artifact = deriveRunChangeArtifact(snapshot, workspace);
+    expect(artifact).toMatchObject({
+      summary: {
+        filesChanged: 1,
+        insertions: 1,
+        deletions: 1
+      }
+    });
+    expect(artifact?.files[0]?.previewLines).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'removed', oldLineNumber: 2, newLineNumber: null, text: 'const two = 2;' }),
+        expect.objectContaining({ type: 'added', oldLineNumber: null, newLineNumber: 2, text: 'const two = 22;' })
+      ])
+    );
+  });
+
+  it('does not add insertion or deletion stats for final-newline-only changes', () => {
+    const workspace = createWorkspace({
+      'src/app.ts': 'export const value = true;\n'
+    });
+
+    const snapshot = captureWorkspaceSnapshot(workspace);
+    expect(snapshot).not.toBeNull();
+
+    writeFileSync(join(workspace, 'src/app.ts'), 'export const value = true;', 'utf8');
+
+    const artifact = deriveRunChangeArtifact(snapshot, workspace);
+    expect(artifact).toMatchObject({
+      summary: {
+        filesChanged: 1,
+        insertions: 0,
+        deletions: 0
+      }
+    });
+    expect(artifact?.files[0]?.previewLines).toEqual([
+      expect.objectContaining({
+        type: 'context',
+        oldLineNumber: 1,
+        newLineNumber: 1,
+        text: 'export const value = true;'
+      })
+    ]);
+  });
+
   it('ignores generated folders and returns null when nothing changed', () => {
     const workspace = createWorkspace({
       'src/app.tsx': 'export const app = true;\n',

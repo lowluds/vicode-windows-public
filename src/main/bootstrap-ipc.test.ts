@@ -15,6 +15,7 @@ vi.mock('electron', () => ({
   },
   shell: {
     openExternal: vi.fn(),
+    openPath: vi.fn(),
     showItemInFolder: vi.fn()
   }
 }));
@@ -62,16 +63,6 @@ describe('app:getBootstrap IPC', () => {
         onboardingComplete: false,
         lastOpenedThreadId: null,
         microphoneAllowed: false
-      },
-      personalization: {
-        globalInstructions: '',
-        providerInstructions: {
-          openai: '',
-          gemini: '',
-          qwen: '',
-          kimi: ''
-        },
-        useWorkspaceInstructions: true
       }
     };
     const providers = [
@@ -101,8 +92,7 @@ describe('app:getBootstrap IPC', () => {
           supported: true,
           executionMode: 'workspace-write' as const,
           enforcement: 'hard-enforced' as const
-        },
-        quota: null
+        }
       }
     ];
 
@@ -129,7 +119,6 @@ describe('app:getBootstrap IPC', () => {
       jobs: {
         onEvent: vi.fn(() => vi.fn())
       },
-      workspaceBootstrap: {},
       voice: {}
     };
 

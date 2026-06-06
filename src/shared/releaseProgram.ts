@@ -41,24 +41,24 @@ export interface ProviderGraduationTarget {
 export const PROVIDER_GRADUATION_TARGETS: Record<ProviderId, ProviderGraduationTarget> = {
   openai: {
     providerId: 'openai',
-    releaseBlocking: true,
-    targetTier: 5,
+    releaseBlocking: false,
+    targetTier: 1,
     stretchTier: null,
-    summary: 'Highest-fidelity benchmark provider. Must pass the full complex-project ladder.'
+    summary: 'Retired first-class provider lane. Keep historical records truthful, but route active OpenAI-compatible API-key proof through Custom API.'
   },
   gemini: {
     providerId: 'gemini',
-    releaseBlocking: true,
-    targetTier: 5,
+    releaseBlocking: false,
+    targetTier: 1,
     stretchTier: null,
-    summary: 'Second release-blocking provider. Must pass the full complex-project ladder on stable Gemini 2.5 routes.'
+    summary: 'Discontinued for the current beta scope. Keep compatibility truthful, but do not spend active release-hardening effort here.'
   },
   ollama: {
     providerId: 'ollama',
-    releaseBlocking: false,
+    releaseBlocking: true,
     targetTier: 4,
     stretchTier: 5,
-    summary: 'Graduate hosted and local Ollama to serious iterative app-building quality on preferred model sets.'
+    summary: 'Release-blocking local runtime lane. Graduate Ollama to serious iterative app-building quality on preferred local model sets.'
   },
   qwen: {
     providerId: 'qwen',
@@ -73,6 +73,13 @@ export const PROVIDER_GRADUATION_TARGETS: Record<ProviderId, ProviderGraduationT
     targetTier: 1,
     stretchTier: null,
     summary: 'Compatibility lane only. Keep basic run sanity truthful, but do not spend active production-hardening effort here.'
+  },
+  openai_compatible: {
+    providerId: 'openai_compatible',
+    releaseBlocking: false,
+    targetTier: 2,
+    stretchTier: 4,
+    summary: 'Custom OpenAI-compatible lane. Surface only saved, enabled, key-backed providers and graduate with normalized tool-loop evidence.'
   }
 };
 
@@ -130,11 +137,12 @@ export const APP_BUILDER_BENCHMARKS = [
 export type AppBuilderBenchmarkId = (typeof APP_BUILDER_BENCHMARKS)[number]['id'];
 
 export const PROVIDER_BENCHMARK_REQUIREMENTS: Record<ProviderId, readonly AppBuilderBenchmarkId[]> = {
-  openai: APP_BUILDER_BENCHMARKS.map((benchmark) => benchmark.id),
-  gemini: APP_BUILDER_BENCHMARKS.map((benchmark) => benchmark.id),
+  openai: [],
+  gemini: [],
   ollama: ['marketing-site', 'dashboard', 'docs-site', 'existing-project-refinement', 'bugfix-slice'],
   qwen: [],
-  kimi: []
+  kimi: [],
+  openai_compatible: ['marketing-site', 'docs-site']
 };
 
 export function getProviderGraduationTarget(providerId: ProviderId) {

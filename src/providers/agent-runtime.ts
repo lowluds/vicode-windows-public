@@ -5,25 +5,23 @@ import type {
   ProjectRuntimeCommandPolicy,
   ProjectRuntimeNetworkPolicy,
   RunActivityInfo,
+  RunToolApprovalRequestInput,
   RunToolApprovalDecision
 } from '../shared/domain';
+import type { HarnessIsolationMode } from '../shared/harness-task-contract';
 
 export interface AgentToolCall {
   name: string;
   arguments: Record<string, unknown>;
 }
 
-export interface AgentToolApprovalRequest {
-  toolName: string;
-  command: string;
-  cwd: string | null;
-  workspaceRoot: string;
-}
+export type AgentToolApprovalRequest = Omit<RunToolApprovalRequestInput, 'threadId' | 'runId' | 'providerId'>;
 
 export interface AgentToolExecutionContext {
   workspaceRoot: string;
   threadId?: string;
   runId?: string;
+  isolationMode?: HarnessIsolationMode;
   trustedWorkspace?: boolean;
   executionPermission: ExecutionPermission;
   executionConstraints?: AgentExecutionConstraints | null;
@@ -37,10 +35,38 @@ export interface AgentToolExecutionContext {
   requestApproval?: (request: AgentToolApprovalRequest) => Promise<RunToolApprovalDecision>;
 }
 
+export type StagedWorkspaceSourceToolName = 'mkdir' | 'write_file' | 'apply_patch';
+export type StagedWorkspaceOperationKind = 'mkdir' | 'write_file' | 'apply_patch' | 'delete';
+
+export interface StagedWorkspaceOperation {
+  operation: StagedWorkspaceOperationKind;
+  path: string;
+  beforeContent: string | null;
+  proposedAfterContent: string | null;
+  patchText: string | null;
+}
+
+export interface StagedWorkspaceChangeSet {
+  threadId: string | null;
+  runId: string | null;
+  sourceToolName: StagedWorkspaceSourceToolName;
+  isolationMode: 'patch_buffer';
+  status: 'proposed';
+  requestedPath: string | null;
+  changedPaths: string[];
+  operations: StagedWorkspaceOperation[];
+  summary: {
+    filesChanged: number;
+    insertions: number;
+    deletions: number;
+  };
+}
+
 export interface AgentToolExecutionResult {
   toolName: string;
   content: string;
   isError?: boolean;
+  stagedWorkspaceChangeSet?: StagedWorkspaceChangeSet | null;
 }
 
 export type AgentRuntimeToolOrigin = 'native' | 'mcp';
@@ -49,8 +75,10 @@ export type AgentRuntimeToolVisibilityGroup =
   | 'workspace_read'
   | 'workspace_write'
   | 'web_research'
+  | 'browser_preview'
   | 'host_command'
   | 'delegate'
+  | 'knowledge'
   | 'mcp';
 export type AgentRuntimeToolRenderHint = 'workspace' | 'shell' | 'web' | 'delegate' | 'mcp';
 export type AgentRuntimeToolReviewHint =
@@ -90,6 +118,8 @@ export interface AgentRuntimeToolCatalogContext {
   executionConstraints?: AgentExecutionConstraints | null;
   runtimeCommandPolicy?: ProjectRuntimeCommandPolicy;
   runtimeNetworkPolicy?: ProjectRuntimeNetworkPolicy;
+  enableDelegationTools?: boolean;
+  enableCreatorTools?: boolean;
 }
 
 export interface AgentRuntimeToolCatalog {

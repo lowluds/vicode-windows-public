@@ -1,10 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileExists, runHiddenExecutable } from '../../providers/util';
-import type { ProviderAdapter } from '../../providers/types';
-import { PROVIDER_IDS, type ProviderId, type SkillCategory, type SkillDefinition, type SkillInstallResult, type SkillSaveInput } from '../../shared/domain';
+import type { ProviderId, SkillCategory, SkillDefinition, SkillInstallResult, SkillSaveInput } from '../../shared/domain';
+import { SURFACED_PROVIDER_IDS } from '../../shared/providers';
 import { normalizeSkillMetadata } from '../../shared/skills';
 import type { DatabaseService } from '../../storage/database';
 import { parseSkillMarkdown } from './skill-markdown';
@@ -18,11 +16,9 @@ function safeDelete(path: string) {
 }
 
 type SkillInstallInput = {
-  installKind: 'provider_native' | 'github_folder';
-  providerId?: ProviderId | null;
+  installKind: 'github_folder';
   providerTargets?: ProviderId[];
   token: string;
-  installTarget?: string | null;
   owner?: string | null;
   repo?: string | null;
   path?: string | null;
@@ -35,63 +31,15 @@ type SkillInstallInput = {
 type SkillInstallDependencies = {
   root: string;
   db: Pick<DatabaseService, 'upsertSkill'>;
-  adapters: Record<ProviderId, ProviderAdapter>;
   saveSkill: (input: SkillSaveInput) => SkillDefinition;
   refreshSkillsFromDisk: () => void;
-  refreshProviderNativeSkills: () => Promise<void>;
 };
 
 export class SkillInstallService {
   constructor(private readonly deps: SkillInstallDependencies) {}
 
   async installSuggestedSkill(input: SkillInstallInput): Promise<SkillInstallResult> {
-    if (input.installKind === 'github_folder') {
-      return await this.installGithubSkill(input);
-    }
-
-    if (input.providerId === 'openai') {
-      throw new Error(
-        'Vicode does not install provider-native Codex skills into the Codex app home. Import the skill as a Vicode-managed GitHub skill or install it from Codex.'
-      );
-    }
-
-    if (input.providerId === 'gemini') {
-      const result = await this.installGeminiExtension(input.installTarget ?? null);
-      this.deps.refreshSkillsFromDisk();
-      return result;
-    }
-
-    if (input.providerId === 'qwen') {
-      throw new Error('Qwen provider-native installs are not supported in Vicode yet.');
-    }
-
-    if (input.providerId === 'kimi') {
-      throw new Error('Kimi provider-native installs are not supported in Vicode yet.');
-    }
-
-    throw new Error('Missing provider for provider-native install.');
-  }
-
-  private async installGeminiExtension(installTarget: string | null): Promise<SkillInstallResult> {
-    if (!installTarget) {
-      throw new Error('Missing Gemini extension install target.');
-    }
-
-    const install = await this.deps.adapters.gemini.detectInstall();
-    if (!install.cliPath) {
-      throw new Error('Gemini CLI is required before installing Gemini extensions.');
-    }
-
-    const installRoot = join(homedir(), '.gemini', 'extensions');
-    const command = await this.resolveGeminiInstallCommand(install.cliPath, ['extensions', 'install', installTarget, '--consent']);
-    await runHiddenExecutable(command.executable, command.args);
-    await this.deps.refreshProviderNativeSkills();
-    return {
-      status: 'completed',
-      providerId: 'gemini',
-      installPath: installRoot,
-      message: `Installed Gemini extension under ${installRoot}.`
-    };
+    return await this.installGithubSkill(input);
   }
 
   private async installGithubSkill(input: SkillInstallInput): Promise<SkillInstallResult> {
@@ -123,8 +71,7 @@ export class SkillInstallService {
         description: parsed.description,
         instructions: parsed.instructions,
         scope: 'global',
-        providerTargets: input.providerTargets?.length ? [...new Set(input.providerTargets)] : [...PROVIDER_IDS],
-        syncTargets: [],
+        providerTargets: input.providerTargets?.length ? [...new Set(input.providerTargets)] : [...SURFACED_PROVIDER_IDS],
         enabled: true,
         projectId: null
       });
@@ -150,25 +97,6 @@ export class SkillInstallService {
     } finally {
       safeDelete(importDir);
     }
-  }
-
-  private async resolveGeminiInstallCommand(executable: string, args: string[]) {
-    if (process.platform !== 'win32' || !executable.toLowerCase().endsWith('.cmd')) {
-      return { executable, args };
-    }
-
-    const installDir = dirname(executable);
-    const nodeScript = join(installDir, 'node_modules', '@google', 'gemini-cli', 'dist', 'index.js');
-    if (!(await fileExists(nodeScript))) {
-      return { executable, args };
-    }
-
-    const bundledNode = join(installDir, 'node.exe');
-    const nodeExecutable = (await fileExists(bundledNode)) ? bundledNode : 'node';
-    return {
-      executable: nodeExecutable,
-      args: ['--no-warnings=DEP0040', nodeScript, ...args]
-    };
   }
 
   private async downloadGithubDirectoryRecursive(owner: string, repo: string, repoPath: string, targetDir: string): Promise<void> {

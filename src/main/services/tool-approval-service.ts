@@ -3,7 +3,8 @@ import type {
   ProjectRuntimeCommandPolicy,
   ProviderId,
   RunToolApprovalDecision,
-  RunToolApprovalRequest
+  RunToolApprovalRequest,
+  RunToolApprovalRequestInput
 } from '../../shared/domain';
 import type { AppEvent } from '../../shared/events';
 
@@ -16,6 +17,10 @@ export interface ToolApprovalServiceHost {
   usesAppAuthoritativeToolApproval(providerId: ProviderId): boolean;
   getCurrentRuntimeCommandPolicyForThread(threadId: string, fallback: ProjectRuntimeCommandPolicy): ProjectRuntimeCommandPolicy;
   emit(event: AppEvent): void;
+}
+
+export interface ToolApprovalRequestOptions {
+  appAuthoritative?: boolean;
 }
 
 export class ToolApprovalService {
@@ -38,10 +43,13 @@ export class ToolApprovalService {
   }
 
   requestToolApproval(
-    input: Omit<RunToolApprovalRequest, 'id' | 'requestedAt'>,
-    runtimeCommandPolicy: ProjectRuntimeCommandPolicy = 'approval_required'
+    input: RunToolApprovalRequestInput,
+    runtimeCommandPolicy: ProjectRuntimeCommandPolicy = 'approval_required',
+    options: ToolApprovalRequestOptions = {}
   ) {
-    if (!this.host.usesAppAuthoritativeToolApproval(input.providerId)) {
+    const appAuthoritative =
+      options.appAuthoritative ?? this.host.usesAppAuthoritativeToolApproval(input.providerId);
+    if (!appAuthoritative) {
       return Promise.resolve<RunToolApprovalDecision>('approved');
     }
 
@@ -50,11 +58,13 @@ export class ToolApprovalService {
       runtimeCommandPolicy
     );
 
-    if (effectiveRuntimeCommandPolicy === 'auto_approve') {
+    const requiresManualWorkspaceChangeApproval = input.approvalKind === 'workspace_change';
+
+    if (!requiresManualWorkspaceChangeApproval && effectiveRuntimeCommandPolicy === 'auto_approve') {
       return Promise.resolve<RunToolApprovalDecision>('approved');
     }
 
-    if (effectiveRuntimeCommandPolicy === 'disabled') {
+    if (!requiresManualWorkspaceChangeApproval && effectiveRuntimeCommandPolicy === 'disabled') {
       return Promise.resolve<RunToolApprovalDecision>('rejected');
     }
 

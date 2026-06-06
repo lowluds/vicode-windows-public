@@ -1,8 +1,6 @@
 import type { OllamaRuntime } from '../../providers/ollama/runtime';
-import {
-  findSuspiciousAssistantTextPatterns,
-  repairSuspiciousWordSplits
-} from '../../providers/text-normalization';
+import { cleanFinalAssistantDisplayText } from '../../shared/assistant-text/final-display-cleanup';
+import { findSuspiciousAssistantTextPatterns } from '../../shared/assistant-text-normalization';
 
 interface OllamaWrapUpSection {
   heading: string;
@@ -311,24 +309,19 @@ function normalizeWrapUpMarkdown(text: string) {
     .trim();
 }
 
-export function formatOllamaFinalAnswerFallback(source: string) {
-  let text = source.replace(/\r\n/g, '\n').trim();
+export function formatDiagnosticFinalAnswerFallback(source: string) {
+  let text = cleanFinalAssistantDisplayText(source, {
+    stripXmlFunctionCallMarkup: true,
+    stripReasoningLabels: true
+  });
   if (!text) {
     return '';
   }
-
-  text = text
-    .replace(/[ \t]+([,.;:!?])/gu, '$1')
-    .replace(/([(\[{])\s+/gu, '$1')
-    .replace(/\s+([)\]}])/gu, '$1')
-    .replace(/([A-Za-z])-\s+([A-Za-z])/gu, '$1-$2')
-    .replace(/`\s+([^`\n]+?)\s+`/gu, '`$1`');
 
   if (shouldRecoverDenseWrapUp(text)) {
     text = normalizeWrapUpHeadingBreaksLegacy(text);
     text = normalizeListLikeWrapUp(text);
   }
-  text = repairSuspiciousWordSplits(text);
   text = text.replace(
     /([A-Za-z0-9)])(Yes|No|Here|This|That|These|Those|Want me to|Need me to|Should I|Can I)\b/gu,
     '$1\n\n$2'
@@ -360,7 +353,7 @@ export class OllamaFinalAnswerFormatter {
     }
 
     const suspiciousFindings = findSuspiciousAssistantTextPatterns(trimmed);
-    const normalizedFallback = formatOllamaFinalAnswerFallback(trimmed);
+    const normalizedFallback = formatDiagnosticFinalAnswerFallback(trimmed);
 
     if (hasReadableStructure(trimmed)) {
       return suspiciousFindings.some((label) => label !== 'split-hyphen-fragment' && label !== 'split-suffix-fragment');
@@ -379,7 +372,7 @@ export class OllamaFinalAnswerFormatter {
       return null;
     }
 
-    const normalizedFallback = formatOllamaFinalAnswerFallback(trimmed);
+    const normalizedFallback = formatDiagnosticFinalAnswerFallback(trimmed);
 
     const response = await this.runtime.fetch(
       '/api/chat',

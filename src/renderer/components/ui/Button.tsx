@@ -229,19 +229,22 @@ interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode;
 }
 
-export function IconButton({
+export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton({
   children,
   className,
   label,
   tone = 'quiet',
   size = 'default',
+  title,
   type = 'button',
   ...props
-}: IconButtonProps) {
+}, ref) {
   return (
     <button
+      ref={ref}
       type={type}
       aria-label={label}
+      title={title ?? label}
       className={cx(
         'ui-icon-button inline-flex shrink-0 items-center justify-center rounded-[var(--ui-radius-md)] border transition-colors disabled:pointer-events-none disabled:opacity-50',
         tone === 'danger'
@@ -257,7 +260,7 @@ export function IconButton({
       {children}
     </button>
   );
-}
+});
 
 export function ProjectTreeButton({ className, ...props }: SharedButtonProps) {
   return (

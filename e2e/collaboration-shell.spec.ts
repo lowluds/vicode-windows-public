@@ -16,7 +16,10 @@ test('collaboration shell stays parked out of the current app chrome', async () 
   try {
     const seeded = await window.evaluate(async (targetWorkspaceDir) => {
       const bootstrap = await window.vicode.app.getBootstrap();
-      const provider = bootstrap.providers.find((entry) => entry.id === 'openai') ?? bootstrap.providers[0];
+      const provider =
+        bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+        bootstrap.providers.find((entry) => entry.id === 'openai_compatible') ??
+        bootstrap.providers[0];
       if (!provider) {
         throw new Error('Expected at least one provider for the parked collaboration shell test.');
       }
@@ -24,7 +27,7 @@ test('collaboration shell stays parked out of the current app chrome', async () 
       const modelId =
         bootstrap.preferences.defaultModelByProvider[provider.id] ??
         provider.models[0]?.id ??
-        'gpt-5';
+        'qwen2.5-coder:14b-instruct-q6_K';
 
       const project = await window.vicode.projects.create({
         name: `Collab parked ${Date.now()}`,

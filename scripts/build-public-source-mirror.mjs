@@ -12,8 +12,9 @@ const publicDocs = new Set([
   'CHANGELOG.md',
   'CONTRIBUTING.md',
   'LICENSE',
-  'docs/releases/0.2.6.md',
-  'docs/releases/0.2.6-reviewer-guide.md',
+  'docs/releases/0.2.8.md',
+  'docs/releases/0.2.8-public-beta-handoff.md',
+  'docs/releases/0.2.8-reviewer-guide.md',
   'docs/releases/beta-tester-quick-start.md',
   'docs/setup/windows-provider-setup.md'
 ]);
@@ -82,7 +83,6 @@ function writeMirrorManifest(targetPath, fileCount) {
     `${JSON.stringify(
       {
         generatedAt: new Date().toISOString(),
-        sourceRoot: root,
         publicRepo: publicRepoUrl,
         fileCount
       },

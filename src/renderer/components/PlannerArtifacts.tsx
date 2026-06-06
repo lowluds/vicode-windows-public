@@ -1,12 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { PlannerPlan, PlannerQuestionAnswer, PlannerQuestionSet, ProviderPlannerPolicy } from '../../shared/domain';
+import type {
+  PlannerPlan,
+  PlannerQuestionAnswer,
+  PlannerQuestionSet,
+  ProviderPlannerPolicy,
+  RunProgressState,
+  RunTaskStatus
+} from '../../shared/domain';
 import { derivePlannerTaskLabels } from '../../shared/run-progress';
-import { ActionButton, PrimaryButton, SelectableRowButton, StatusPill, SurfaceCard, TextArea, TextInput } from './ui';
+import { ActionButton, PrimaryButton, SelectableRowButton, TextArea, TextInput } from './ui';
 import { MessageResponse } from './ai-elements/message';
 import { ArrowLeftIcon, CheckIcon, ChevronRightIcon, TaskIcon } from './icons';
 import { cx } from './ui/utils';
 
 const PLANNER_OTHER_OPTION_ID = '__other__';
+const PLANNER_PLAN_PREVIEW_LIMIT = 8;
+
+type PlannerChecklistItem = {
+  label: string;
+  status: RunTaskStatus;
+};
 
 function formatPlannerDisplayTitle(value: string | null | undefined, fallback: string) {
   const cleaned = (value ?? '')
@@ -23,15 +36,76 @@ function formatPlannerDisplayTitle(value: string | null | undefined, fallback: s
   return cleaned || fallback;
 }
 
-function planStatusTone(status: PlannerPlan['status']) {
-  switch (status) {
-    case 'approved':
-      return 'connected';
-    case 'superseded':
-      return 'disconnected';
-    default:
-      return 'checking';
-  }
+function normalizePlannerTaskKey(value: string) {
+  return value
+    .replace(/^\d+[.)]\s+/u, '')
+    .trim()
+    .toLowerCase();
+}
+
+function derivePlannerChecklistItems(plan: PlannerPlan, runProgress: RunProgressState | null | undefined): PlannerChecklistItem[] {
+  const progressByLabel = new Map(
+    (runProgress?.items ?? []).map((item) => [normalizePlannerTaskKey(item.label), item])
+  );
+
+  return derivePlannerTaskLabels(plan).map((label, index) => {
+    const progressItem = runProgress?.items[index] ?? progressByLabel.get(normalizePlannerTaskKey(label)) ?? null;
+    return {
+      label,
+      status: progressItem?.status ?? 'pending'
+    };
+  });
+}
+
+function PlannerPlanChecklist({
+  plan,
+  runProgress,
+  limit,
+  showHiddenCount,
+  showAssumptions,
+  renderedMarkdown
+}: {
+  plan: PlannerPlan;
+  runProgress?: RunProgressState | null;
+  limit?: number;
+  showHiddenCount?: boolean;
+  showAssumptions?: boolean;
+  renderedMarkdown?: string;
+}) {
+  const allTasks = useMemo(() => derivePlannerChecklistItems(plan, runProgress), [plan, runProgress]);
+  const visibleTasks = typeof limit === 'number' ? allTasks.slice(0, limit) : allTasks;
+  const hiddenTaskCount = Math.max(allTasks.length - visibleTasks.length, 0);
+  const assumptionSummary = showAssumptions
+    ? plan.structuredPlan?.assumptions.filter(Boolean).slice(0, 2).join(' · ') || null
+    : null;
+
+  return (
+    <div className="planner-plan-preview">
+      <ol className="planner-plan-preview-list" data-testid="planner-plan-preview-list">
+        {visibleTasks.map((item, index) => (
+          <li
+            key={`${plan.id}-task-${index}`}
+            className={cx('planner-plan-preview-item', `is-${item.status}`)}
+            data-task-status={item.status}
+          >
+            <span className="planner-plan-preview-marker" aria-hidden="true" />
+            <span className="planner-plan-preview-label">{`${index + 1}. ${item.label}`}</span>
+          </li>
+        ))}
+      </ol>
+      {showHiddenCount && hiddenTaskCount > 0 ? (
+        <p className="planner-plan-preview-footnote">{`+ ${hiddenTaskCount} more task${hiddenTaskCount === 1 ? '' : 's'} in this draft`}</p>
+      ) : null}
+      {assumptionSummary ? (
+        <p className="planner-plan-preview-footnote">{`Assumptions: ${assumptionSummary}`}</p>
+      ) : null}
+      {!plan.structuredPlan && renderedMarkdown?.trim().length ? (
+        <MessageResponse className="planner-plan-markdown">
+          {renderedMarkdown}
+        </MessageResponse>
+      ) : null}
+    </div>
+  );
 }
 
 function buildQuestionAnswerPayload(
@@ -316,49 +390,30 @@ export function PlannerPlanCard({
   }, [plan.id]);
   const displayTitle = formatPlannerDisplayTitle(plan.structuredPlan?.title, 'Proposed plan');
   const allTaskLabels = useMemo(() => derivePlannerTaskLabels(plan), [plan]);
-  const visibleTaskLabels = allTaskLabels.slice(0, 8);
-  const hiddenTaskCount = Math.max(allTaskLabels.length - visibleTaskLabels.length, 0);
-  const assumptionSummary = plan.structuredPlan?.assumptions.filter(Boolean).slice(0, 2).join(' · ') || null;
+  const taskCountLabel = `${allTaskLabels.length} planned item${allTaskLabels.length === 1 ? '' : 's'}`;
 
   return (
-    <SurfaceCard
-      className="planner-card planner-plan-card gap-4 rounded-[18px] border-[color:var(--ui-border-soft)] bg-[image:var(--ui-panel-gradient)] p-4"
-      data-testid="planner-plan-card"
-    >
+    <section className="planner-card planner-plan-card" data-testid="planner-plan-card">
       <div className="planner-card-header flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="planner-card-eyebrow text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--ui-text-subtle)]">
-            {`0 out of ${allTaskLabels.length} tasks completed`}
+            {`Execution checklist · ${taskCountLabel}`}
           </p>
           <h3 className="mt-1 text-[15px] font-semibold tracking-[-0.01em] text-[color:var(--ui-text-title)]">{displayTitle}</h3>
         </div>
         <div className="planner-card-statuses flex items-center gap-2">
-          <StatusPill tone={planStatusTone(plan.status)}>{plan.status}</StatusPill>
+          <span className={`planner-status-text is-${plan.status}`}>{plan.status}</span>
         </div>
       </div>
-      <div className="planner-plan-preview">
-        <ol className="planner-plan-preview-list" data-testid="planner-plan-preview-list">
-          {visibleTaskLabels.map((item, index) => (
-            <li key={`${plan.id}-task-${index}`} className="planner-plan-preview-item">
-              <span className="planner-plan-preview-marker" aria-hidden="true" />
-              <span className="planner-plan-preview-label">{`${index + 1}. ${item}`}</span>
-            </li>
-          ))}
-        </ol>
-        {hiddenTaskCount > 0 ? (
-          <p className="planner-plan-preview-footnote">{`+ ${hiddenTaskCount} more task${hiddenTaskCount === 1 ? '' : 's'} in this draft`}</p>
-        ) : null}
-        {assumptionSummary ? (
-          <p className="planner-plan-preview-footnote">{`Assumptions: ${assumptionSummary}`}</p>
-        ) : null}
-        {!plan.structuredPlan && renderedMarkdown.trim().length > 0 ? (
-          <MessageResponse className="planner-plan-markdown rounded-[16px] border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-alpha-03)] px-3 py-3 text-[12.5px] leading-6 text-[color:var(--ui-text)]">
-            {renderedMarkdown}
-          </MessageResponse>
-        ) : null}
-      </div>
+      <PlannerPlanChecklist
+        plan={plan}
+        limit={PLANNER_PLAN_PREVIEW_LIMIT}
+        showHiddenCount
+        showAssumptions
+        renderedMarkdown={renderedMarkdown}
+      />
       {plan.status !== 'approved' && revisionOpen ? (
-        <div className="planner-revision-panel rounded-[18px] border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-alpha-03)] p-4">
+        <div className="planner-revision-panel">
           <label className="planner-other-field planner-revision-field flex flex-col gap-2">
             <span className="text-[12px] font-medium text-[color:var(--ui-text-muted)]">Tell the agent what to adjust</span>
             <TextArea
@@ -397,7 +452,7 @@ export function PlannerPlanCard({
         <p className="max-w-[560px] text-[13px] leading-6 text-[color:var(--ui-text-muted)]">
           {plan.status === 'approved'
             ? (approvedCardText ?? 'This plan has already been approved for execution.')
-            : 'Accept to continue, or send a short revision so the planner can adjust before the next step.'}
+            : 'Accept to start execution. The agent will work through each item and run verification before the final response.'}
         </p>
         <div className="planner-action-group flex items-center gap-2">
           {plan.status !== 'approved' ? (
@@ -434,18 +489,23 @@ export function PlannerPlanCard({
           </PrimaryButton>
         </div>
       </div>
-    </SurfaceCard>
+    </section>
   );
 }
 
 export function PlannerPlanStatusRow({
   plan,
+  runProgress,
   approvedStatusText
 }: {
   plan: PlannerPlan;
+  runProgress?: RunProgressState | null;
   approvedStatusText?: string;
 }) {
   const title = formatPlannerDisplayTitle(plan.structuredPlan?.title, 'Planner status');
+  const tasks = useMemo(() => derivePlannerChecklistItems(plan, runProgress), [plan, runProgress]);
+  const completedCount = tasks.filter((item) => item.status === 'completed').length;
+  const progressLabel = tasks.length > 0 ? `${completedCount}/${tasks.length} complete` : null;
   const statusLabel =
     plan.status === 'approved'
       ? (approvedStatusText ?? 'Approved and moved into execution.')
@@ -455,12 +515,15 @@ export function PlannerPlanStatusRow({
 
   return (
     <div className="planner-status-row" data-testid="planner-plan-status-row">
-      <div className="planner-status-row-copy">
-        <p className="planner-status-row-eyebrow">Planner</p>
-        <div className="planner-status-row-title">{title}</div>
-        <p className="planner-status-row-text">{statusLabel}</p>
+      <div className="planner-status-row-summary">
+        <div className="planner-status-row-copy">
+          <p className="planner-status-row-eyebrow">Planner</p>
+          <div className="planner-status-row-title">{title}</div>
+          <p className="planner-status-row-text">{progressLabel ? `${statusLabel} ${progressLabel}.` : statusLabel}</p>
+        </div>
+        <span className={`planner-status-text planner-status-row-state is-${plan.status}`}>{plan.status}</span>
       </div>
-      <StatusPill tone={planStatusTone(plan.status)}>{plan.status}</StatusPill>
+      <PlannerPlanChecklist plan={plan} runProgress={runProgress} />
     </div>
   );
 }

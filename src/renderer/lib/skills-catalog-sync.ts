@@ -12,11 +12,10 @@ type SuggestedSkillInstallInput = {
   id: string;
   name: string;
   description: string;
-  installKind: 'provider_native' | 'github_folder';
+  installKind: 'provider_reference' | 'github_folder';
   providerId?: ProviderId;
   providerTargets: ProviderId[];
   browseUrl: string;
-  installTarget?: string;
   owner?: string;
   repo?: string;
   path?: string;
@@ -31,11 +30,9 @@ export interface SkillsCatalogSyncHost {
   listMcpServers(): Promise<McpServerView[]>;
   listMcpCatalog(): Promise<McpCatalogSnapshot>;
   installSuggestedSkill(input: {
-    installKind: 'provider_native' | 'github_folder';
-    providerId: ProviderId | null;
+    installKind: 'github_folder';
     providerTargets: ProviderId[];
     token: string;
-    installTarget: string;
     owner: string | null;
     repo: string | null;
     path: string | null;
@@ -66,15 +63,18 @@ export async function installSuggestedSkill(
   host: SkillsCatalogSyncHost,
   skill: SuggestedSkillInstallInput
 ) {
+  if (skill.installKind !== 'github_folder') {
+    host.showToast('info', 'Provider-managed resources are browse-only in Vicode. Use Browse to inspect the source.');
+    return;
+  }
+
   host.setInstallingSkillId(skill.id);
 
   try {
     const result = await host.installSuggestedSkill({
       installKind: skill.installKind,
-      providerId: skill.providerId ?? null,
       providerTargets: skill.providerTargets,
       token: skill.token,
-      installTarget: skill.installTarget ?? skill.browseUrl,
       owner: skill.owner ?? null,
       repo: skill.repo ?? null,
       path: skill.path ?? null,

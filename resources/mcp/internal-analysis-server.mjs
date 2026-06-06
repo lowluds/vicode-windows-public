@@ -15,7 +15,6 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 
 const WORKSPACE_ROOT = path.resolve(process.env.VICODE_INTERNAL_ANALYSIS_ROOT ?? process.cwd());
 const ENGINEERING_DOCS_ROOT = path.join(WORKSPACE_ROOT, 'docs', 'engineering');
-const BUILD_CONTROL_ROOT = path.join(WORKSPACE_ROOT, '.vicode', 'control');
 const STATE_DB_PATH = process.env.VICODE_STATE_DB_PATH ? path.resolve(process.env.VICODE_STATE_DB_PATH) : null;
 const MAX_SEARCH_RESULTS = 20;
 const IGNORED_DIRECTORIES = new Set([
@@ -73,17 +72,6 @@ async function listEngineeringDocs() {
 async function findMaintainabilityReportPath() {
   const docs = await listEngineeringDocs();
   return docs.find((entry) => /^maintainability-audit-.*\.md$/iu.test(entry.name))?.relativePath ?? null;
-}
-
-async function readJsonIfPresent(filePath) {
-  if (!(await fileExists(filePath))) {
-    return null;
-  }
-  try {
-    return JSON.parse(await readTextFile(filePath));
-  } catch {
-    return null;
-  }
 }
 
 function openStateDb() {
@@ -194,66 +182,6 @@ function listAutonomousTasksForProject(projectId) {
   }
 }
 
-function summarizeTicketQueue(queueJson) {
-  const tickets = Array.isArray(queueJson?.tickets) ? queueJson.tickets : [];
-  const inProgress = tickets.find((ticket) => ticket?.status === 'in_progress') ?? null;
-  return {
-    totalTickets: tickets.length,
-    todoTickets: tickets.filter((ticket) => ticket?.status === 'todo').length,
-    blockedTickets: tickets.filter((ticket) => ticket?.status === 'blocked').length,
-    doneTickets: tickets.filter((ticket) => ticket?.status === 'done').length,
-    activeTicketTitle: typeof inProgress?.title === 'string' ? inProgress.title : null
-  };
-}
-
-async function getBuildControlSummary() {
-  const configPath = path.join(BUILD_CONTROL_ROOT, 'vicode-build-teams.json');
-  const config = await readJsonIfPresent(configPath);
-  const controls = Array.isArray(config?.teams) ? config.teams : Array.isArray(config?.controls) ? config.controls : [];
-  const teams = [];
-
-  for (const control of controls) {
-    const controlId = String(control?.id ?? 'unknown');
-    const heartbeatRelativePath =
-      typeof control?.heartbeat_path === 'string'
-        ? control.heartbeat_path
-        : typeof control?.heartbeatPath === 'string'
-          ? control.heartbeatPath
-          : 'HEARTBEAT.md';
-    const queueRelativePath = path.join('.vicode', 'control', 'build-tickets', `${controlId}.json`).replace(/\\/gu, '/');
-    const heartbeatPath = safeWorkspacePath(heartbeatRelativePath);
-    const queuePath = safeWorkspacePath(queueRelativePath);
-    const heartbeatText =
-      heartbeatPath && (await fileExists(heartbeatPath))
-        ? await readTextFile(heartbeatPath)
-        : null;
-    const queueJson = queuePath ? await readJsonIfPresent(queuePath) : null;
-
-    teams.push({
-      id: controlId,
-      label: typeof control?.label === 'string' ? control.label : controlId,
-      goal: typeof control?.goal === 'string' ? control.goal : null,
-      worktreePath:
-        typeof control?.worktree_path === 'string'
-          ? control.worktree_path
-          : typeof control?.worktreePath === 'string'
-            ? control.worktreePath
-            : null,
-      heartbeatPath: heartbeatRelativePath.replace(/\\/gu, '/'),
-      heartbeatStatus: heartbeatText?.match(/status:\s*(.+)$/imu)?.[1]?.trim() ?? null,
-      ...summarizeTicketQueue(queueJson)
-    });
-  }
-
-  return {
-    workspaceRoot: WORKSPACE_ROOT,
-    available: Boolean(config),
-    configPath: path.join('.vicode', 'control', 'vicode-build-teams.json').replace(/\\/gu, '/'),
-    teamCount: teams.length,
-    teams
-  };
-}
-
 async function walkWorkspace(relativeDir = '') {
   const absoluteDir = safeWorkspacePath(relativeDir);
   if (!absoluteDir || !(await dirExists(absoluteDir))) {
@@ -349,18 +277,6 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
       mimeType: 'text/markdown'
     },
     {
-      uri: 'vicode://engineering/adoption-plan',
-      name: 'Claude Code Adoption Plan',
-      description: 'Current phased adoption plan against the Claude Code upstream reference.',
-      mimeType: 'text/markdown'
-    },
-    {
-      uri: 'vicode://build-control/summary',
-      name: 'Build Control Summary',
-      description: 'Current build-control teams, heartbeat state, and ticket queue summary.',
-      mimeType: 'application/json'
-    },
-    {
       uri: 'vicode://app/projects',
       name: 'Local Projects',
       description: 'Local Vicode projects from the app state database.',
@@ -403,11 +319,6 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
       contents: [{ uri, mimeType: 'text/markdown', text: await readTextFile(path.join(ENGINEERING_DOCS_ROOT, 'WORKLOG.md')) }]
     };
   }
-  if (uri === 'vicode://engineering/adoption-plan') {
-    return {
-      contents: [{ uri, mimeType: 'text/markdown', text: await readTextFile(path.join(ENGINEERING_DOCS_ROOT, 'claude-code-adoption-plan.md')) }]
-    };
-  }
   if (uri === 'vicode://engineering/maintainability-report') {
     const relativePath = await findMaintainabilityReportPath();
     if (!relativePath) {
@@ -419,11 +330,6 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     }
     return {
       contents: [{ uri, mimeType: 'text/markdown', text: await readTextFile(absolutePath) }]
-    };
-  }
-  if (uri === 'vicode://build-control/summary') {
-    return {
-      contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(await getBuildControlSummary(), null, 2) }]
     };
   }
   if (uri === 'vicode://app/projects') {
@@ -449,11 +355,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'list_engineering_docs',
       description: 'List markdown docs in docs/engineering for the current workspace.',
-      inputSchema: { type: 'object', properties: {} }
-    },
-    {
-      name: 'get_build_control_summary',
-      description: 'Return a bounded summary of build-control teams, heartbeat files, and ticket queues.',
       inputSchema: { type: 'object', properties: {} }
     },
     {
@@ -514,9 +415,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (name === 'list_engineering_docs') {
     return { content: [{ type: 'text', text: JSON.stringify(await listEngineeringDocs(), null, 2) }] };
   }
-  if (name === 'get_build_control_summary') {
-    return { content: [{ type: 'text', text: JSON.stringify(await getBuildControlSummary(), null, 2) }] };
-  }
   if (name === 'list_projects') {
     return { content: [{ type: 'text', text: JSON.stringify(listProjectsFromState(), null, 2) }] };
   }
@@ -547,32 +445,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   throw new Error(`Unknown tool: ${name}`);
 });
 
-server.setRequestHandler(ListPromptsRequestSchema, async () => ({
-  prompts: [
-    {
-      name: 'summarize_build_control_health',
-      description: 'Summarize build-control health from the local workspace.',
-      arguments: []
-    }
-  ]
-}));
+server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: [] }));
 
 server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-  if (request.params.name !== 'summarize_build_control_health') {
-    throw new Error(`Unknown prompt: ${request.params.name}`);
-  }
-  return {
-    description: 'Summarize build-control health from the current workspace.',
-    messages: [
-      {
-        role: 'user',
-        content: {
-          type: 'text',
-          text: 'Use the local build-control summary and engineering docs to summarize the current build-plan health, blockers, and next recommended action.'
-        }
-      }
-    ]
-  };
+  throw new Error(`Unknown prompt: ${request.params.name}`);
 });
 
 const transport = new StdioServerTransport();

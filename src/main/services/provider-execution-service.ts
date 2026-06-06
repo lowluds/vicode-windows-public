@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentToolExecutionResult } from '../../providers/agent-runtime';
-import type { ProviderAdapter, ProviderInfoPayload, ProviderRunHandle } from '../../providers/types';
+import type {
+  ProviderAdapter,
+  ProviderInfoPayload,
+  ProviderRunCallbacks,
+  ProviderRunContext,
+  ProviderRunHandle
+} from '../../providers/types';
+import { RetiredProviderAdapter } from '../../providers/retired-adapter';
 import type {
   AutonomyDelegationProfile,
   ComposerSubmitInput,
@@ -11,21 +18,71 @@ import type {
   RunEvent,
   RunProgressState,
   RunToolApprovalRequest,
+  RunToolApprovalRequestInput,
   ThreadDetail
 } from '../../shared/domain';
 import type { AppEvent } from '../../shared/events';
-import { providerCapabilities, providerDisplayName } from '../../shared/providers';
-import { deriveRunProgressFromPlanner, shouldAdvanceRunProgressFromActivity } from '../../shared/run-progress';
+import {
+  decodeOllamaModelId,
+  providerCapabilities,
+  providerDisplayName,
+  providerRetiredMessage,
+  resolveOllamaApiKeyForModel
+} from '../../shared/providers';
+import { decodeCustomProviderModelId } from '../../shared/custom-provider-routing';
+import {
+  deriveRunProgressFromPlanner,
+  deriveRunProgressFromResolvedTaskPacket,
+  shouldAdvanceRunProgressFromActivity
+} from '../../shared/run-progress';
+import { deriveHarnessTaskContract } from '../../shared/harness-task-contract';
+import { resolveConversationTaskPacket } from '../../shared/conversation-task-resolver';
 import { DatabaseService } from '../../storage/database';
 import { captureWorkspaceSnapshot } from './workspace-changes';
+import { deriveWorkspaceVerificationPlan } from './provider-verification-plan';
 import { normalizeProviderInfoEvent } from './provider-run-event-normalizer';
 import { createProviderReplyAssembly } from './provider-reply-assembly';
 import { formatProviderCompletionOutput, resolveProviderCompletionText } from './provider-completion-output';
-import { buildEffectivePrompt, formatUsingReferences } from './provider-manager-prompt-builder';
+import {
+  buildEffectivePrompt,
+  formatDisclosureReferences,
+  formatApprovedPlanExecutionContract,
+} from './provider-manager-prompt-builder';
 import { resolveExecutionContinuity } from './provider-manager-continuity';
 import type { VicodeGuidanceContext } from './vicode-guidance';
+import type { ProviderModelExecutionService } from './provider-model-execution-service';
+import type { ThreadContextCompactionTriggerInput } from './thread-context-compaction-trigger';
+import {
+  legacyProviderRuntimeAuthority,
+  usesAppToolApprovalAuthority
+} from './provider-model-runtime-authority';
+import {
+  buildProviderCompatibilityDispatchTraceDetail,
+  resolveProviderCompatibilityDispatchPolicy
+} from './provider-compatibility-dispatch-policy';
+import type { ToolApprovalRequestOptions } from './tool-approval-service';
+import {
+  resolveProviderExecutionWorkspace,
+  type ProviderExecutionWorkspaceHost
+} from './provider-execution-workspace';
+import {
+  assembleProviderExecutionContext,
+  buildProviderExecutionWorkspaceContextTraceDetail,
+  type ProviderExecutionContextHost
+} from './provider-execution-context';
+import {
+  buildProviderExecutionAbortedFinalization,
+  buildProviderExecutionCleanupSuccessFinalization,
+  buildProviderExecutionEmptyOutputFailure,
+  buildProviderExecutionFailedFinalization,
+  buildProviderExecutionSuccessFinalization,
+  resolveProviderExecutionApprovedPlan,
+  resolveProviderExecutionTitlePrompt,
+  type ProviderExecutionFinalizationHost
+} from './provider-execution-finalization';
 
 const OLLAMA_IMAGE_REVIEW_TIMEOUT_MS = 1000 * 60 * 2;
+const APPROVED_PLAN_TASK_PROMPT = 'Implement the approved plan to completion.';
 
 export interface ExecutionContext {
   approvedPlan?: PlannerPlan | null;
@@ -40,51 +97,80 @@ export interface ExecutionContext {
   } | null;
 }
 
-export interface ProviderExecutionServiceHost {
+export interface ProviderExecutionProgressHost {
+  createBackgroundDelegationRunProgress(
+    runId: string,
+    threadId: string,
+    providerId: ProviderId,
+    delegation: NonNullable<ExecutionContext['delegation']>
+  ): RunProgressState;
+  recordInfoEvent(threadId: string, runId: string, normalizedInfo: ReturnType<typeof normalizeProviderInfoEvent>): RunEvent | null;
+  publishProviderRunProgress(runId: string, progress: RunProgressState): void;
+  advanceRunProgress(runId: string): void;
+  refreshDerivedRunProgress(threadId: string, runId: string, providerId: ProviderId, modelId: string): void;
+  maybeCreateThreadContextCompactionFromContextUsage(input: ThreadContextCompactionTriggerInput): void;
+}
+
+export interface ProviderExecutionToolHost {
+  usesAppAuthoritativeToolApproval(providerId: ProviderId): boolean;
+  requestToolApproval(
+    request: RunToolApprovalRequestInput,
+    runtimeCommandPolicy: Project['runtimeCommandPolicy'],
+    options?: ToolApprovalRequestOptions
+  ): Promise<'approved' | 'rejected' | 'cancelled'>;
+  executeProviderRuntimeToolCall(input: {
+    call: Record<string, unknown>;
+    workspaceRoot: string;
+    trustedWorkspace: boolean;
+    threadId: string;
+    runId: string;
+    providerId: ProviderId;
+    appAuthoritativeToolApproval?: boolean;
+    executionPermission: ComposerSubmitInput['executionPermission'];
+    executionConstraints: ComposerSubmitInput['executionConstraints'];
+    runtimeCommandPolicy: Project['runtimeCommandPolicy'];
+    runtimeNetworkPolicy: Project['runtimeNetworkPolicy'];
+    onInfo: (payload: ProviderInfoPayload) => void;
+  }): Promise<Record<string, unknown>>;
+}
+
+export interface ProviderExecutionServiceHost
+  extends ProviderExecutionWorkspaceHost,
+    ProviderExecutionContextHost,
+    ProviderExecutionProgressHost,
+    ProviderExecutionToolHost,
+    ProviderExecutionFinalizationHost {
   adapters: Record<ProviderId, ProviderAdapter>;
   db: DatabaseService;
+  providerModelExecutionService: ProviderModelExecutionService;
   isDisposed(): boolean;
   assertProviderRunPermission(providerId: ProviderId, executionPermission: ComposerSubmitInput['executionPermission']): void;
   assertProviderProjectContext(providerId: ProviderId, folderPath: string | null, trusted: boolean): void;
-  recordRuntimeTraceMark(threadId: string, runId: string, stage: string, payload?: Record<string, unknown> | null): void;
-  assembleWorkspaceContext(
-    input: ComposerSubmitInput,
-    thread: ThreadDetail,
-    folderPath: string | null,
-    trusted: boolean,
-    options: {
-      includeRuntimeSkills: boolean;
-      contextProfile?: 'main' | 'delegated';
-      includeMemory?: boolean;
-      includeGeneratedMemory?: boolean;
-    }
-  ): {
-    blocks: string[];
-    memoryBlocks: Array<{ itemId?: string }>;
-    generatedMemoryBlocks?: Array<{ itemId: string; evidenceCount: number }>;
-    skillBlocks: string[];
-    runtimeSkillResources: unknown[];
-    selectedSkillIds: string[];
-    diagnostics: Record<string, unknown>;
-  };
-  createGeneratedMemoryTraceDetail(input: {
-    folderPath: string | null;
-    trusted: boolean;
-    generatedMemoryEnabled: boolean;
-    generatedMemoryGenerationEnabled: boolean;
-    memoryBlocks: Array<{ itemId?: string }>;
-    generatedMemoryBlocks: Array<{ itemId: string; evidenceCount: number }>;
-    repeatSteeringCount: number;
-  }): Record<string, unknown>;
   createMemoryRecallActivity(
     memoryBlocks: Array<{ fileName: string }>,
     generatedMemoryBlocks: Array<{ itemId: string }>
+  ): import('../../shared/domain').RunActivityInfo | null;
+  createProjectKnowledgeActivity?(
+    projectKnowledgeBlocks: Array<{
+      title: string;
+      relativePath: string;
+      heading: string | null;
+      path: string;
+      retrievalReason: { reason: string };
+    }>,
+    routerEvidence?: { reason: string } | null
+  ): import('../../shared/domain').RunActivityInfo | null;
+  createSkillActivity?(
+    workspaceContext: {
+      selectedSkillIds: string[];
+      autoSelectedSkillIds?: string[];
+      mentionedSkillIds?: string[];
+    }
   ): import('../../shared/domain').RunActivityInfo | null;
   resolveVicodeGuidance(input: {
     prompt: string;
     selectedSkillIds: string[];
   }): VicodeGuidanceContext | null;
-  countQueuedSteerFollowUps(thread: ThreadDetail): number;
   resolveExecutionModelId(
     providerId: ProviderId,
     requestedModelId: string,
@@ -101,102 +187,63 @@ export interface ProviderExecutionServiceHost {
   }>;
   decryptApiKey(encrypted: string): string;
   resolveOllamaTransportMode(providerId: ProviderId): string | undefined;
-  createBackgroundDelegationRunProgress(
-    runId: string,
-    threadId: string,
-    providerId: ProviderId,
-    delegation: NonNullable<ExecutionContext['delegation']>
-  ): RunProgressState;
-  recordInfoEvent(threadId: string, runId: string, normalizedInfo: ReturnType<typeof normalizeProviderInfoEvent>): RunEvent | null;
-  publishProviderRunProgress(runId: string, progress: RunProgressState): void;
-  advanceRunProgress(runId: string): void;
-  refreshDerivedRunProgress(threadId: string, runId: string, providerId: ProviderId, modelId: string): void;
-  usesAppAuthoritativeToolApproval(providerId: ProviderId): boolean;
-  requestToolApproval(
-    request: {
-      threadId: string;
-      runId: string;
-      providerId: ProviderId;
-      toolName: string;
-      command: string;
-      cwd: string | null;
-      workspaceRoot: string;
-    },
-    runtimeCommandPolicy: Project['runtimeCommandPolicy']
-  ): Promise<'approved' | 'rejected' | 'cancelled'>;
-  executeProviderRuntimeToolCall(input: {
-    call: Record<string, unknown>;
-    workspaceRoot: string;
-    trustedWorkspace: boolean;
-    threadId: string;
-    runId: string;
-    providerId: ProviderId;
-    executionPermission: ComposerSubmitInput['executionPermission'];
-    executionConstraints: ComposerSubmitInput['executionConstraints'];
-    runtimeCommandPolicy: Project['runtimeCommandPolicy'];
-    runtimeNetworkPolicy: Project['runtimeNetworkPolicy'];
-    onInfo: (payload: ProviderInfoPayload) => void;
-  }): Promise<Record<string, unknown>>;
   collectAssistantText(threadId: string, runId: string): string;
   collectRunDeltaText(threadId: string, runId: string): string;
   emit(event: AppEvent): void;
   onRunRegistered(runId: string, handle: ProviderRunHandle, threadId: string): void;
-  finalizeSuccessfulExecutionRun(input: {
-    threadId: string;
-    runId: string;
-    output: string;
-    workspaceSnapshot: ReturnType<typeof captureWorkspaceSnapshot>;
-    projectFolderPath: string;
-    approvedPlan: boolean;
-    titlePrompt: string | null;
-  }): void;
-  finalizeExecutionRunFailure(input: {
-    threadId: string;
-    runId: string;
-    message: string;
-    traceStage: 'failed' | 'aborted';
-    tracePayload?: Record<string, unknown> | null;
-    eventType: 'failed' | 'aborted';
-    threadStatus: 'failed' | 'aborted';
-    runStatus: 'failed' | 'aborted';
-    progressStatus: 'failed' | 'blocked';
-    approvedPlan: boolean;
-    titlePrompt: string | null;
-  }): void;
-  shouldFinalizeWithProviderCleanup(providerId: ProviderId, output: string): boolean;
-  finalizeSuccessfulExecutionRunWithProviderCleanup(input: {
-    providerId: ProviderId;
-    modelId: string;
-    threadId: string;
-    runId: string;
-    output: string;
-    workspaceSnapshot: ReturnType<typeof captureWorkspaceSnapshot>;
-    projectFolderPath: string;
-    approvedPlan: boolean;
-    titlePrompt: string | null;
-  }): Promise<void>;
+}
+
+function buildProviderRunSourcePrompt(prompt: string, approvedPlan?: PlannerPlan | null) {
+  if (!approvedPlan) {
+    return prompt;
+  }
+
+  return [
+    APPROVED_PLAN_TASK_PROMPT,
+    formatApprovedPlanExecutionContract(approvedPlan)
+  ].join('\n\n');
 }
 
 export class ProviderExecutionService {
   constructor(private readonly host: ProviderExecutionServiceHost) {}
 
-  private recordVisibleUsingEvent(threadId: string, runId: string, usingReferences: string[]) {
-    if (usingReferences.length === 0) {
+  private buildTaskPolicyWaitMessage(
+    packet: NonNullable<ReturnType<typeof resolveConversationTaskPacket>>
+  ): string | null {
+    switch (packet.executionPolicy) {
+      case 'ask_clarifying_question':
+        return packet.clarificationQuestion
+          ?? 'What should I implement, and what outcome should I verify?';
+      case 'approval_required':
+        return [
+          packet.riskReason ?? 'This task needs confirmation before execution.',
+          'Reply with explicit confirmation if you want me to proceed.'
+        ].join(' ');
+      case 'scope_replan':
+        return 'The task scope changed enough that I should re-plan before continuing. Tell me what to keep or change.';
+      default:
+        return null;
+    }
+  }
+
+  private recordInternalGuidanceEvent(threadId: string, runId: string, guidanceReferences: string[]) {
+    if (guidanceReferences.length === 0) {
       return;
     }
 
-    const visibleReferences = usingReferences.slice(0, 10);
-    const remainingCount = usingReferences.length - visibleReferences.length;
+    const visibleReferences = guidanceReferences.slice(0, 10);
+    const remainingCount = guidanceReferences.length - visibleReferences.length;
     const referenceText = remainingCount > 0
       ? `${visibleReferences.join(', ')}, and ${remainingCount} more`
       : visibleReferences.join(', ');
-    const summary = `Using: ${referenceText}`;
+    const summary = `Context: ${referenceText}`;
     const event = this.host.db.addRunEvent(threadId, runId, 'info', {
+      transcriptVisible: false,
       activity: {
         kind: 'guidance',
         summary,
         text: summary,
-        providerEventType: 'vicode_guidance_using'
+        providerEventType: 'vicode_guidance_context'
       }
     });
     this.host.emit({ type: 'raw.event', event });
@@ -331,6 +378,11 @@ export class ProviderExecutionService {
     this.host.assertProviderRunPermission(input.providerId, input.executionPermission);
     this.host.assertProviderProjectContext(input.providerId, project.folderPath, project.trusted);
     const runId = randomUUID();
+    const approvedPlan = resolveProviderExecutionApprovedPlan(executionContext);
+    const titlePrompt = resolveProviderExecutionTitlePrompt({
+      shouldGenerateTitle,
+      prompt: input.prompt
+    });
     this.host.recordRuntimeTraceMark(thread.id, runId, 'submit_received', {
       providerId: input.providerId,
       threadId: thread.id,
@@ -341,45 +393,133 @@ export class ProviderExecutionService {
       includeRuntimeSkills: providerCapabilities(input.providerId).supportsRuntimeSkillResources,
       contextProfile: executionContext.contextProfile ?? 'main'
     });
-    const workspaceContext = this.host.assembleWorkspaceContext(input, thread, project.folderPath, project.trusted, {
-      includeRuntimeSkills: providerCapabilities(input.providerId).supportsRuntimeSkillResources,
-      contextProfile: executionContext.contextProfile ?? 'main',
-      includeMemory: executionContext.includeMemory ?? true,
-      includeGeneratedMemory: executionContext.includeGeneratedMemory ?? preferences.generatedMemoryUseEnabled
+    const {
+      sourceWorkspaceRoot,
+      runtimeWorkspaceRoot,
+      harnessWorktreeSession
+    } = await resolveProviderExecutionWorkspace({
+      composerInput: input,
+      project,
+      runId,
+      threadId: thread.id,
+      host: this.host
     });
-    const generatedMemoryBlocks = workspaceContext.generatedMemoryBlocks ?? [];
-    const generatedMemoryTraceDetail = this.host.createGeneratedMemoryTraceDetail({
-      folderPath: project.folderPath,
-      trusted: project.trusted,
-      generatedMemoryEnabled: executionContext.includeGeneratedMemory ?? preferences.generatedMemoryUseEnabled,
-      generatedMemoryGenerationEnabled: preferences.generatedMemoryGenerationEnabled,
-      memoryBlocks: workspaceContext.memoryBlocks,
+    const taskContractPrompt = buildProviderRunSourcePrompt(input.prompt, executionContext.approvedPlan);
+    const harnessTaskContract = deriveHarnessTaskContract({
+      prompt: taskContractPrompt,
+      mode: input.runMode ?? 'default',
+      workspaceRoot: runtimeWorkspaceRoot,
+      executionPermission: input.executionPermission,
+      isolationMode: input.isolationMode ?? 'direct_workspace',
+      trustedWorkspace: project.trusted,
+      runtimeCommandPolicy: project.runtimeCommandPolicy,
+      runtimeNetworkPolicy: project.runtimeNetworkPolicy
+    });
+    const verificationPlan = deriveWorkspaceVerificationPlan({
+      workspaceRoot: runtimeWorkspaceRoot,
+      executionPermission: input.executionPermission,
+      runtimeNetworkPolicy: project.runtimeNetworkPolicy
+    });
+    const rawResolvedTaskPacket = resolveConversationTaskPacket({
+      prompt: taskContractPrompt,
+      turns: thread.turns,
+      taskContract: harnessTaskContract
+    });
+    const resolvedTaskPacket = rawResolvedTaskPacket && executionContext.approvedPlan
+      ? {
+          ...rawResolvedTaskPacket,
+          executionPolicy: 'auto_execute' as const,
+          riskReason: undefined
+        }
+      : rawResolvedTaskPacket;
+    const {
+      workspaceContext,
       generatedMemoryBlocks,
-      repeatSteeringCount: this.host.countQueuedSteerFollowUps(thread)
+      generatedMemoryTraceDetail
+    } = assembleProviderExecutionContext({
+      composerInput: input,
+      thread,
+      runtimeWorkspaceRoot,
+      trusted: project.trusted,
+      executionContext,
+      preferences,
+      resolvedTaskPacket,
+      host: this.host
     });
-    this.host.recordRuntimeTraceMark(thread.id, runId, 'workspace_context_completed', {
-      ...workspaceContext.diagnostics,
-      ...generatedMemoryTraceDetail
-    });
+    this.host.recordRuntimeTraceMark(
+      thread.id,
+      runId,
+      'workspace_context_completed',
+      buildProviderExecutionWorkspaceContextTraceDetail({
+        workspaceContext,
+        generatedMemoryTraceDetail,
+        harnessTaskContract,
+        verificationPlan,
+        resolvedTaskPacket
+      })
+    );
     this.host.db.appendTurn(thread.id, 'user', input.prompt, {
       skillIds: workspaceContext.selectedSkillIds,
       imageAttachments: input.imageAttachments ?? [],
       textAttachments: input.textAttachments ?? [],
       executionPermission: input.executionPermission,
-      ...(userTurnMetadata ?? {})
+      ...(userTurnMetadata ?? {}),
+      harnessTaskContract,
+      ...(resolvedTaskPacket ? { resolvedTaskPacket } : {}),
+      verificationPlan
     });
+
+    const policyWaitMessage = resolvedTaskPacket && !executionContext.approvedPlan
+      ? this.buildTaskPolicyWaitMessage(resolvedTaskPacket)
+      : null;
+    if (policyWaitMessage) {
+      this.host.recordRuntimeTraceMark(thread.id, runId, 'task_execution_policy_waiting', {
+        executionPolicy: resolvedTaskPacket?.executionPolicy,
+        confidence: resolvedTaskPacket?.confidence,
+        objective: resolvedTaskPacket?.objective,
+        riskReason: resolvedTaskPacket?.riskReason ?? null,
+        clarificationQuestion: resolvedTaskPacket?.clarificationQuestion ?? null
+      });
+      this.host.db.updateAssistantTurn(runId, thread.id, policyWaitMessage, {
+        resolvedTaskPacket,
+        taskExecutionPolicy: resolvedTaskPacket.executionPolicy
+      });
+      this.host.db.addRunEvent(thread.id, runId, 'delta', { delta: policyWaitMessage });
+      this.host.db.updateThreadStatus(thread.id, 'completed');
+      this.host.emit({ type: 'run.replace', threadId: thread.id, runId, text: policyWaitMessage });
+      this.host.emit({ type: 'run.status', threadId: thread.id, runId, status: 'completed', message: policyWaitMessage });
+      return { thread: this.host.db.getThread(thread.id), runId };
+    }
+
     this.host.db.updateThreadStatus(thread.id, 'queued');
 
-    const account = this.host.db.getProviderAccount(input.providerId);
-    const auth = await adapter.getAuthState(account);
-    const apiKey = auth.authMode === 'api_key' && account?.encryptedApiKey ? this.host.decryptApiKey(account.encryptedApiKey) : null;
-    const modelId = await this.host.resolveExecutionModelId(input.providerId, input.modelId, input.imageAttachments ?? []);
+    const customProviderRoute =
+      input.providerId === 'openai_compatible'
+        ? decodeCustomProviderModelId(input.modelId)
+        : null;
+    const account = input.providerId === 'openai_compatible' ? null : this.host.db.getProviderAccount(input.providerId);
+    const auth = input.providerId === 'openai_compatible'
+      ? { authState: 'connected' as const, authMode: 'api_key' as const }
+      : await adapter.getAuthState(account);
+    const explicitOpenAiApiKeyAuth = input.providerId === 'openai' && account?.authMode === 'api_key' && Boolean(account.encryptedApiKey);
+    const authMode = explicitOpenAiApiKeyAuth ? 'api_key' : auth.authMode;
+    const providerApiKey = input.providerId === 'openai_compatible'
+      ? null
+      : authMode === 'api_key' && account?.encryptedApiKey
+        ? this.host.decryptApiKey(account.encryptedApiKey)
+        : null;
+    const resolvedModelId = await this.host.resolveExecutionModelId(input.providerId, input.modelId, input.imageAttachments ?? []);
+    const modelId = input.providerId === 'ollama' ? decodeOllamaModelId(resolvedModelId) : resolvedModelId;
+    const apiKey =
+      input.providerId === 'ollama'
+        ? resolveOllamaApiKeyForModel(resolvedModelId, providerApiKey)
+        : providerApiKey;
     const imageAttachments = input.imageAttachments ?? [];
     let executionImageAttachments = imageAttachments;
     let imageReviewText: string | null = null;
 
     try {
-      const imageRouting = await this.host.resolveImageAttachmentRouting(input.providerId, modelId, imageAttachments);
+      const imageRouting = await this.host.resolveImageAttachmentRouting(input.providerId, resolvedModelId, imageAttachments);
       executionImageAttachments = imageRouting.passImagesToExecution ? imageAttachments : [];
 
       if (imageRouting.needsInternalReview) {
@@ -402,19 +542,14 @@ export class ProviderExecutionService {
         ? error.message.trim()
         : 'Ollama image review failed before the coding model could start.';
       this.host.recordRuntimeTraceMark(thread.id, runId, 'image_review_failed', { message });
-      this.host.finalizeExecutionRunFailure({
+      this.host.finalizeExecutionRunFailure(buildProviderExecutionFailedFinalization({
         threadId: thread.id,
         runId,
         message,
-        traceStage: 'failed',
         tracePayload: { message },
-        eventType: 'failed',
-        threadStatus: 'failed',
-        runStatus: 'failed',
-        progressStatus: 'failed',
-        approvedPlan: Boolean(executionContext.approvedPlan),
-        titlePrompt: shouldGenerateTitle ? input.prompt : null
-      });
+        approvedPlan,
+        titlePrompt
+      }));
       return { thread: this.host.db.getThread(thread.id), runId };
     }
 
@@ -426,13 +561,16 @@ export class ProviderExecutionService {
       prompt: input.prompt,
       selectedSkillIds: workspaceContext.selectedSkillIds
     });
-    const usingReferences = formatUsingReferences(vicodeGuidance, workspaceContext as never);
+    const disclosureReferences = formatDisclosureReferences(vicodeGuidance, workspaceContext as never);
+    const threadCompaction = this.host.db.getLatestThreadCompaction(thread.id);
     const effectivePrompt = buildEffectivePrompt({ ...input, imageReviewText }, workspaceContext as never, {
-      personalization: this.host.db.getPersonalization(),
+      approvedPlan: executionContext.approvedPlan ?? null,
       approvedPlanMarkdown: executionContext.approvedPlan?.proposedPlanMarkdown ?? null,
       plannerAnswers: executionContext.plannerAnswers ?? null,
       thread,
+      threadCompaction,
       continuity,
+      resolvedTaskPacket,
       vicodeGuidance
     });
     this.host.recordRuntimeTraceMark(thread.id, runId, 'prompt_assembled', {
@@ -440,19 +578,21 @@ export class ProviderExecutionService {
       workspaceBlockCount: workspaceContext.blocks.length,
       memoryBlockCount: workspaceContext.memoryBlocks.length,
       generatedMemoryBlockCount: generatedMemoryBlocks.length,
+      projectKnowledgeBlockCount: workspaceContext.projectKnowledgeBlocks?.length ?? 0,
       skillBlockCount: workspaceContext.skillBlocks.length,
       runtimeSkillResourceCount: workspaceContext.runtimeSkillResources.length,
-      vicodeGuidanceUsingCount: usingReferences.length,
+      vicodeContextReferenceCount: disclosureReferences.contextReferences.length,
+      vicodeCapabilityUsingCount: disclosureReferences.usingReferences.length,
       vicodeGuidanceDocumentCount: vicodeGuidance?.documents.length ?? 0,
       ...generatedMemoryTraceDetail
     });
-    const workspaceSnapshot = captureWorkspaceSnapshot(project.folderPath);
+    const workspaceSnapshot = captureWorkspaceSnapshot(runtimeWorkspaceRoot);
     const initialRunProgress =
       executionContext.approvedPlan
         ? deriveRunProgressFromPlanner(executionContext.approvedPlan, 'executing_from_plan', runId, thread.id)
         : executionContext.delegation?.mode === 'background'
           ? this.host.createBackgroundDelegationRunProgress(runId, thread.id, input.providerId, executionContext.delegation)
-          : null;
+          : deriveRunProgressFromResolvedTaskPacket(resolvedTaskPacket, runId, thread.id);
     let sawFirstDelta = false;
     let sawFirstToolCall = false;
     let sawFirstToolResult = false;
@@ -475,7 +615,7 @@ export class ProviderExecutionService {
       const runMode = input.runMode ?? 'default';
       this.host.recordRuntimeTraceMark(thread.id, runId, 'provider_dispatch_started', {
         modelId,
-        authMode: auth.authMode,
+        authMode,
         runMode
       });
       const handleProviderInfo = (payload: ProviderInfoPayload) => {
@@ -490,6 +630,15 @@ export class ProviderExecutionService {
           this.host.advanceRunProgress(runId);
         }
         this.host.refreshDerivedRunProgress(thread.id, runId, input.providerId, modelId);
+        if (normalizedInfo.contextWindow) {
+          this.host.maybeCreateThreadContextCompactionFromContextUsage({
+            threadId: thread.id,
+            runId,
+            providerId: input.providerId,
+            modelId,
+            contextWindow: normalizedInfo.contextWindow
+          });
+        }
         if (normalizedInfo.activity?.kind === 'tool_call' && !sawFirstToolCall) {
           sawFirstToolCall = true;
           this.host.recordRuntimeTraceMark(thread.id, runId, 'first_tool_call', {
@@ -520,18 +669,6 @@ export class ProviderExecutionService {
           this.host.emit({ type: 'run.status', threadId: thread.id, runId, status: 'info', message: normalizedInfo.message });
         }
       };
-      const requestProviderToolApproval =
-        this.host.usesAppAuthoritativeToolApproval(input.providerId)
-          ? (request: { toolName: string; command: string; cwd: string | null; workspaceRoot: string }) =>
-              isRunCallbackOpen()
-                ? this.host.requestToolApproval({
-                    threadId: thread.id,
-                    runId,
-                    providerId: input.providerId,
-                    ...request
-                  }, project.runtimeCommandPolicy)
-                : Promise.resolve('cancelled' as const)
-          : undefined;
       const replyAssembly = createProviderReplyAssembly({
         providerId: input.providerId,
         readCurrentText: () => this.host.collectAssistantText(thread.id, runId),
@@ -553,186 +690,305 @@ export class ProviderExecutionService {
           this.host.emit({ type: 'run.replace', threadId: thread.id, runId, text });
         }
       });
-      const run = await adapter.startRun(
-        {
-          threadId: thread.id,
-          runId,
-          prompt: effectivePrompt,
-          sourcePrompt: input.prompt,
-          imageAttachments: executionImageAttachments,
-          textAttachments: input.textAttachments ?? [],
-          modelId,
-          reasoningEffort: input.reasoningEffort ?? null,
-          thinkingEnabled: providerCapabilities(input.providerId).supportsThinkingToggle ? input.thinkingEnabled ?? false : undefined,
-          executionConstraints: input.executionConstraints ?? null,
-          resumeSessionId: continuity.resumeSessionId,
-          folderPath: project.folderPath,
-          trusted: project.trusted,
-          apiKey,
-          runMode,
-          executionPermission: input.executionPermission,
-          runtimeCommandPolicy: project.runtimeCommandPolicy,
-          runtimeNetworkPolicy: project.runtimeNetworkPolicy,
-          ollamaTransportMode: this.host.resolveOllamaTransportMode(input.providerId),
-          runtimeSkillResources: workspaceContext.runtimeSkillResources as never
+      const providerRunContext: ProviderRunContext = {
+        threadId: thread.id,
+        runId,
+        prompt: effectivePrompt,
+        sourcePrompt: buildProviderRunSourcePrompt(input.prompt, executionContext.approvedPlan),
+        imageAttachments: executionImageAttachments,
+        textAttachments: input.textAttachments ?? [],
+        modelId,
+        customProviderId: customProviderRoute?.customProviderId ?? null,
+        reasoningEffort: input.reasoningEffort ?? null,
+        thinkingEnabled: providerCapabilities(input.providerId).supportsThinkingToggle ? input.thinkingEnabled ?? false : undefined,
+        executionConstraints: input.executionConstraints ?? null,
+        resumeSessionId: continuity.resumeSessionId,
+        folderPath: runtimeWorkspaceRoot,
+        sourceWorkspaceRoot,
+        runtimeWorkspaceRoot,
+        trusted: project.trusted,
+        apiKey,
+        runMode,
+        executionPermission: input.executionPermission,
+        runtimeCommandPolicy: project.runtimeCommandPolicy,
+        runtimeNetworkPolicy: project.runtimeNetworkPolicy,
+        harnessTaskContract,
+        resolvedTaskPacket,
+        verificationPlan,
+        harnessWorktreeSession,
+        ollamaTransportMode: this.host.resolveOllamaTransportMode(input.providerId),
+        runtimeSkillResources: workspaceContext.runtimeSkillResources as never
+      };
+      const normalizedRunResolution = this.host.providerModelExecutionService.resolveNormalizedRun({
+        providerId: input.providerId,
+        context: providerRunContext
+      });
+      const compatibilityDispatchPolicy = resolveProviderCompatibilityDispatchPolicy({
+        providerId: input.providerId,
+        context: providerRunContext,
+        retiredProvider: adapter instanceof RetiredProviderAdapter
+      });
+      const runtimeAuthority =
+        normalizedRunResolution?.runtimeAuthority ?? legacyProviderRuntimeAuthority(input.providerId);
+      const usesAppApprovalAuthority = usesAppToolApprovalAuthority(runtimeAuthority);
+      const requestProviderToolApproval =
+        usesAppApprovalAuthority
+          ? (request: { toolName: string; command: string; cwd: string | null; workspaceRoot: string }) =>
+              isRunCallbackOpen()
+                ? this.host.requestToolApproval(
+                    {
+                      threadId: thread.id,
+                      runId,
+                      providerId: input.providerId,
+                      ...request
+                    },
+                    project.runtimeCommandPolicy,
+                    {
+                      appAuthoritative: usesAppApprovalAuthority
+                    }
+                  )
+                : Promise.resolve('cancelled' as const)
+          : undefined;
+      const providerRunCallbacks: ProviderRunCallbacks = {
+        onStart: () => {
+          if (!isRunCallbackOpen()) {
+            return;
+          }
+          this.host.db.updateThreadStatus(thread.id, 'running');
+          this.host.db.addRunEvent(thread.id, runId, 'started', {
+            providerId: input.providerId,
+            modelId,
+            continuityStrategy: continuity.strategy,
+            resumeSessionId: continuity.resumeSessionId
+          });
+          this.host.recordRuntimeTraceMark(thread.id, runId, 'run_started', { providerId: input.providerId, modelId });
+          this.recordInternalGuidanceEvent(
+            thread.id,
+            runId,
+            vicodeGuidance?.documents.map((document) => document.title) ?? []
+          );
+          const projectKnowledgeActivity = this.host.createProjectKnowledgeActivity?.(
+            workspaceContext.projectKnowledgeBlocks ?? [],
+            workspaceContext.projectKnowledgeRouter ?? null
+          );
+          if (projectKnowledgeActivity) {
+            const event = this.host.db.addRunEvent(thread.id, runId, 'info', {
+              activity: projectKnowledgeActivity
+            });
+            this.host.emit({ type: 'raw.event', event });
+          }
+          const skillActivity = this.host.createSkillActivity?.({
+            selectedSkillIds: workspaceContext.selectedSkillIds,
+            autoSelectedSkillIds: workspaceContext.autoSelectedSkillIds ?? [],
+            mentionedSkillIds: workspaceContext.mentionedSkillIds ?? []
+          });
+          if (skillActivity) {
+            const event = this.host.db.addRunEvent(thread.id, runId, 'info', {
+              activity: skillActivity
+            });
+            this.host.emit({ type: 'raw.event', event });
+          }
+          if (initialRunProgress) {
+            this.host.publishProviderRunProgress(runId, initialRunProgress);
+          }
+          const memoryRecallActivity = this.host.createMemoryRecallActivity(
+            workspaceContext.memoryBlocks,
+            workspaceContext.generatedMemoryBlocks ?? []
+          );
+          if (memoryRecallActivity) {
+            const event = this.host.db.addRunEvent(thread.id, runId, 'info', {
+              activity: memoryRecallActivity
+            });
+            this.host.emit({ type: 'raw.event', event });
+          }
+          this.host.emit({ type: 'run.started', threadId: thread.id, runId });
         },
-        {
-          onStart: () => {
-            if (!isRunCallbackOpen()) {
-              return;
-            }
-            this.host.db.updateThreadStatus(thread.id, 'running');
-            this.host.db.addRunEvent(thread.id, runId, 'started', {
+        onDelta: (delta) => {
+          if (!isRunCallbackOpen()) {
+            return;
+          }
+          if (!sawFirstDelta) {
+            sawFirstDelta = true;
+          }
+          replyAssembly.handleDelta(delta);
+        },
+        onAssistantSnapshot: (snapshot) => {
+          if (!isRunCallbackOpen()) {
+            return;
+          }
+          if (!sawFirstDelta) {
+            sawFirstDelta = true;
+          }
+          replyAssembly.handleSnapshot(snapshot);
+        },
+        onInfo: handleProviderInfo,
+        requestToolApproval: requestProviderToolApproval,
+        invokeRuntimeTool:
+          runtimeWorkspaceRoot?.trim()
+            ? (call) =>
+                isRunCallbackOpen()
+                  ? this.host.executeProviderRuntimeToolCall({
+                      call: call as Record<string, unknown>,
+                      workspaceRoot: runtimeWorkspaceRoot!,
+                      trustedWorkspace: project.trusted,
+                      threadId: thread.id,
+                      runId,
+                      providerId: input.providerId,
+                      appAuthoritativeToolApproval: usesAppApprovalAuthority,
+                      executionPermission: input.executionPermission,
+                      executionConstraints: input.executionConstraints ?? null,
+                      runtimeCommandPolicy: project.runtimeCommandPolicy,
+                      runtimeNetworkPolicy: project.runtimeNetworkPolicy,
+                      onInfo: handleProviderInfo
+                    })
+                  : Promise.resolve(stoppedToolResult(call))
+            : undefined,
+        onComplete: (output) => {
+          if (!closeRunCallbacks()) {
+            return;
+          }
+          const resolvedOutput = resolveProviderCompletionText({
+            providerId: input.providerId,
+            output,
+            streamedDeltaOutput: this.host.collectRunDeltaText(thread.id, runId),
+            assistantTurnOutput: this.host.collectAssistantText(thread.id, runId)
+          });
+          const completionOutput = formatProviderCompletionOutput(input.providerId, resolvedOutput);
+          if (!completionOutput) {
+            this.host.finalizeExecutionRunFailure(buildProviderExecutionEmptyOutputFailure({
+              providerId: input.providerId,
+              threadId: thread.id,
+              runId,
+              approvedPlan,
+              titlePrompt
+            }));
+            return;
+          }
+          if (this.host.shouldFinalizeWithProviderCleanup(input.providerId, completionOutput)) {
+            void this.host.finalizeSuccessfulExecutionRunWithProviderCleanup(buildProviderExecutionCleanupSuccessFinalization({
               providerId: input.providerId,
               modelId,
-              continuityStrategy: continuity.strategy,
-              resumeSessionId: continuity.resumeSessionId
-            });
-            this.host.recordRuntimeTraceMark(thread.id, runId, 'run_started', { providerId: input.providerId, modelId });
-            this.recordVisibleUsingEvent(thread.id, runId, usingReferences);
-            if (initialRunProgress) {
-              this.host.publishProviderRunProgress(runId, initialRunProgress);
-            }
-            const memoryRecallActivity = this.host.createMemoryRecallActivity(
-              workspaceContext.memoryBlocks,
-              workspaceContext.generatedMemoryBlocks ?? []
-            );
-            if (memoryRecallActivity) {
-              const event = this.host.db.addRunEvent(thread.id, runId, 'info', {
-                activity: memoryRecallActivity
-              });
-              this.host.emit({ type: 'raw.event', event });
-            }
-            this.host.emit({ type: 'run.started', threadId: thread.id, runId });
-          },
-          onDelta: (delta) => {
-            if (!isRunCallbackOpen()) {
-              return;
-            }
-            if (!sawFirstDelta) {
-              sawFirstDelta = true;
-            }
-            replyAssembly.handleDelta(delta);
-          },
-          onAssistantSnapshot: (snapshot) => {
-            if (!isRunCallbackOpen()) {
-              return;
-            }
-            if (!sawFirstDelta) {
-              sawFirstDelta = true;
-            }
-            replyAssembly.handleSnapshot(snapshot);
-          },
-          onInfo: handleProviderInfo,
-          requestToolApproval: requestProviderToolApproval,
-          invokeRuntimeTool:
-            project.folderPath?.trim()
-              ? (call) =>
-                  isRunCallbackOpen()
-                    ? this.host.executeProviderRuntimeToolCall({
-                        call: call as Record<string, unknown>,
-                        workspaceRoot: project.folderPath!,
-                        trustedWorkspace: project.trusted,
-                        threadId: thread.id,
-                        runId,
-                        providerId: input.providerId,
-                        executionPermission: input.executionPermission,
-                        executionConstraints: input.executionConstraints ?? null,
-                        runtimeCommandPolicy: project.runtimeCommandPolicy,
-                        runtimeNetworkPolicy: project.runtimeNetworkPolicy,
-                        onInfo: handleProviderInfo
-                      })
-                    : Promise.resolve(stoppedToolResult(call))
-              : undefined,
-          onComplete: (output) => {
-            if (!closeRunCallbacks()) {
-              return;
-            }
-            const resolvedOutput = resolveProviderCompletionText({
-              providerId: input.providerId,
-              output,
-              streamedDeltaOutput: this.host.collectRunDeltaText(thread.id, runId),
-              assistantTurnOutput: this.host.collectAssistantText(thread.id, runId)
-            });
-            const completionOutput = formatProviderCompletionOutput(input.providerId, resolvedOutput);
-            if (!completionOutput) {
-              this.host.finalizeExecutionRunFailure({
-                threadId: thread.id,
-                runId,
-                message: `${providerDisplayName(input.providerId)} completed without producing assistant output.`,
-                traceStage: 'failed',
-                tracePayload: { reason: 'empty_output' },
-                eventType: 'failed',
-                threadStatus: 'failed',
-                runStatus: 'failed',
-                progressStatus: 'failed',
-                approvedPlan: Boolean(executionContext.approvedPlan),
-                titlePrompt: shouldGenerateTitle ? input.prompt : null
-              });
-              return;
-            }
-            if (this.host.shouldFinalizeWithProviderCleanup(input.providerId, completionOutput)) {
-              void this.host.finalizeSuccessfulExecutionRunWithProviderCleanup({
-                providerId: input.providerId,
-                modelId,
-                threadId: thread.id,
-                runId,
-                output: completionOutput,
-                workspaceSnapshot,
-                projectFolderPath: project.folderPath!,
-                approvedPlan: Boolean(executionContext.approvedPlan),
-                titlePrompt: shouldGenerateTitle ? input.prompt : null
-              });
-              return;
-            }
-            this.host.finalizeSuccessfulExecutionRun({
               threadId: thread.id,
               runId,
               output: completionOutput,
               workspaceSnapshot,
-              projectFolderPath: project.folderPath!,
-              approvedPlan: Boolean(executionContext.approvedPlan),
-              titlePrompt: shouldGenerateTitle ? input.prompt : null
-            });
-          },
-          onError: (message) => {
-            if (!closeRunCallbacks()) {
-              return;
-            }
-            this.host.finalizeExecutionRunFailure({
-              threadId: thread.id,
-              runId,
-              message,
-              traceStage: 'failed',
-              tracePayload: { message },
-              eventType: 'failed',
-              threadStatus: 'failed',
-              runStatus: 'failed',
-              progressStatus: 'failed',
-              approvedPlan: Boolean(executionContext.approvedPlan),
-              titlePrompt: shouldGenerateTitle ? input.prompt : null
-            });
-          },
-          onAbort: (message) => {
-            if (!closeRunCallbacks()) {
-              return;
-            }
-            this.host.finalizeExecutionRunFailure({
-              threadId: thread.id,
-              runId,
-              message,
-              traceStage: 'aborted',
-              tracePayload: message ? { message } : null,
-              eventType: 'aborted',
-              threadStatus: 'aborted',
-              runStatus: 'aborted',
-              progressStatus: 'blocked',
-              approvedPlan: Boolean(executionContext.approvedPlan),
-              titlePrompt: null
-            });
+              projectFolderPath: runtimeWorkspaceRoot!,
+              approvedPlan,
+              titlePrompt,
+              harnessWorktreeSession
+            }));
+            return;
           }
+          this.host.finalizeSuccessfulExecutionRun(buildProviderExecutionSuccessFinalization({
+            threadId: thread.id,
+            runId,
+            output: completionOutput,
+            workspaceSnapshot,
+            projectFolderPath: runtimeWorkspaceRoot!,
+            approvedPlan,
+            titlePrompt,
+            harnessWorktreeSession
+          }));
+        },
+        onError: (message) => {
+          if (!closeRunCallbacks()) {
+            return;
+          }
+          this.host.finalizeExecutionRunFailure(buildProviderExecutionFailedFinalization({
+            threadId: thread.id,
+            runId,
+            message,
+            tracePayload: { message },
+            approvedPlan,
+            titlePrompt
+          }));
+        },
+        onAbort: (message) => {
+          if (!closeRunCallbacks()) {
+            return;
+          }
+          this.host.finalizeExecutionRunFailure(buildProviderExecutionAbortedFinalization({
+            threadId: thread.id,
+            runId,
+            message,
+            approvedPlan
+          }));
         }
-      );
+      };
+      const normalizedRun = await this.host.providerModelExecutionService.tryStartNormalizedRun({
+        providerId: input.providerId,
+        context: providerRunContext,
+        callbacks: providerRunCallbacks,
+        resolvedRun: normalizedRunResolution,
+        finalizeAssistantOutput: (runContext, output) =>
+          this.host.finalizeProviderModelAssistantOutput(runContext, output),
+        recordTrace: (stage, payload) =>
+          this.host.recordRuntimeTraceMark(thread.id, runId, stage, payload ?? null)
+      });
+      if (!normalizedRun && compatibilityDispatchPolicy.reason === 'retired_provider') {
+        const message = providerRetiredMessage(input.providerId);
+        this.host.recordRuntimeTraceMark(thread.id, runId, 'provider_model_compatibility_dispatch_blocked', {
+          providerId: input.providerId,
+          runMode,
+          reason: compatibilityDispatchPolicy.reason
+        });
+        this.host.finalizeExecutionRunFailure(buildProviderExecutionFailedFinalization({
+          threadId: thread.id,
+          runId,
+          message,
+          tracePayload: { message, reason: compatibilityDispatchPolicy.reason },
+          approvedPlan,
+          titlePrompt: null
+        }));
+        return { thread: this.host.db.getThread(thread.id), runId };
+      }
+      if (!normalizedRun && compatibilityDispatchPolicy.requireNormalizedTransport) {
+        const message = `${providerDisplayName(input.providerId)} requires an app-owned normalized transport for trusted workspace runs, but no normalized transport was available.`;
+        this.host.recordRuntimeTraceMark(thread.id, runId, 'provider_model_normalized_transport_missing', {
+          providerId: input.providerId,
+          runMode,
+          reason: compatibilityDispatchPolicy.reason,
+          requestedTransportMode: providerRunContext.ollamaTransportMode ?? null
+        });
+        this.host.finalizeExecutionRunFailure(buildProviderExecutionFailedFinalization({
+          threadId: thread.id,
+          runId,
+          message,
+          tracePayload: { message, reason: compatibilityDispatchPolicy.reason },
+          approvedPlan,
+          titlePrompt: null
+        }));
+        return { thread: this.host.db.getThread(thread.id), runId };
+      }
+      if (!normalizedRun && !compatibilityDispatchPolicy.allowCompatibilityDispatch) {
+        const message = `${providerDisplayName(input.providerId)} cannot use the legacy provider adapter path for this run.`;
+        this.host.recordRuntimeTraceMark(thread.id, runId, 'provider_model_compatibility_dispatch_blocked', {
+          providerId: input.providerId,
+          runMode,
+          reason: compatibilityDispatchPolicy.reason
+        });
+        this.host.finalizeExecutionRunFailure(buildProviderExecutionFailedFinalization({
+          threadId: thread.id,
+          runId,
+          message,
+          tracePayload: { message, reason: compatibilityDispatchPolicy.reason },
+          approvedPlan,
+          titlePrompt: null
+        }));
+        return { thread: this.host.db.getThread(thread.id), runId };
+      }
+      const run = normalizedRun ?? await (async () => {
+        this.host.recordRuntimeTraceMark(
+          thread.id,
+          runId,
+          'provider_model_compatibility_dispatch_started',
+          buildProviderCompatibilityDispatchTraceDetail({
+            providerId: input.providerId,
+            runMode
+          })
+        );
+        return adapter.startRun(providerRunContext, providerRunCallbacks);
+      })();
       this.host.onRunRegistered(runId, run, thread.id);
       const detail = this.host.db.getThread(thread.id);
       this.host.emit({ type: 'thread.detail', thread: detail });
@@ -741,19 +997,14 @@ export class ProviderExecutionService {
     } catch (error) {
       const message = error instanceof Error && error.message.trim() ? error.message.trim() : `Failed to start ${providerDisplayName(input.providerId)}.`;
       this.host.recordRuntimeTraceMark(thread.id, runId, 'provider_dispatch_failed', { message });
-      this.host.finalizeExecutionRunFailure({
+      this.host.finalizeExecutionRunFailure(buildProviderExecutionFailedFinalization({
         threadId: thread.id,
         runId,
         message,
-        traceStage: 'failed',
         tracePayload: { message },
-        eventType: 'failed',
-        threadStatus: 'failed',
-        runStatus: 'failed',
-        progressStatus: 'failed',
-        approvedPlan: Boolean(executionContext.approvedPlan),
-        titlePrompt: shouldGenerateTitle ? input.prompt : null
-      });
+        approvedPlan,
+        titlePrompt
+      }));
       return { thread: this.host.db.getThread(thread.id), runId };
     }
   }

@@ -21,7 +21,6 @@
     "src/shared/**/*.ts"
   ],
   "exclude": [
-    "src/renderer/store/app-store.ts",
     "src/shared/**/*.test.ts"
   ]
 }

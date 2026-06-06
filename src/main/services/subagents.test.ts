@@ -13,8 +13,8 @@ function createSubagent(overrides: Partial<SubagentSummary> = {}): SubagentSumma
     name: 'Chandrasekhar',
     title: 'Implement task',
     prompt: 'Do the work',
-    providerId: 'openai',
-    modelId: 'gpt-5',
+    providerId: 'ollama',
+    modelId: 'qwen3-coder',
     executionPermission: 'default',
     delegationProfile: 'research',
     status: 'queued',
@@ -30,7 +30,7 @@ function createSubagent(overrides: Partial<SubagentSummary> = {}): SubagentSumma
 
 describe('SubagentOrchestratorService', () => {
   it('spawns delegated background runs and persists child thread/run ownership', async () => {
-    const created = createSubagent({ modelId: 'gpt-5.4-mini' });
+    const created = createSubagent({ modelId: 'qwen3-coder-lite' });
     const running = createSubagent({
       childThreadId: 'thread-child',
       childRunId: 'run-child',
@@ -41,8 +41,8 @@ describe('SubagentOrchestratorService', () => {
       getThread: vi.fn(() => ({
         id: 'thread-parent',
         projectId: 'project-1',
-        providerId: 'openai',
-        modelId: 'gpt-5',
+        providerId: 'ollama',
+        modelId: 'qwen3-coder',
         executionPermission: 'default'
       })),
       countActiveSubagentsByProvider: vi.fn(() => 0),
@@ -53,10 +53,10 @@ describe('SubagentOrchestratorService', () => {
     };
     const providers = {
       getProvider: vi.fn(async () => ({
-        id: 'openai',
+        id: 'ollama',
         models: [
-          { id: 'gpt-5.4', recommendation: 'recommended' },
-          { id: 'gpt-5.4-mini', recommendation: 'fast' }
+          { id: 'qwen3-coder', recommendation: 'recommended' },
+          { id: 'qwen3-coder-lite', recommendation: 'fast' }
         ]
       })),
       startDelegatedBackgroundRun: vi.fn(async () => ({
@@ -78,8 +78,8 @@ describe('SubagentOrchestratorService', () => {
         projectId: 'project-1',
         title: 'Implement task',
         prompt: 'Do the work',
-        providerId: 'openai',
-        modelId: 'gpt-5.4-mini',
+        providerId: 'ollama',
+        modelId: 'qwen3-coder-lite',
         delegationProfile: 'research',
         reasoningEffort: 'high'
       })

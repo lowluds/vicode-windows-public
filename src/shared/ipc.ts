@@ -7,15 +7,7 @@ export type {
   StorageCompactionResult,
   StorageDiagnostics,
   StorageMaintenanceResult,
-  ThreadCollaborationSummary,
-  WorkspaceBootstrapAnswers,
-  WorkspaceBootstrapDraftBundle,
-  WorkspaceBootstrapFileKind,
-  WorkspaceBootstrapQuestion,
-  WorkspaceBootstrapStatus,
-  WorkspaceContractFileStatus,
-  WorkspaceRepoInspection,
-  WorkspaceTemplateDraft
+  ThreadCollaborationSummary
 } from './ipc-bootstrap-types';
 import type { AppDomainApi } from './ipc-app-domain';
 import type { ThreadDomainApi } from './ipc-thread-domain';

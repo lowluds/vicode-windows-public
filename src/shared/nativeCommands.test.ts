@@ -14,19 +14,10 @@ describe('nativeCommands', () => {
     });
   });
 
-  it('parses autonomous-builds aliases to the same command', () => {
-    expect(parseLeadingNativeComposerCommand('/autonomous-builds ship the docs')).toEqual({
-      command: expect.objectContaining({ id: 'autonomous-builds', token: 'autonomous-builds' }),
-      body: 'ship the docs'
-    });
-    expect(parseLeadingNativeComposerCommand('/build-plan ship the docs')).toEqual({
-      command: expect.objectContaining({ id: 'autonomous-builds', token: 'autonomous-builds' }),
-      body: 'ship the docs'
-    });
-    expect(parseLeadingNativeComposerCommand('/auto-build ship the docs')).toEqual({
-      command: expect.objectContaining({ id: 'autonomous-builds', token: 'autonomous-builds' }),
-      body: 'ship the docs'
-    });
+  it('does not expose parked autonomous-build commands in the composer', () => {
+    expect(parseLeadingNativeComposerCommand('/autonomous-builds ship the docs')).toBeNull();
+    expect(parseLeadingNativeComposerCommand('/build-plan ship the docs')).toBeNull();
+    expect(parseLeadingNativeComposerCommand('/auto-build ship the docs')).toBeNull();
   });
 
   it('keeps review prompt shaping intact', () => {
@@ -59,7 +50,7 @@ describe('nativeCommands', () => {
     expect(searchNativeComposerCommands('plan').map((command) => command.id)[0]).toBe('plan');
   });
 
-  it('surfaces slash-command aliases in search results', () => {
-    expect(searchNativeComposerCommands('build-plan').map((command) => command.id)[0]).toBe('autonomous-builds');
+  it('does not surface parked build-control aliases in search results', () => {
+    expect(searchNativeComposerCommands('build-plan')).toEqual([]);
   });
 });

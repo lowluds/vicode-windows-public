@@ -1,7 +1,7 @@
-import type { AssistantTextNormalizationOptions } from '../../providers/text-normalization';
+import type { AssistantTextNormalizationOptions } from '../../shared/assistant-text-normalization';
+import { cleanFinalAssistantDisplayText } from '../../shared/assistant-text/final-display-cleanup';
 import type { ProviderId } from '../../shared/domain';
 import { createProviderRecord } from '../../shared/providers';
-import { formatOllamaFinalAnswerFallback } from './ollama-final-answer-formatter';
 
 export interface ProviderTextPolicy {
   visibleTextNormalizationOptions: AssistantTextNormalizationOptions;
@@ -17,13 +17,17 @@ const PROVIDER_TEXT_POLICIES: Record<ProviderId, ProviderTextPolicy> = createPro
         stripXmlFunctionCallMarkup: true,
         stripReasoningLabels: true
       },
-      formatCompletionOutput: formatOllamaFinalAnswerFallback
+      formatCompletionOutput: (value) =>
+        cleanFinalAssistantDisplayText(value, {
+          stripXmlFunctionCallMarkup: true,
+          stripReasoningLabels: true
+        })
     };
   }
 
   return {
     visibleTextNormalizationOptions: DEFAULT_VISIBLE_TEXT_NORMALIZATION_OPTIONS,
-    formatCompletionOutput: null
+    formatCompletionOutput: cleanFinalAssistantDisplayText
   };
 });
 

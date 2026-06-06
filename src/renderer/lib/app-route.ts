@@ -2,7 +2,6 @@ export type AppRoute =
   | "thread"
   | "collab"
   | "skills"
-  | "build-control"
   | "automations"
   | "settings"
   | "ui-dev";

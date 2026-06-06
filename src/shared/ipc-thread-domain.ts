@@ -9,6 +9,21 @@ import type {
   PlannerSetModeInput,
   PlannerSubmitInput,
   ProviderId,
+  RunChangeArtifact,
+  StagedWorkspaceHunkApplyInput,
+  StagedWorkspaceHunkRejectInput,
+  StagedWorkspaceHunkRevertInput,
+  StagedWorkspaceHunkReviewResult,
+  StagedWorkspaceReviewInput,
+  StagedWorkspaceReviewResult,
+  WorktreeCleanupInput,
+  WorktreeCleanupResult,
+  WorktreeHunkApplyInput,
+  WorktreeHunkRejectInput,
+  WorktreeHunkRevertInput,
+  WorktreeHunkReviewResult,
+  WorktreeReviewInput,
+  WorktreeReviewResult,
   TextAttachment,
   ThreadDetail,
   ThreadFollowUp,
@@ -70,6 +85,20 @@ export interface ThreadDomainApi {
   runs: {
     approveToolApproval(approvalId: string): Promise<void>;
     rejectToolApproval(approvalId: string): Promise<void>;
+    previewStagedWorkspaceChange(input: StagedWorkspaceReviewInput): Promise<RunChangeArtifact>;
+    applyStagedWorkspaceChange(input: StagedWorkspaceReviewInput): Promise<StagedWorkspaceReviewResult>;
+    rejectStagedWorkspaceChange(input: StagedWorkspaceReviewInput): Promise<StagedWorkspaceReviewResult>;
+    revertStagedWorkspaceChange(input: StagedWorkspaceReviewInput): Promise<StagedWorkspaceReviewResult>;
+    applyStagedWorkspaceHunks(input: StagedWorkspaceHunkApplyInput): Promise<StagedWorkspaceHunkReviewResult>;
+    rejectStagedWorkspaceHunks(input: StagedWorkspaceHunkRejectInput): Promise<StagedWorkspaceHunkReviewResult>;
+    revertStagedWorkspaceHunks(input: StagedWorkspaceHunkRevertInput): Promise<StagedWorkspaceHunkReviewResult>;
+    applyWorktreeReview(input: WorktreeReviewInput): Promise<WorktreeReviewResult>;
+    rejectWorktreeReview(input: WorktreeReviewInput): Promise<WorktreeReviewResult>;
+    revertWorktreeReview(input: WorktreeReviewInput): Promise<WorktreeReviewResult>;
+    applyWorktreeHunks(input: WorktreeHunkApplyInput): Promise<WorktreeHunkReviewResult>;
+    rejectWorktreeHunks(input: WorktreeHunkRejectInput): Promise<WorktreeHunkReviewResult>;
+    revertWorktreeHunks(input: WorktreeHunkRevertInput): Promise<WorktreeHunkReviewResult>;
+    cleanupWorktreeReview(input: WorktreeCleanupInput): Promise<WorktreeCleanupResult>;
   };
   subagents: {
     list(threadId: string): Promise<SubagentSummary[]>;

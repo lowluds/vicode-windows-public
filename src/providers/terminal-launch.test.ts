@@ -21,14 +21,14 @@ describe('launchTerminalExecutable', () => {
     vi.restoreAllMocks();
   });
 
-  it('forces cmd shim auth flows into a visible cmd window on Windows', async () => {
+  it('forces cmd shim flows into a visible cmd window on Windows', async () => {
     const child = new FakeDetachedProcess();
     spawnMock.mockImplementation(() => {
       queueMicrotask(() => child.emit('spawn'));
       return child;
     });
 
-    await launchTerminalExecutable('Gemini CLI Login', 'C:\\Users\\test-user\\AppData\\Roaming\\npm\\gemini.cmd');
+    await launchTerminalExecutable('Tool Login', 'C:\\Users\\test-user\\AppData\\Roaming\\npm\\example-tool.cmd');
 
     expect(spawnMock).toHaveBeenCalledTimes(1);
     const [executable, args, options] = spawnMock.mock.calls[0] ?? [];
@@ -39,8 +39,8 @@ describe('launchTerminalExecutable', () => {
     expect(launcherCommand).toContain('Start-Process -FilePath');
     expect(launcherCommand).toContain('cmd.exe');
     expect(launcherCommand).toContain('-WindowStyle Normal');
-    expect(launcherCommand).toContain('Gemini CLI Login');
-    expect(launcherCommand).toContain('gemini.cmd');
+    expect(launcherCommand).toContain('Tool Login');
+    expect(launcherCommand).toContain('example-tool.cmd');
     expect(launcherCommand).toContain('/k');
 
     expect(options).toEqual(

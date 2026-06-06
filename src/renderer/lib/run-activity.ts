@@ -1,4 +1,56 @@
-import type { RunActivityInfo, RunChangeArtifact, RunEvent, RunProgressState, ThreadDetail, ThreadSource, ThreadTurn } from '../../shared/domain';
+import type {
+  RunActivityInfo,
+  RunChangeArtifact,
+  RunEvent,
+  RunProgressState,
+  StagedWorkspaceHunkReviewDecision,
+  StagedWorkspaceReviewDecision,
+  StagedWorkspaceReviewInput,
+  StagedWorkspaceReviewOperationKind,
+  StagedWorkspaceReviewStatus,
+  ThreadDetail,
+  ThreadTurn,
+  WorktreeCleanupDecision,
+  WorktreeCleanupStatus,
+  WorktreeHunkReviewDecision,
+  WorktreeReviewDecision,
+  WorktreeReviewInput,
+  WorktreeReviewStatus
+} from '../../shared/domain';
+import {
+  appendThinkingLine,
+  deriveActiveHeading
+} from './run-activity/reasoning';
+import {
+  appendIfMissing,
+  appendLines,
+  canMergeTerminalCommand,
+  compactTerminalOutput,
+  deriveTerminalCommandStatus,
+  normalizeTerminalCommandLabel,
+  sanitizeTerminalOutputLine,
+  sanitizeTerminalOutputLines,
+  terminalControlSequencePattern,
+  terminalTimestampPattern
+} from './run-activity/terminal-commands';
+import type {
+  RunActivityTimelineItem,
+  RunActivityViewModel,
+  RunReviewEvidenceViewModel,
+  RunStagedWorkspaceReviewItem,
+  RunTranscriptActivityItem,
+  RunTranscriptAssistantItem,
+  RunTranscriptChangeArtifactItem,
+  RunTranscriptItem,
+  RunTranscriptResolutionSummaryItem,
+  RunWorktreeReviewItem,
+  TerminalCommandViewModel,
+  ThinkingLineViewModel
+} from './run-activity/types';
+import {
+  formatElapsed,
+  hasWorkedForEvidence
+} from './run-activity/worked-summary';
 import {
   compactAssistantDetailAfterResolutionSummary,
   compactAssistantFollowUps,
@@ -10,135 +62,58 @@ import {
   compactRedundantToolCalls,
   deriveFriendlyToolCallDisplay,
   deriveToolResultDisplay
-} from './run-activity-tool-display';
+} from './run-activity/tool-calls';
+import { formatVisibleRunErrorMessage } from './error-format';
 
-export interface TerminalCommandViewModel {
-  id: string;
-  label: string;
-  command: string | null;
-  cwd: string | null;
-  isolationMode: string | null;
-  status: 'running' | 'completed' | 'stopped';
-  startedAt: string | null;
-  finishedAt: string | null;
-  durationLabel: string | null;
-  outputLines: string[];
+export type {
+  RunActivityTimelineItem,
+  RunActivityTimelineTerminalItem,
+  RunActivityTimelineThinkingItem,
+  RunActivityViewModel,
+  RunReviewEvidenceViewModel,
+  RunStagedWorkspaceReviewItem,
+  RunTranscriptActivityItem,
+  RunTranscriptAssistantItem,
+  RunTranscriptChangeArtifactItem,
+  RunTranscriptItem,
+  RunTranscriptResolutionSummaryItem,
+  RunTranscriptStagedWorkspaceChangeItem,
+  RunTranscriptWorkedForItem,
+  RunTranscriptWorktreeWorkspaceChangeItem,
+  RunWorktreeReviewItem,
+  StagedWorkspaceProposalStatus,
+  TerminalCommandViewModel,
+  ThinkingLineViewModel,
+  WorktreeCleanupUiStatus,
+  WorktreeProposalStatus
+} from './run-activity/types';
+
+export function stagedWorkspaceReviewInput(change: RunStagedWorkspaceReviewItem): StagedWorkspaceReviewInput {
+  return {
+    threadId: change.threadId,
+    runId: change.runId,
+    stagedEventId: change.stagedEventId,
+    stagedEventIndex: change.stagedEventIndex
+  };
 }
 
-export interface ThinkingLineViewModel {
-  id: string;
-  label: string;
-  text: string;
-  url: string | null;
-  path: string | null;
-  kind: 'thinking' | 'guidance' | 'skill' | 'memory_recall' | 'memory_checkpoint' | 'web_search' | 'delegation' | 'tool_call' | 'tool_result' | 'file_edit' | 'file_write' | 'mkdir' | 'file_open' | 'file_read' | 'file_search';
+export function worktreeReviewInput(change: RunWorktreeReviewItem): WorktreeReviewInput {
+  return {
+    threadId: change.threadId,
+    runId: change.runId
+  };
 }
 
-export interface RunActivityTimelineThinkingItem {
-  id: string;
-  kind: 'thinking';
-  line: ThinkingLineViewModel;
+export function stagedWorkspaceReviewKey(input: Pick<StagedWorkspaceReviewInput, 'threadId' | 'runId' | 'stagedEventId' | 'stagedEventIndex'>) {
+  const selector = input.stagedEventId && input.stagedEventId.trim().length > 0
+    ? `id:${input.stagedEventId}`
+    : `index:${input.stagedEventIndex ?? 'unknown'}`;
+  return `${input.threadId}:${input.runId}:${selector}`;
 }
 
-export interface RunActivityTimelineTerminalItem {
-  id: string;
-  kind: 'terminal_command';
-  command: TerminalCommandViewModel;
+export function worktreeReviewKey(input: Pick<WorktreeReviewInput, 'threadId' | 'runId'>) {
+  return `${input.threadId}:${input.runId}`;
 }
-
-export type RunActivityTimelineItem = RunActivityTimelineThinkingItem | RunActivityTimelineTerminalItem;
-
-export interface RunTranscriptAssistantItem {
-  id: string;
-  kind: 'assistant_text';
-  text: string;
-  sources?: ThreadSource[];
-}
-
-export interface RunTranscriptActivityItem {
-  id: string;
-  kind: 'activity_line';
-  activityKind: 'thinking' | 'guidance' | 'skill' | 'memory_recall' | 'memory_checkpoint' | 'web_search' | 'delegation' | 'tool_call' | 'tool_result' | 'file_edit' | 'file_write' | 'mkdir' | 'terminal_command' | 'file_open' | 'file_read' | 'file_search' | 'inspection_group' | 'write_group';
-  toolName: string | null;
-  label: string;
-  text: string;
-  url: string | null;
-  path: string | null;
-  command: string | null;
-  cwd: string | null;
-  isolationMode: string | null;
-  status: 'running' | 'completed' | 'stopped' | null;
-  startedAt: string | null;
-  finishedAt: string | null;
-  durationLabel: string | null;
-  outputLines: string[];
-}
-
-export interface RunTranscriptChangeArtifactItem {
-  id: string;
-  kind: 'change_artifact';
-  label: string;
-  artifact: RunChangeArtifact;
-}
-
-export interface RunTranscriptWorkedForItem {
-  id: string;
-  kind: 'worked_for';
-  label: string;
-}
-
-export interface RunTranscriptResolutionSummaryItem {
-  id: string;
-  kind: 'resolution_summary';
-  outcome: string;
-  filesChanged: string[];
-  toolsUsed: string[];
-  verificationCommands: string[];
-  remainingRisk: string | null;
-}
-
-export type RunTranscriptItem =
-  | RunTranscriptAssistantItem
-  | RunTranscriptActivityItem
-  | RunTranscriptChangeArtifactItem
-  | RunTranscriptWorkedForItem
-  | RunTranscriptResolutionSummaryItem;
-
-export interface RunActivityViewModel {
-  runId: string;
-  state: 'running' | 'completed' | 'failed' | 'aborted';
-  startedAt: string | null;
-  finishedAt: string | null;
-  outcomeMessage: string | null;
-  thinkingLines: ThinkingLineViewModel[];
-  terminalCommands: TerminalCommandViewModel[];
-  timelineItems: RunActivityTimelineItem[];
-  activeHeading: 'Thinking' | 'Working' | null;
-  workedForLabel: string | null;
-  changeArtifact: RunChangeArtifact | null;
-}
-
-export interface RunReviewEvidenceViewModel {
-  runId: string;
-  state: RunActivityViewModel['state'];
-  reviewAvailable: boolean;
-  changeArtifact: RunChangeArtifact | null;
-  thoughtEvidence: ThinkingLineViewModel[];
-  fileEvidence: ThinkingLineViewModel[];
-  terminalCommands: TerminalCommandViewModel[];
-  workedForLabel: string | null;
-  activity: RunActivityViewModel;
-}
-
-const WORKED_FOR_ACTIVITY_KINDS = new Set<RunTranscriptActivityItem['activityKind']>([
-  'tool_call',
-  'tool_result',
-  'file_edit',
-  'file_write',
-  'mkdir',
-  'terminal_command',
-  'write_group'
-]);
 
 function readDelta(value: unknown) {
   return typeof value === 'string' ? value : null;
@@ -156,27 +131,443 @@ function cleanMultiline(value: string) {
     .join('\n');
 }
 
-const nodeInternalStackLinePattern = /^\s*at .*(?:\((?:node:)?internal[/:].+\)|\((?:node:)?diagnostics_channel:.+\)|(?:node:)?internal[/:].+|(?:node:)?diagnostics_channel:.+)$/u;
-
-function sanitizeTerminalOutputLine(value: string) {
-  return value
-    .split(/\r?\n/u)
-    .map((line) => line.replace(/\u001b\[[0-9;]*m/gu, '').trimEnd())
-    .filter((line) => line.trim().length > 0 && !nodeInternalStackLinePattern.test(line.trim()))
-    .join('\n')
-    .trimEnd();
-}
-
-function sanitizeTerminalOutputLines(values: string[] | null) {
-  if (!values) {
-    return null;
-  }
-
-  return values.map(sanitizeTerminalOutputLine).filter(Boolean);
-}
+const MCP_AUTH_FAILURE_MESSAGE = 'MCP tool unavailable: authentication required.';
 
 function readString(value: unknown) {
   return typeof value === 'string' ? clean(value) : null;
+}
+
+function readRawString(value: unknown) {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function recordValue(value: unknown) {
+  return isRecord(value) ? value : null;
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
+}
+
+function readNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+const stagedWorkspaceToolNames = new Set(['mkdir', 'write_file', 'apply_patch']);
+const stagedWorkspaceOperationKinds = new Set(['mkdir', 'write_file', 'apply_patch', 'delete']);
+const stagedWorkspaceDecisionStatuses = new Set(['applied', 'rejected', 'reverted', 'failed']);
+const worktreeReviewStatuses = new Set(['applied', 'rejected', 'reverted', 'failed']);
+const worktreeCleanupStatuses = new Set(['cleaned', 'failed', 'refused']);
+
+function readStagedWorkspaceToolName(value: unknown): RunStagedWorkspaceReviewItem['sourceToolName'] | null {
+  return typeof value === 'string' && stagedWorkspaceToolNames.has(value)
+    ? value as RunStagedWorkspaceReviewItem['sourceToolName']
+    : null;
+}
+
+function readStagedWorkspaceOperationKind(value: unknown): StagedWorkspaceReviewOperationKind | null {
+  return typeof value === 'string' && stagedWorkspaceOperationKinds.has(value)
+    ? value as StagedWorkspaceReviewOperationKind
+    : null;
+}
+
+function readStagedWorkspaceDecisionStatus(value: unknown): StagedWorkspaceReviewStatus | null {
+  return typeof value === 'string' && stagedWorkspaceDecisionStatuses.has(value)
+    ? value as StagedWorkspaceReviewStatus
+    : null;
+}
+
+function readWorktreeReviewStatus(value: unknown): WorktreeReviewStatus | null {
+  return typeof value === 'string' && worktreeReviewStatuses.has(value)
+    ? value as WorktreeReviewStatus
+    : null;
+}
+
+function readWorktreeCleanupStatus(value: unknown): WorktreeCleanupStatus | null {
+  return typeof value === 'string' && worktreeCleanupStatuses.has(value)
+    ? value as WorktreeCleanupStatus
+    : null;
+}
+
+function readRunChangeArtifact(value: unknown): RunChangeArtifact | null {
+  const record = recordValue(value);
+  if (!record || !recordValue(record.summary) || !Array.isArray(record.files)) {
+    return null;
+  }
+
+  return value as RunChangeArtifact;
+}
+
+function readOperationKindsFromOperations(value: unknown) {
+  const kinds: StagedWorkspaceReviewOperationKind[] = [];
+  if (!Array.isArray(value)) {
+    return kinds;
+  }
+
+  for (const operation of value) {
+    const record = recordValue(operation);
+    const kind = record ? readStagedWorkspaceOperationKind(record.operation) : null;
+    if (kind && !kinds.includes(kind)) {
+      kinds.push(kind);
+    }
+  }
+
+  return kinds;
+}
+
+function parseStagedWorkspaceReviewDecision(value: unknown): StagedWorkspaceReviewDecision | null {
+  const record = recordValue(value);
+  if (!record) {
+    return null;
+  }
+
+  const action = record.action === 'applied' || record.action === 'rejected' || record.action === 'reverted' ? record.action : null;
+  const status = readStagedWorkspaceDecisionStatus(record.status);
+  const threadId = readRawString(record.threadId);
+  const runId = readRawString(record.runId);
+  const stagedEventId = readRawString(record.stagedEventId);
+  const stagedEventIndex = readNumber(record.stagedEventIndex);
+  const sourceToolName = readStagedWorkspaceToolName(record.sourceToolName);
+  const isolationMode = record.isolationMode === 'patch_buffer' ? record.isolationMode : null;
+  if (!action || !status || !threadId || !runId || !stagedEventId || stagedEventIndex === null || !sourceToolName || !isolationMode) {
+    return null;
+  }
+
+  return {
+    action,
+    status,
+    threadId,
+    runId,
+    stagedEventId,
+    stagedEventIndex,
+    sourceToolName,
+    isolationMode,
+    changedPaths: readStringArray(record.changedPaths),
+    operationKinds: readStringArray(record.operationKinds)
+      .map(readStagedWorkspaceOperationKind)
+      .filter((kind): kind is StagedWorkspaceReviewOperationKind => Boolean(kind)),
+    errorReason: readRawString(record.errorReason),
+    createdAt: readRawString(record.createdAt) ?? ''
+  };
+}
+
+function parseStagedWorkspaceHunkReviewDecision(value: unknown): StagedWorkspaceHunkReviewDecision | null {
+  const record = recordValue(value);
+  if (!record) {
+    return null;
+  }
+
+  const action = record.action === 'applied' || record.action === 'rejected' || record.action === 'reverted'
+    ? record.action
+    : null;
+  const status = readStagedWorkspaceDecisionStatus(record.status);
+  const threadId = readRawString(record.threadId);
+  const runId = readRawString(record.runId);
+  const source = record.source === 'staged_workspace_preview' ? record.source : null;
+  const isolationMode = record.isolationMode === 'patch_buffer' ? record.isolationMode : null;
+  const stagedEventId = readRawString(record.stagedEventId);
+  const stagedEventIndex = readNumber(record.stagedEventIndex);
+  if (!action || !status || !threadId || !runId || !source || !isolationMode || !stagedEventId || stagedEventIndex === null) {
+    return null;
+  }
+
+  return {
+    action,
+    status,
+    threadId,
+    runId,
+    source,
+    isolationMode,
+    stagedEventId,
+    stagedEventIndex,
+    changedPaths: readStringArray(record.changedPaths),
+    hunkIds: readStringArray(record.hunkIds),
+    acceptedHunkIds: readStringArray(record.acceptedHunkIds),
+    rejectedHunkIds: readStringArray(record.rejectedHunkIds),
+    filesChanged: readNumber(record.filesChanged) ?? 0,
+    insertions: readNumber(record.insertions) ?? 0,
+    deletions: readNumber(record.deletions) ?? 0,
+    errorReason: readRawString(record.errorReason),
+    createdAt: readRawString(record.createdAt) ?? ''
+  };
+}
+
+function parseWorktreeReviewDecision(value: unknown): WorktreeReviewDecision | null {
+  const record = recordValue(value);
+  if (!record) {
+    return null;
+  }
+
+  const action = record.action === 'applied' || record.action === 'rejected' || record.action === 'reverted'
+    ? record.action
+    : null;
+  const status = readWorktreeReviewStatus(record.status);
+  const threadId = readRawString(record.threadId);
+  const runId = readRawString(record.runId);
+  const isolationMode = record.isolationMode === 'git_worktree' ? record.isolationMode : null;
+  const branchName = readRawString(record.branchName);
+  const baseSha = readRawString(record.baseSha);
+  const sourceWorkspaceRelativePath = readRawString(record.sourceWorkspaceRelativePath);
+  if (!action || !status || !threadId || !runId || !isolationMode || !branchName || !baseSha || !sourceWorkspaceRelativePath) {
+    return null;
+  }
+
+  return {
+    action,
+    status,
+    threadId,
+    runId,
+    isolationMode,
+    branchName,
+    baseSha,
+    sourceWorkspaceRelativePath,
+    changedPaths: readStringArray(record.changedPaths),
+    filesChanged: readNumber(record.filesChanged) ?? 0,
+    insertions: readNumber(record.insertions) ?? 0,
+    deletions: readNumber(record.deletions) ?? 0,
+    errorReason: readRawString(record.errorReason),
+    createdAt: readRawString(record.createdAt) ?? ''
+  };
+}
+
+function parseWorktreeHunkReviewDecision(value: unknown): WorktreeHunkReviewDecision | null {
+  const record = recordValue(value);
+  if (!record) {
+    return null;
+  }
+
+  const action = record.action === 'applied' || record.action === 'rejected' || record.action === 'reverted'
+    ? record.action
+    : null;
+  const status = readStagedWorkspaceDecisionStatus(record.status);
+  const threadId = readRawString(record.threadId);
+  const runId = readRawString(record.runId);
+  const source = record.source === 'worktree_diff' ? record.source : null;
+  const isolationMode = record.isolationMode === 'git_worktree' ? record.isolationMode : null;
+  const branchName = readRawString(record.branchName);
+  const baseSha = readRawString(record.baseSha);
+  const sourceWorkspaceRelativePath = readRawString(record.sourceWorkspaceRelativePath);
+  if (!action || !status || !threadId || !runId || !source || !isolationMode || !branchName || !baseSha || !sourceWorkspaceRelativePath) {
+    return null;
+  }
+
+  return {
+    action,
+    status,
+    threadId,
+    runId,
+    source,
+    isolationMode,
+    branchName,
+    baseSha,
+    sourceWorkspaceRelativePath,
+    changedPaths: readStringArray(record.changedPaths),
+    hunkIds: readStringArray(record.hunkIds),
+    acceptedHunkIds: readStringArray(record.acceptedHunkIds),
+    rejectedHunkIds: readStringArray(record.rejectedHunkIds),
+    filesChanged: readNumber(record.filesChanged) ?? 0,
+    insertions: readNumber(record.insertions) ?? 0,
+    deletions: readNumber(record.deletions) ?? 0,
+    errorReason: readRawString(record.errorReason),
+    createdAt: readRawString(record.createdAt) ?? ''
+  };
+}
+
+function parseWorktreeCleanupDecision(value: unknown): WorktreeCleanupDecision | null {
+  const record = recordValue(value);
+  if (!record) {
+    return null;
+  }
+
+  const action = readWorktreeCleanupStatus(record.action);
+  const status = readWorktreeCleanupStatus(record.status);
+  const reviewStatus = record.reviewStatus === 'pending'
+    ? record.reviewStatus
+    : readWorktreeReviewStatus(record.reviewStatus);
+  const threadId = readRawString(record.threadId);
+  const runId = readRawString(record.runId);
+  const isolationMode = record.isolationMode === 'git_worktree' ? record.isolationMode : null;
+  const branchName = readRawString(record.branchName);
+  const baseSha = readRawString(record.baseSha);
+  const cleanupPolicy = readRawString(record.cleanupPolicy);
+  if (!action || !status || !reviewStatus || !threadId || !runId || !isolationMode || !branchName || !baseSha || !cleanupPolicy) {
+    return null;
+  }
+
+  return {
+    action,
+    status,
+    threadId,
+    runId,
+    isolationMode,
+    branchName,
+    baseSha,
+    cleanupPolicy,
+    reviewStatus,
+    errorReason: readRawString(record.errorReason),
+    createdAt: readRawString(record.createdAt) ?? ''
+  };
+}
+
+export function deriveStagedWorkspaceReviewItems(events: RunEvent[], runId: string) {
+  const decisionsByStagedEventId = new Map<string, StagedWorkspaceReviewDecision>();
+  const hunkDecisionsByStagedEventId = new Map<string, StagedWorkspaceHunkReviewDecision>();
+  for (const event of events) {
+    if (event.runId !== runId || event.eventType !== 'info') {
+      continue;
+    }
+
+    const decision = parseStagedWorkspaceReviewDecision(event.payload.stagedWorkspaceReviewDecision);
+    if (decision) {
+      decisionsByStagedEventId.set(decision.stagedEventId, decision);
+    }
+
+    const hunkDecision = parseStagedWorkspaceHunkReviewDecision(event.payload.stagedWorkspaceHunkReviewDecision);
+    if (hunkDecision) {
+      hunkDecisionsByStagedEventId.set(hunkDecision.stagedEventId, hunkDecision);
+    }
+  }
+
+  const items: RunStagedWorkspaceReviewItem[] = [];
+  let stagedEventIndex = 0;
+  for (const event of events) {
+    if (event.runId !== runId || event.eventType !== 'info') {
+      continue;
+    }
+
+    const changeSet = recordValue(event.payload.stagedWorkspaceChangeSet);
+    if (!changeSet) {
+      continue;
+    }
+
+    const sourceToolName = readStagedWorkspaceToolName(changeSet.sourceToolName);
+    const isolationMode = changeSet.isolationMode === 'patch_buffer' ? changeSet.isolationMode : null;
+    if (!sourceToolName || !isolationMode || changeSet.status !== 'proposed') {
+      continue;
+    }
+
+    const summary = recordValue(changeSet.summary);
+    const decision = decisionsByStagedEventId.get(event.id) ?? null;
+    const hunkDecision = hunkDecisionsByStagedEventId.get(event.id) ?? null;
+    const operationKinds = decision?.operationKinds.length
+      ? decision.operationKinds
+      : readOperationKindsFromOperations(changeSet.operations);
+
+    items.push({
+      id: `staged-workspace:${event.id}`,
+      threadId: event.threadId,
+      runId: event.runId,
+      stagedEventId: event.id,
+      stagedEventIndex,
+      createdAt: event.createdAt,
+      sourceToolName,
+      isolationMode,
+      status: decision?.status ?? 'pending',
+      requestedPath: readRawString(changeSet.requestedPath),
+      changedPaths: readStringArray(changeSet.changedPaths),
+      operationCount: Array.isArray(changeSet.operations) ? changeSet.operations.length : 0,
+      operationKinds,
+      filesChanged: readNumber(summary?.filesChanged) ?? 0,
+      insertions: readNumber(summary?.insertions) ?? 0,
+      deletions: readNumber(summary?.deletions) ?? 0,
+      decision,
+      hunkDecision
+    });
+    stagedEventIndex += 1;
+  }
+
+  return items;
+}
+
+export function deriveWorktreeReviewItems(events: RunEvent[], runId: string) {
+  let latestArtifactEvent: RunEvent | null = null;
+  let latestArtifact: RunChangeArtifact | null = null;
+  let latestEvidence: Record<string, unknown> | null = null;
+  let latestDecision: WorktreeReviewDecision | null = null;
+  let latestHunkDecision: WorktreeHunkReviewDecision | null = null;
+  let latestCleanupDecision: WorktreeCleanupDecision | null = null;
+
+  for (const event of events) {
+    if (event.runId !== runId || event.eventType !== 'info') {
+      continue;
+    }
+
+    const activity = readActivityInfo(event.payload.activity);
+    const artifact = readRunChangeArtifact(activity?.changeArtifact);
+    if (artifact?.source === 'worktree_diff') {
+      latestArtifactEvent = event;
+      latestArtifact = artifact;
+    }
+
+    const evidence = recordValue(event.payload.worktreeChangeEvidence);
+    if (evidence?.isolationMode === 'git_worktree') {
+      latestEvidence = evidence;
+    }
+
+    const decision = parseWorktreeReviewDecision(event.payload.worktreeReviewDecision);
+    if (decision) {
+      latestDecision = decision;
+    }
+
+    const hunkDecision = parseWorktreeHunkReviewDecision(event.payload.worktreeHunkReviewDecision);
+    if (hunkDecision) {
+      latestHunkDecision = hunkDecision;
+    }
+
+    const cleanupDecision = parseWorktreeCleanupDecision(event.payload.worktreeCleanupDecision);
+    if (cleanupDecision) {
+      latestCleanupDecision = cleanupDecision;
+    }
+  }
+
+  if (!latestArtifactEvent || !latestArtifact) {
+    return [];
+  }
+
+  const changedPaths = latestDecision?.changedPaths.length
+    ? latestDecision.changedPaths
+    : readStringArray(latestEvidence?.changedPaths).length
+      ? readStringArray(latestEvidence?.changedPaths)
+      : latestArtifact.files.map((file) => file.path);
+  const branchName = latestDecision?.branchName ?? readRawString(latestEvidence?.branchName);
+  const baseSha = latestDecision?.baseSha ?? readRawString(latestEvidence?.baseSha);
+  const sourceWorkspaceRelativePath =
+    latestDecision?.sourceWorkspaceRelativePath ?? readRawString(latestEvidence?.sourceWorkspaceRelativePath);
+  const filesChanged = latestDecision?.filesChanged ?? readNumber(latestEvidence?.filesChanged) ?? latestArtifact.summary.filesChanged;
+  const insertions = latestDecision?.insertions ?? readNumber(latestEvidence?.insertions) ?? latestArtifact.summary.insertions;
+  const deletions = latestDecision?.deletions ?? readNumber(latestEvidence?.deletions) ?? latestArtifact.summary.deletions;
+
+  return [
+    {
+      id: `worktree-review:${latestArtifactEvent.id}`,
+      threadId: latestArtifactEvent.threadId,
+      runId: latestArtifactEvent.runId,
+      artifactEventId: latestArtifactEvent.id,
+      createdAt: latestArtifactEvent.createdAt,
+      isolationMode: 'git_worktree' as const,
+      status: latestDecision?.status ?? 'pending',
+      branchName,
+      baseSha,
+      sourceWorkspaceRelativePath,
+      changedPaths,
+      filesChanged,
+      insertions,
+      deletions,
+      errorReason: latestDecision?.errorReason ?? null,
+      decision: latestDecision,
+      cleanupStatus: latestCleanupDecision?.status ?? 'pending',
+      cleanupErrorReason: latestCleanupDecision?.errorReason ?? null,
+      cleanupDecision: latestCleanupDecision,
+      hunkDecision: latestHunkDecision,
+      artifact: latestArtifact
+    }
+  ];
 }
 
 const noisyOperationalMessagePatterns = [
@@ -189,11 +580,40 @@ const noisyOperationalMessagePatterns = [
   /^\/>$/u,
   /\bcodex_core::/u,
   /\bmcp::service::client\b/u,
+  /\brmcp::\s*transport::\s*worker\b/u,
   /\bcodex_features\b/u,
   /\bReceived unknown status update\b/u,
   /\bstartup remote plugin sync failed\b/u,
   /\bWARN\b.*\b(?:codex_|mcp::)\b/u
 ];
+
+function sanitizeOperationalTranscriptText(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value
+    .replace(terminalControlSequencePattern, '')
+    .replace(terminalTimestampPattern, ' ')
+    .split(/\r?\n/u)
+    .map((line) => line.replace(/[ \t\f\v]+/gu, ' ').trim())
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (
+    /\b(?:mcp|rmcp)::/iu.test(normalized)
+    && /\bAuthRequired\b|\binvalid_token\b|\bMissing or invalid access token\b|\bwww_authenticate_header\b/iu.test(normalized)
+  ) {
+    return MCP_AUTH_FAILURE_MESSAGE;
+  }
+
+  return normalized;
+}
 
 function shouldSuppressOperationalMessage(value: string | null) {
   if (!value) {
@@ -201,8 +621,8 @@ function shouldSuppressOperationalMessage(value: string | null) {
   }
 
   const normalized = value
-    .replace(/\u001b\[[0-9;]*m/gu, '')
-    .replace(/\[[0-9]{4}-[0-9]{2}-[0-9]{2}T[^\]]+\]/gu, '')
+    .replace(terminalControlSequencePattern, '')
+    .replace(terminalTimestampPattern, ' ')
     .replace(/\s+/gu, ' ')
     .trim();
 
@@ -214,7 +634,8 @@ function shouldSuppressOperationalMessage(value: string | null) {
 }
 
 function sanitizeOperationalMessage(value: string | null) {
-  return shouldSuppressOperationalMessage(value) ? null : value;
+  const sanitized = sanitizeOperationalTranscriptText(value);
+  return shouldSuppressOperationalMessage(sanitized) ? null : sanitized;
 }
 
 function normalizeWorkspaceCwd(value: string | null) {
@@ -248,7 +669,7 @@ function readActivityInfo(value: unknown): RunActivityInfo | null {
   }
 
   const candidate = value as Partial<RunActivityInfo>;
-  if ((candidate.kind === 'thinking' || candidate.kind === 'guidance' || candidate.kind === 'skill' || candidate.kind === 'memory_recall' || candidate.kind === 'memory_checkpoint' || candidate.kind === 'web_search' || candidate.kind === 'delegation' || candidate.kind === 'tool_call' || candidate.kind === 'tool_result' || candidate.kind === 'file_edit' || candidate.kind === 'file_write' || candidate.kind === 'mkdir' || candidate.kind === 'terminal_command' || candidate.kind === 'terminal_output' || candidate.kind === 'file_open' || candidate.kind === 'file_read' || candidate.kind === 'file_search' || candidate.kind === 'change_summary') && typeof candidate.summary === 'string') {
+  if ((candidate.kind === 'thinking' || candidate.kind === 'guidance' || candidate.kind === 'skill' || candidate.kind === 'memory_recall' || candidate.kind === 'memory_checkpoint' || candidate.kind === 'context_compaction' || candidate.kind === 'web_search' || candidate.kind === 'delegation' || candidate.kind === 'tool_call' || candidate.kind === 'tool_result' || candidate.kind === 'file_edit' || candidate.kind === 'file_write' || candidate.kind === 'mkdir' || candidate.kind === 'terminal_command' || candidate.kind === 'terminal_output' || candidate.kind === 'file_open' || candidate.kind === 'file_read' || candidate.kind === 'file_search' || candidate.kind === 'change_summary') && typeof candidate.summary === 'string') {
     return {
       kind: candidate.kind,
       summary: clean(candidate.summary),
@@ -278,75 +699,6 @@ function readActivityInfo(value: unknown): RunActivityInfo | null {
   }
 
   return null;
-}
-
-function appendUnique(target: string[], value: string | null) {
-  if (!value) {
-    return;
-  }
-  if (target[target.length - 1] !== value) {
-    target.push(value);
-  }
-}
-
-function appendIfMissing(target: string[], value: string | null) {
-  if (!value) {
-    return;
-  }
-  if (!target.includes(value)) {
-    target.push(value);
-  }
-}
-
-function appendLines(target: string[], values: string[] | null | undefined) {
-  if (!values || values.length === 0) {
-    return;
-  }
-  for (const value of values) {
-    appendUnique(target, value);
-  }
-}
-
-function stripLeadingTerminalCommandEcho(command: string | null, values: string[]) {
-  if (!command || values.length === 0) {
-    return values;
-  }
-
-  const escapedCommand = command.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-  const commandEchoPattern = new RegExp(`^(?:PS\\s+[^>]+>\\s*|\\$\\s*)?${escapedCommand}$`, 'u');
-  const nextValues = [...values];
-
-  while (nextValues.length > 0 && commandEchoPattern.test(nextValues[0]?.trim() ?? '')) {
-    nextValues.shift();
-  }
-
-  return nextValues;
-}
-
-function compactTerminalOutput(command: string | null, values: string[]) {
-  return stripLeadingTerminalCommandEcho(command, values);
-}
-
-function appendThinkingLine(target: ThinkingLineViewModel[], entry: Omit<ThinkingLineViewModel, 'id'>, seed: string) {
-  const label = clean(entry.label);
-  const text = cleanMultiline(entry.text);
-  if (!label) {
-    return;
-  }
-
-  const previous = target[target.length - 1];
-  if (previous && previous.label === label && previous.text === text && previous.url === (entry.url ?? null) && previous.path === (entry.path ?? null) && previous.kind === entry.kind) {
-    return;
-  }
-
-  target.push({
-    id: `${seed}:${target.length}`,
-    label,
-    text,
-    url: entry.url ?? null,
-    path: entry.path ?? null,
-    kind: entry.kind
-  });
 }
 
 function shouldSuppressTranscriptToolResult(activity: RunActivityInfo) {
@@ -388,6 +740,15 @@ function shouldSuppressTranscriptToolResult(activity: RunActivityInfo) {
 
 function hasVisibleTranscriptText(value: string | null | undefined) {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isControlPlaneHiddenRunEvent(event: RunEvent) {
+  if (event.payload.transcriptVisible === false) {
+    return true;
+  }
+
+  return event.payload.eventKind === 'internal_runtime_reminder'
+    || event.payload.eventKind === 'provider_diagnostic';
 }
 
 function isInternalRuntimeReminderText(value: string | null | undefined) {
@@ -477,6 +838,7 @@ function compactTranscriptActivityItems(items: RunTranscriptItem[]) {
       id: `${pendingInspectionItems[0].id}:inspection-group`,
       kind: 'activity_line',
       activityKind: 'inspection_group',
+      providerEventType: null,
       toolName: null,
       label: formatInspectionGroupLabel(pendingInspectionItems),
       text,
@@ -506,6 +868,7 @@ function compactTranscriptActivityItems(items: RunTranscriptItem[]) {
       id: `${pendingWriteItems[0].id}:write-group`,
       kind: 'activity_line',
       activityKind: 'write_group',
+      providerEventType: null,
       toolName: null,
       label: formatWriteGroupLabel(pendingWriteItems),
       text: formatWriteGroupText(pendingWriteItems),
@@ -562,65 +925,6 @@ function compactOperationalMetaRows(items: RunTranscriptItem[]) {
   });
 }
 
-function deriveTerminalCommandStatus(activity: RunActivityInfo) {
-  return activity.phase === 'completed' ? 'completed' : activity.phase === 'stopped' ? 'stopped' : 'running';
-}
-
-function normalizeTerminalCommandLabel(
-  summary: string,
-  command: string | null,
-  status: TerminalCommandViewModel['status']
-) {
-  const cleanedSummary = clean(summary)
-    .replace(/\s+[·-]\s+Workspace root$/u, '')
-    .trim();
-
-  if (
-    cleanedSummary.startsWith('Started background terminal with ')
-    || cleanedSummary.startsWith('Background terminal running')
-    || cleanedSummary.startsWith('Background terminal finished')
-    || cleanedSummary.startsWith('Background terminal stopped')
-  ) {
-    return cleanedSummary.replace(/^Started background terminal with /u, 'Background terminal running with ');
-  }
-
-  if (command) {
-    return status === 'completed'
-      ? `Ran ${command}`
-      : status === 'stopped'
-        ? `Stopped ${command}`
-        : `Running ${command}`;
-  }
-
-  return cleanedSummary;
-}
-
-function canMergeTerminalCommand(currentCommand: Pick<TerminalCommandViewModel, 'status' | 'command'> | null, activity: RunActivityInfo) {
-  return currentCommand && currentCommand.status === 'running' && (activity.command === null || currentCommand.command === null || currentCommand.command === activity.command);
-}
-
-function formatElapsed(startedAt: string | null, finishedAt: string | null) {
-  if (!startedAt || !finishedAt) {
-    return null;
-  }
-
-  const durationMs = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
-  if (!Number.isFinite(durationMs) || durationMs <= 0) {
-    return null;
-  }
-
-  const totalSeconds = Math.max(1, Math.round(durationMs / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes === 0) {
-    return `${totalSeconds}s`;
-  }
-  if (seconds === 0) {
-    return `${minutes}m`;
-  }
-  return `${minutes}m ${seconds}s`;
-}
-
 const transcriptWordCharClass = `\\p{L}\\p{N}\\p{M}`;
 const transcriptContinuationStartPattern = new RegExp(`^[\\p{Ll}\\p{Lm}\\p{Lo}\\p{Nd}\\p{Nl}\\p{Mn}\\p{Mc}]`, 'u');
 const transcriptTrailingFragmentPattern = new RegExp(`(^|[^${transcriptWordCharClass}])([${transcriptWordCharClass}][${transcriptWordCharClass}'’_-]{0,23})$`, 'u');
@@ -660,53 +964,6 @@ function takeTrailingAssistantFragment(items: RunTranscriptItem[], incomingDelta
   return '';
 }
 
-function deriveActiveHeading(thinkingLines: ThinkingLineViewModel[], terminalCommands: TerminalCommandViewModel[], state: RunActivityViewModel['state']) {
-  if (state !== 'running') {
-    return null;
-  }
-
-  if (terminalCommands.length > 0) {
-    return 'Working' as const;
-  }
-
-  if (thinkingLines.some((line) => line.kind === 'guidance' || line.kind === 'file_edit' || line.kind === 'file_write' || line.kind === 'mkdir' || line.kind === 'tool_call' || line.kind === 'tool_result' || line.kind === 'web_search' || line.kind === 'file_open' || line.kind === 'file_read' || line.kind === 'file_search')) {
-    return 'Working' as const;
-  }
-
-  return 'Thinking' as const;
-}
-
-function hasWorkedForEvidence(params: {
-  thinkingLines?: ThinkingLineViewModel[];
-  terminalCommands?: TerminalCommandViewModel[];
-  timelineItems?: RunTranscriptItem[];
-  changeArtifact?: RunChangeArtifact | null;
-}) {
-  if (params.changeArtifact) {
-    return true;
-  }
-
-  if ((params.terminalCommands?.length ?? 0) > 0) {
-    return true;
-  }
-
-  if (params.thinkingLines?.some((line) =>
-    line.kind === 'tool_call' ||
-    line.kind === 'tool_result' ||
-    line.kind === 'file_edit' ||
-    line.kind === 'file_write' ||
-    line.kind === 'mkdir'
-  )) {
-    return true;
-  }
-
-  if (params.timelineItems?.some((item) => item.kind === 'change_artifact' || (item.kind === 'activity_line' && WORKED_FOR_ACTIVITY_KINDS.has(item.activityKind)))) {
-    return true;
-  }
-
-  return false;
-}
-
 function deriveRunActivity(runId: string, events: RunEvent[]): RunActivityViewModel {
   let startedAt: string | null = null;
   let finishedAt: string | null = null;
@@ -734,18 +991,23 @@ function deriveRunActivity(runId: string, events: RunEvent[]): RunActivityViewMo
     if (event.eventType === 'failed') {
       finishedAt = event.createdAt;
       state = 'failed';
-      outcomeMessage = readString(event.payload.message);
+      outcomeMessage = formatVisibleRunErrorMessage(readString(event.payload.message));
       continue;
     }
 
     if (event.eventType === 'aborted') {
       finishedAt = event.createdAt;
       state = 'aborted';
-      outcomeMessage = readString(event.payload.message);
+      const message = readString(event.payload.message);
+      outcomeMessage = message ? formatVisibleRunErrorMessage(message) : null;
       continue;
     }
 
     if (event.eventType !== 'info') {
+      continue;
+    }
+
+    if (isControlPlaneHiddenRunEvent(event)) {
       continue;
     }
 
@@ -758,7 +1020,7 @@ function deriveRunActivity(runId: string, events: RunEvent[]): RunActivityViewMo
       continue;
     }
 
-    if (activity?.kind === 'thinking' || activity?.kind === 'guidance' || activity?.kind === 'skill' || activity?.kind === 'memory_checkpoint' || activity?.kind === 'web_search' || activity?.kind === 'delegation' || activity?.kind === 'tool_call' || activity?.kind === 'tool_result' || activity?.kind === 'file_edit' || activity?.kind === 'file_write' || activity?.kind === 'mkdir' || activity?.kind === 'file_open' || activity?.kind === 'file_read' || activity?.kind === 'file_search') {
+    if (activity?.kind === 'thinking' || activity?.kind === 'guidance' || activity?.kind === 'skill' || activity?.kind === 'memory_checkpoint' || activity?.kind === 'context_compaction' || activity?.kind === 'web_search' || activity?.kind === 'delegation' || activity?.kind === 'tool_call' || activity?.kind === 'tool_result' || activity?.kind === 'file_edit' || activity?.kind === 'file_write' || activity?.kind === 'mkdir' || activity?.kind === 'file_open' || activity?.kind === 'file_read' || activity?.kind === 'file_search') {
       const toolCallDisplay = activity.kind === 'tool_call'
         ? deriveFriendlyToolCallDisplay(activity)
         : null;
@@ -893,12 +1155,29 @@ export function deriveRunActivityMap(thread: ThreadDetail | null) {
 function deriveRunTranscriptItems(events: RunEvent[], assistantTurn: ThreadTurn | null = null): RunTranscriptItem[] {
   let items: RunTranscriptItem[] = [];
   const changeArtifacts: RunTranscriptChangeArtifactItem[] = [];
+  const stagedWorkspaceChanges = events[0]?.runId
+    ? deriveStagedWorkspaceReviewItems(events, events[0].runId).map((change): RunTranscriptStagedWorkspaceChangeItem => ({
+        id: change.id,
+        kind: 'staged_workspace_change',
+        label: 'Proposed workspace changes',
+        change
+      }))
+    : [];
+  const worktreeWorkspaceChanges = events[0]?.runId
+    ? deriveWorktreeReviewItems(events, events[0].runId).map((change): RunTranscriptWorktreeWorkspaceChangeItem => ({
+        id: change.id,
+        kind: 'worktree_workspace_change',
+        label: 'Worktree workspace changes',
+        change
+      }))
+    : [];
   let assistantBuffer = '';
   let assistantSeed = '';
   let currentTerminalItem: RunTranscriptActivityItem | null = null;
   let startedAt: string | null = null;
   let finishedAt: string | null = null;
   let runState: 'completed' | 'failed' | 'aborted' | null = null;
+  let failureMessage: string | null = null;
 
   const flushAssistant = () => {
     const text = assistantBuffer;
@@ -922,6 +1201,9 @@ function deriveRunTranscriptItems(events: RunEvent[], assistantTurn: ThreadTurn 
     } else if (event.eventType === 'completed' || event.eventType === 'failed' || event.eventType === 'aborted') {
       finishedAt = event.createdAt;
       runState = event.eventType;
+      if (event.eventType === 'failed') {
+        failureMessage = formatVisibleRunErrorMessage(readString(event.payload.message));
+      }
     }
 
     if (event.eventType === 'delta') {
@@ -947,11 +1229,19 @@ function deriveRunTranscriptItems(events: RunEvent[], assistantTurn: ThreadTurn 
       continue;
     }
 
+    if (isControlPlaneHiddenRunEvent(event)) {
+      continue;
+    }
+
     flushAssistant();
 
     const message = sanitizeOperationalMessage(readString(event.payload.message));
     const activity = readActivityInfo(event.payload.activity);
     if (activity?.kind === 'change_summary' && activity.changeArtifact) {
+      if (activity.changeArtifact.source === 'worktree_diff') {
+        continue;
+      }
+
       changeArtifacts.push({
         id: `changes:${event.id}`,
         kind: 'change_artifact',
@@ -963,7 +1253,7 @@ function deriveRunTranscriptItems(events: RunEvent[], assistantTurn: ThreadTurn 
     if (activity?.kind === 'memory_recall') {
       continue;
     }
-    const activityKind = activity?.kind === 'thinking' || activity?.kind === 'guidance' || activity?.kind === 'skill' || activity?.kind === 'memory_checkpoint' || activity?.kind === 'web_search' || activity?.kind === 'delegation' || activity?.kind === 'tool_call' || activity?.kind === 'file_edit' || activity?.kind === 'file_write' || activity?.kind === 'mkdir' || activity?.kind === 'file_open' || activity?.kind === 'file_read' || activity?.kind === 'file_search' ? activity.kind : null;
+    const activityKind = activity?.kind === 'thinking' || activity?.kind === 'guidance' || activity?.kind === 'skill' || activity?.kind === 'memory_checkpoint' || activity?.kind === 'context_compaction' || activity?.kind === 'web_search' || activity?.kind === 'delegation' || activity?.kind === 'tool_call' || activity?.kind === 'file_edit' || activity?.kind === 'file_write' || activity?.kind === 'mkdir' || activity?.kind === 'file_open' || activity?.kind === 'file_read' || activity?.kind === 'file_search' ? activity.kind : null;
     const toolResultDisplay = activity?.kind === 'tool_result'
       ? deriveToolResultDisplay(activity)
       : null;
@@ -991,6 +1281,7 @@ function deriveRunTranscriptItems(events: RunEvent[], assistantTurn: ThreadTurn 
         id: event.id,
         kind: 'activity_line',
         activityKind: 'terminal_command',
+        providerEventType: activity.providerEventType ?? null,
         toolName: null,
         label: normalizeTerminalCommandLabel(activity.summary, activity.command ?? null, nextStatus),
         text: normalizeTerminalCommandLabel(activity.summary, activity.command ?? null, nextStatus),
@@ -1052,6 +1343,7 @@ function deriveRunTranscriptItems(events: RunEvent[], assistantTurn: ThreadTurn 
         id: event.id,
         kind: 'activity_line',
         activityKind,
+        providerEventType: activity?.providerEventType ?? null,
         toolName: activity?.toolName ?? null,
         label,
         text,
@@ -1084,6 +1376,7 @@ function deriveRunTranscriptItems(events: RunEvent[], assistantTurn: ThreadTurn 
         id: event.id,
         kind: 'activity_line',
         activityKind: 'tool_result',
+        providerEventType: activity.providerEventType ?? null,
         toolName: activity.toolName ?? null,
         label,
         text,
@@ -1103,6 +1396,7 @@ function deriveRunTranscriptItems(events: RunEvent[], assistantTurn: ThreadTurn 
         id: event.id,
         kind: 'activity_line',
         activityKind: 'thinking',
+        providerEventType: null,
         toolName: null,
         label: message,
         text: message,
@@ -1159,11 +1453,17 @@ function deriveRunTranscriptItems(events: RunEvent[], assistantTurn: ThreadTurn 
   items = compactAssistantFollowUps(items);
   items = compactGenericThinkingRows(items);
   items = compactOperationalMetaRows(items);
-  const resolutionSummary = deriveResolutionSummaryItem(items, changeArtifacts, runState);
+  const resolutionSummary = deriveResolutionSummaryItem(items, changeArtifacts, runState, failureMessage);
   if (resolutionSummary) {
-    items.push(resolutionSummary);
-    items = compactAssistantDetailAfterResolutionSummary(items);
+    if (runState === 'failed') {
+      items.unshift(resolutionSummary);
+    } else {
+      items.push(resolutionSummary);
+      items = compactAssistantDetailAfterResolutionSummary(items);
+    }
   }
+  items.push(...stagedWorkspaceChanges);
+  items.push(...worktreeWorkspaceChanges);
   items.push(...changeArtifacts);
   return items;
 }

@@ -8,22 +8,24 @@ Vicode is a Windows-first Electron app. Contributions should improve the coding 
 
 For beta user feedback:
 
-- use [GitHub Issues](https://github.com/lowluds/vicode-windows/issues) for bug reports, crash notes, and reproducible user-facing problems
+- use [GitHub Issues](https://github.com/lowluds/vicode-windows-public/issues) for beta feedback, bug reports, crash notes, and reproducible user-facing problems
 - use pull requests for code changes, not for reporting that the app is broken
 
 Release-blocking providers:
 
-- `OpenAI`
-- `Gemini`
+- local `Ollama` runtime/API
 
-Supported secondary lane:
+Supported API-key lane:
 
-- `Ollama`
+- `Custom API` with an OpenAI-compatible `/v1` base URL and model
 
-Temporarily hidden compatibility lanes in the current beta UI:
+Retired setup paths for the current beta:
 
-- `Qwen`
-- `Kimi`
+- first-class `OpenAI` / Codex CLI setup
+- `Gemini CLI`
+- `Qwen CLI`
+- `Kimi CLI`
+- hosted/cloud Ollama API keys
 
 ## Local Setup
 
@@ -111,10 +113,11 @@ If you changed live provider certification behavior:
 npm run e2e:live
 ```
 
-If you changed cross-provider mixed-use validation:
+If you changed normalized provider or Custom API validation:
 
 ```bash
-npm run validate:mixed-use
+npm run audit:normalized-providers
+npm run certify:openai-compatible
 ```
 
 If you changed packaging scripts, installer resources, shipped dependencies, or

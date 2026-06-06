@@ -17,11 +17,11 @@ export function describeReviewItem(
   if (reviewItem.details.actionType === 'daily_note_capture') {
     return {
       icon: 'note',
-      kindLabel: 'Daily note draft',
-      title: normalizeDisplayText(job?.title ?? 'Review daily note write'),
+      kindLabel: 'Memory review',
+      title: normalizeDisplayText(job?.title ?? 'Review saved context'),
       summary: normalizeDisplayText(reviewItem.summary),
       meta: [
-        { label: 'File', value: String(reviewItem.details.relativePath ?? 'memory') },
+        { label: 'Source', value: 'Conversation context' },
         { label: 'Thread', value: normalizeDisplayText(String(reviewItem.details.threadTitle ?? 'thread capture')) }
       ],
       isManualWrite: true
@@ -31,11 +31,11 @@ export function describeReviewItem(
   if (reviewItem.details.actionType === 'memory_promotion') {
     return {
       icon: 'memory',
-      kindLabel: 'Durable memory update',
-      title: normalizeDisplayText(job?.title ?? 'Review MEMORY.md update'),
+      kindLabel: 'Memory review',
+      title: normalizeDisplayText(job?.title ?? 'Review durable context'),
       summary: normalizeDisplayText(reviewItem.summary),
       meta: [
-        { label: 'File', value: String(reviewItem.details.relativePath ?? 'MEMORY.md') },
+        { label: 'Source', value: 'Conversation context' },
         { label: 'Thread', value: normalizeDisplayText(String(reviewItem.details.threadTitle ?? 'memory promotion')) }
       ],
       isManualWrite: true
@@ -45,11 +45,11 @@ export function describeReviewItem(
   if (reviewItem.details.actionType === 'user_preference') {
     return {
       icon: 'user',
-      kindLabel: 'USER.md suggestion',
-      title: normalizeDisplayText(job?.title ?? 'Review USER.md update'),
+      kindLabel: 'Preference review',
+      title: normalizeDisplayText(job?.title ?? 'Review saved preference'),
       summary: normalizeDisplayText(reviewItem.summary),
       meta: [
-        { label: 'File', value: String(reviewItem.details.relativePath ?? 'USER.md') },
+        { label: 'Source', value: 'Conversation context' },
         { label: 'Thread', value: normalizeDisplayText(String(reviewItem.details.threadTitle ?? 'user preference')) }
       ],
       isManualWrite: true

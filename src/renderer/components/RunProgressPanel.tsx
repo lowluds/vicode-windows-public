@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ActionButton, DisclosureButton, SurfaceCard } from './ui';
+import { ActionButton, DisclosureButton } from './ui';
 import { CheckIcon, ChevronDownIcon, ChevronRightIcon, NoteIcon, TaskIcon } from './icons';
 import type { RunProgressState } from '../../shared/domain';
 import { countCompletedRunProgressItems } from '../../shared/run-progress';
@@ -48,7 +48,7 @@ export function RunProgressPanel({
       : `Includes ${progress.delegation.includedContext.join(', ')} · Excludes ${progress.delegation.excludedContext.join(', ')}`;
 
   return (
-    <SurfaceCard className="run-progress-panel" data-testid="run-progress-panel">
+    <section className="run-progress-panel" data-testid="run-progress-panel">
       <div className="run-progress-header">
         <div className="run-progress-heading">
           <TaskIcon />
@@ -95,7 +95,7 @@ export function RunProgressPanel({
           </div>
           <p>{progress.delegation.note}</p>
           <DisclosureButton
-            className="mt-2 self-start rounded-[14px] px-2.5 py-1.5"
+            className="run-progress-context-toggle mt-2 self-start px-2.5 py-1.5"
             align="start"
             leadingIcon={showDelegationDetails ? <ChevronDownIcon /> : <ChevronRightIcon />}
             onClick={() => setShowDelegationDetails((current) => !current)}
@@ -138,7 +138,7 @@ export function RunProgressPanel({
       ) : null}
       <Task className="run-progress-task" defaultOpen>
         <TaskTrigger title={`${completedCount} of ${progress.items.length} tasks completed`}>
-          <div className="flex w-full items-center gap-3 rounded-[18px] border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-alpha-03)] px-4 py-3 text-left transition-colors hover:bg-[color:var(--ui-alpha-05)]">
+          <div className="run-progress-task-trigger flex w-full items-center gap-3 border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-alpha-03)] px-3 py-2.5 text-left transition-colors hover:bg-[color:var(--ui-alpha-05)]">
             <TaskIcon size={15} />
             <div className="min-w-0 flex-1">
               <div className="text-[13px] font-semibold text-[color:var(--ui-text-title)]">
@@ -170,6 +170,6 @@ export function RunProgressPanel({
         </TaskContent>
       </Task>
       <div className="run-progress-footnote">{progress.title}</div>
-    </SurfaceCard>
+    </section>
   );
 }

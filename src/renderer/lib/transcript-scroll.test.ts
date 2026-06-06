@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isTranscriptNearBottomPosition, shouldAutoFollowTranscript, transcriptAutoFollowThreshold } from './transcript-scroll';
+import {
+  isTranscriptNearBottomPosition,
+  shouldAutoFollowTranscript,
+  shouldPauseTranscriptAutoFollowForWheel,
+  transcriptAutoFollowThreshold
+} from './transcript-scroll';
 
 describe('transcript scroll helpers', () => {
   it('treats the transcript as near the bottom within the follow threshold', () => {
@@ -41,5 +46,11 @@ describe('transcript scroll helpers', () => {
         autoFollow: false
       })
     ).toBe(false);
+  });
+
+  it('pauses auto-follow immediately for upward wheel intent', () => {
+    expect(shouldPauseTranscriptAutoFollowForWheel(-1)).toBe(true);
+    expect(shouldPauseTranscriptAutoFollowForWheel(1)).toBe(false);
+    expect(shouldPauseTranscriptAutoFollowForWheel(0)).toBe(false);
   });
 });

@@ -1,6 +1,11 @@
 import { resolveProviderModelAlias } from '../../providers/catalog';
 import type { ProviderDescriptor, ProviderId } from '../../shared/domain';
-import { getProviderMetadata, providerCanRunInComposer, selectPreferredOllamaModel } from '../../shared/providers';
+import {
+  getProviderMetadata,
+  isSurfacedProviderId,
+  providerCanRunInComposer,
+  selectPreferredOllamaModel
+} from '../../shared/providers';
 
 interface ResolveProviderModelOptions {
   promoteStaleDefault?: boolean;
@@ -22,33 +27,30 @@ export function resolveDefaultProviderId(
   providers: ProviderDescriptor[],
   preferredProviderId: ProviderId
 ): ProviderId {
-  const availableProviders = providers.filter((provider) => providerCanRunInComposer(provider));
+  const availableProviders = providers.filter(
+    (provider) => isSurfacedProviderId(provider.id) && providerCanRunInComposer(provider)
+  );
 
   if (availableProviders.some((provider) => provider.id === preferredProviderId)) {
     return preferredProviderId;
-  }
-
-  if (availableProviders.some((provider) => provider.id === 'openai')) {
-    return 'openai';
-  }
-
-  if (availableProviders.some((provider) => provider.id === 'gemini')) {
-    return 'gemini';
-  }
-
-  if (availableProviders.some((provider) => provider.id === 'qwen')) {
-    return 'qwen';
   }
 
   if (availableProviders.some((provider) => provider.id === 'ollama')) {
     return 'ollama';
   }
 
-  if (providers.some((provider) => provider.id === preferredProviderId)) {
+  if (availableProviders.some((provider) => provider.id === 'openai_compatible')) {
+    return 'openai_compatible';
+  }
+
+  const surfacedProviders = providers.filter((provider) => isSurfacedProviderId(provider.id));
+  if (surfacedProviders.some((provider) => provider.id === preferredProviderId)) {
     return preferredProviderId;
   }
 
-  return providers.find((provider) => provider.id === 'openai')?.id ?? providers[0]?.id ?? preferredProviderId;
+  return surfacedProviders.find((provider) => provider.id === 'ollama')?.id
+    ?? surfacedProviders.find((provider) => provider.id === 'openai_compatible')?.id
+    ?? preferredProviderId;
 }
 
 export function resolveProviderModelId(

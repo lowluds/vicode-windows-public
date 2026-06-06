@@ -5,16 +5,18 @@ import type {
   ProviderDescriptor,
   ProviderId,
   ProviderModel,
-  ProviderModelSource,
-  ProviderQuotaStatus
+  ProviderModelSource
 } from '../../shared/domain';
+import { decodeCustomProviderModelId } from '../../shared/custom-provider-routing';
 import {
-  createProviderModelFromId,
   filterUnsupportedProviderModels,
   resolveProviderModelAlias,
   sanitizeDiscoveredModels
 } from '../../providers/catalog';
 import {
+  decodeOllamaModelId,
+  encodeOllamaLocalModelId,
+  isOllamaLocalModelId,
   selectPreferredOllamaModel,
   selectPreferredOllamaVisionModel
 } from '../../shared/providers';
@@ -22,25 +24,11 @@ import { DatabaseService } from '../../storage/database';
 
 const MODEL_CACHE_TTL_MS = 1000 * 60 * 60 * 12;
 
-const GEMINI_QUOTA_PROBE_ORDER = [
-  'gemini-3.1-pro-preview',
-  'gemini-3-pro-preview',
-  'gemini-3-flash-preview',
-  'gemini-3.1-flash-lite-preview',
-  'gemini-2.5-pro',
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite'
-] as const;
-
 export interface ResolvedProviderModels {
   models: ProviderModel[];
   source: ProviderModelSource;
   updatedAt: string | null;
   canLiveDiscoverModels: boolean;
-}
-
-export interface ResolvedProviderQuota {
-  quota: ProviderQuotaStatus | null;
 }
 
 export interface ProviderImageAttachmentRouting {
@@ -71,7 +59,7 @@ export class ProviderModelService {
     const fallbackModels = adapter.listStaticModels();
     const cached = this.host.db.getProviderModelCache(providerId);
     const apiKey = input.account?.encryptedApiKey ? this.host.decryptApiKey(input.account.encryptedApiKey) : null;
-    const runtimeDiscoveryAllowed = input.authMode === 'cli' || (providerId === 'ollama' && input.authMode !== 'api_key');
+    const runtimeDiscoveryAllowed = input.authMode === 'cli' || providerId === 'ollama';
 
     if (runtimeDiscoveryAllowed) {
       const discovered = await adapter.discoverRuntimeModels({
@@ -127,7 +115,7 @@ export class ProviderModelService {
         if (discovered && discovered.length > 0) {
           this.host.db.replaceProviderModels(providerId, discovered, 'api');
           return {
-            models: this.resolveProviderModels(providerId, fallbackModels, discovered),
+          models: this.resolveProviderModels(providerId, fallbackModels, discovered),
             source: 'api',
             updatedAt: new Date().toISOString(),
             canLiveDiscoverModels: true
@@ -160,73 +148,6 @@ export class ProviderModelService {
     };
   }
 
-  async getResolvedQuota(
-    providerId: ProviderId,
-    adapter: ProviderAdapter,
-    input: {
-      account: ProviderAccount | null;
-      authMode: ProviderDescriptor['authMode'];
-      cliPath: string | null;
-      modelId: string | null;
-    }
-  ): Promise<ResolvedProviderQuota> {
-    if (!adapter.getQuotaStatus || !input.authMode) {
-      return { quota: null };
-    }
-
-    const apiKey = input.account?.encryptedApiKey ? this.host.decryptApiKey(input.account.encryptedApiKey) : null;
-
-    try {
-      const quota = await adapter.getQuotaStatus({
-        account: input.account,
-        authMode: input.authMode,
-        apiKey,
-        cliPath: input.cliPath,
-        modelId: input.modelId
-      });
-      return { quota };
-    } catch {
-      return { quota: null };
-    }
-  }
-
-  resolveQuotaProbeModelId(providerId: ProviderId, models: ProviderModel[]) {
-    if (models.length === 0) {
-      return null;
-    }
-
-    if (providerId === 'gemini') {
-      for (const modelId of GEMINI_QUOTA_PROBE_ORDER) {
-        if (models.some((model) => model.id === modelId)) {
-          return modelId;
-        }
-      }
-    }
-
-    return providerId === 'ollama' ? selectPreferredOllamaModel(models)?.id ?? null : models[0]?.id ?? null;
-  }
-
-  mergeQuotaModels(providerId: ProviderId, models: ProviderModel[], quota: ProviderQuotaStatus | null) {
-    if (!quota?.buckets.length) {
-      return models;
-    }
-
-    const extras = quota.buckets
-      .map((bucket) => createProviderModelFromId(providerId, bucket.modelId))
-      .filter((value): value is ProviderModel => Boolean(value));
-
-    if (extras.length === 0) {
-      return models;
-    }
-
-    return filterUnsupportedProviderModels(
-      providerId,
-      sanitizeDiscoveredModels(providerId, [...models, ...extras], {
-        preserveInputOrder: providerId === 'gemini' || providerId === 'ollama'
-      })
-    );
-  }
-
   resolveProviderModels(providerId: ProviderId, fallbackModels: ProviderModel[], cachedModels: ProviderModel[]) {
     if (providerId === 'ollama' && cachedModels.length === 0) {
       return [];
@@ -246,7 +167,14 @@ export class ProviderModelService {
   }
 
   async resolveUsableModelId(providerId: ProviderId, requestedModelId: string) {
-    const normalizedModelId = resolveProviderModelAlias(providerId, requestedModelId);
+    if (providerId === 'openai_compatible') {
+      return this.resolveOpenAICompatibleExecutionModelId(requestedModelId);
+    }
+
+    const normalizedModelId =
+      providerId === 'ollama' && isOllamaLocalModelId(requestedModelId)
+        ? requestedModelId.trim()
+        : resolveProviderModelAlias(providerId, requestedModelId);
     const provider = await this.host.getProvider(providerId);
     if (provider.models.some((model) => model.id === normalizedModelId)) {
       return normalizedModelId;
@@ -264,7 +192,14 @@ export class ProviderModelService {
     requestedModelId: string,
     _imageAttachments: readonly ImageAttachment[]
   ) {
-    const normalizedModelId = resolveProviderModelAlias(providerId, requestedModelId);
+    if (providerId === 'openai_compatible') {
+      return this.resolveOpenAICompatibleExecutionModelId(requestedModelId);
+    }
+
+    const normalizedModelId =
+      providerId === 'ollama' && isOllamaLocalModelId(requestedModelId)
+        ? requestedModelId.trim()
+        : resolveProviderModelAlias(providerId, requestedModelId);
     const provider = await this.host.getProvider(providerId);
 
     if (provider.models.some((model) => model.id === normalizedModelId)) {
@@ -291,9 +226,15 @@ export class ProviderModelService {
       };
     }
 
-    const normalizedModelId = resolveProviderModelAlias(providerId, executionModelId);
+    const normalizedModelId =
+      providerId === 'ollama'
+        ? decodeOllamaModelId(executionModelId)
+        : resolveProviderModelAlias(providerId, executionModelId);
     const provider = await this.host.getProvider(providerId);
-    const executionModel = provider.models.find((model) => model.id === normalizedModelId) ?? null;
+    const executionModel =
+      provider.models.find((model) => model.id === executionModelId) ??
+      provider.models.find((model) => model.id === normalizedModelId) ??
+      null;
     if (executionModel?.supportsVision) {
       return {
         needsInternalReview: false,
@@ -305,7 +246,7 @@ export class ProviderModelService {
     const reviewModel = selectPreferredOllamaVisionModel(provider.models);
     return {
       needsInternalReview: true,
-      reviewModelId: reviewModel?.id ?? null,
+      reviewModelId: reviewModel ? decodeOllamaModelId(reviewModel.id) : null,
       passImagesToExecution: false
     };
   }
@@ -316,5 +257,14 @@ export class ProviderModelService {
     }
 
     return Date.now() - new Date(updatedAt).getTime() > MODEL_CACHE_TTL_MS;
+  }
+
+  private resolveOpenAICompatibleExecutionModelId(requestedModelId: string) {
+    const route = decodeCustomProviderModelId(requestedModelId);
+    if (route) {
+      return route.modelId;
+    }
+
+    return requestedModelId.trim();
   }
 }

@@ -1,27 +1,92 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
+import type { ProviderId } from '../src/shared/domain';
 import { buildNativeComposerCommandPrompt, nativeComposerCommands } from '../src/shared/nativeCommands';
 import { closeApp, launchApp as launchElectronApp, waitForBridge } from './helpers/electron';
 
 async function launchApp() {
   return await launchElectronApp({
-    bridgePaths: ['vicode.app', 'vicode.projects', 'vicode.threads', 'vicode.skills']
+    bridgePaths: ['vicode.app', 'vicode.projects', 'vicode.threads', 'vicode.skills', 'vicode.providers']
   });
 }
 
-async function seedComposerFixture(window: Page, workspaceDir: string) {
-  return await window.evaluate(async ({ workspaceDir }) => {
+function readRequestBody(request: IncomingMessage) {
+  return new Promise<string>((resolve, reject) => {
+    let body = '';
+    request.setEncoding('utf8');
+    request.on('data', (chunk) => {
+      body += chunk;
+    });
+    request.on('end', () => resolve(body));
+    request.on('error', reject);
+  });
+}
+
+async function startCompatibleServer() {
+  const requests: Array<{ authorization: string | undefined; body: string; url: string | undefined }> = [];
+  const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
+    const body = await readRequestBody(request);
+    requests.push({
+      authorization: request.headers.authorization,
+      body,
+      url: request.url
+    });
+    response.writeHead(200, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: 'Composer command suite Custom API run completed.',
+            tool_calls: []
+          }
+        }
+      ]
+    }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address() as AddressInfo;
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    requests,
+    close: () => new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    })
+  };
+}
+
+async function seedComposerFixture(window: Page, workspaceDir: string, baseUrl: string) {
+  return await window.evaluate(async ({ workspaceDir, baseUrl }) => {
     const bootstrap = await window.vicode.app.getBootstrap();
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-    const openaiProvider = bootstrap.providers.find((provider) => provider.id === 'openai') ?? null;
-    const sparkModel = openaiProvider?.models.find((model) => /spark/i.test(model.id) || /spark/i.test(model.label)) ?? null;
-    const fallbackProvider = openaiProvider ?? bootstrap.providers[0] ?? null;
-    const providerTargets = bootstrap.providers.map((provider) => provider.id);
+    const fallbackProvider =
+      bootstrap.providers.find((provider) => provider.id === 'ollama') ??
+      bootstrap.providers.find((provider) => provider.id === 'openai_compatible') ??
+      bootstrap.providers[0] ??
+      null;
+    const providerTargets = [
+      ...new Set([
+        ...bootstrap.providers.map((provider) => provider.id),
+        'ollama' as const,
+        'openai_compatible' as const
+      ])
+    ];
     if (!fallbackProvider) {
       throw new Error('Expected at least one provider.');
     }
+    const customProvider = await window.vicode.providers.saveCustom({
+      name: `Composer Command Suite ${suffix}`,
+      transportKind: 'openai_compatible_chat',
+      baseUrl,
+      apiKey: 'composer-suite-secret',
+      defaultModelId: 'composer-suite-model',
+      enabled: true
+    });
 
     const project = await window.vicode.projects.create({
       name: `Composer command suite ${suffix}`,
@@ -29,13 +94,13 @@ async function seedComposerFixture(window: Page, workspaceDir: string) {
       trusted: true
     });
 
-    const providerId = sparkModel ? 'openai' : fallbackProvider.id;
-    const modelId =
-      sparkModel?.id ??
-      project.defaultModelByProvider[fallbackProvider.id] ??
-      bootstrap.preferences.defaultModelByProvider[fallbackProvider.id] ??
-      fallbackProvider.models[0]?.id ??
-      'gpt-5';
+    const customModelId = [
+      'openai-compatible',
+      encodeURIComponent(customProvider.id),
+      encodeURIComponent('composer-suite-model')
+    ].join(':');
+    const providerId = 'openai_compatible';
+    const modelId = customModelId;
 
     const thread = await window.vicode.threads.create({
       projectId: project.id,
@@ -74,14 +139,14 @@ async function seedComposerFixture(window: Page, workspaceDir: string) {
       threadId: thread.id,
       providerId,
       modelId,
-      openaiConnected: openaiProvider?.installed === true && openaiProvider.authState === 'connected',
-      sparkModelId: sparkModel?.id ?? null,
+      customApiReady: true,
+      customModelId,
       skills: [
         { id: webSkill.id, name: webSkill.name },
         { id: researchSkill.id, name: researchSkill.name }
       ]
     };
-  }, { workspaceDir });
+  }, { workspaceDir, baseUrl });
 }
 
 async function cleanupFixture(window: Page | null, fixture: {
@@ -167,7 +232,7 @@ async function setDefaultComposerModel(window: Page, providerId: string, modelId
   await window.evaluate(async ({ providerId, modelId }) => {
     const bootstrap = await window.vicode.app.getBootstrap();
     await window.vicode.settings.save({
-      defaultProviderId: providerId as 'openai' | 'gemini' | 'qwen' | 'ollama' | 'kimi',
+      defaultProviderId: providerId as ProviderId,
       defaultModelByProvider: {
         ...bootstrap.preferences.defaultModelByProvider,
         [providerId]: modelId
@@ -188,20 +253,41 @@ async function restorePrimaryComposerThread(window: Page, projectId: string, thr
   await waitForBridge(window, ['vicode.app', 'vicode.projects', 'vicode.threads', 'vicode.skills']);
 }
 
-async function createFreshComposerThread(window: Page, projectId: string, providerId: string, modelId: string) {
-  const threadId = await window.evaluate(async ({ projectId, providerId, modelId }) => {
+async function createOllamaPlannerThread(window: Page, projectId: string | null) {
+  const threadId = await window.evaluate(async ({ projectId }) => {
+    if (!projectId) {
+      throw new Error('Expected a project id for native Plan mode validation.');
+    }
+    const bootstrap = await window.vicode.app.getBootstrap();
+    const provider = bootstrap.providers.find((entry) => entry.id === 'ollama' && entry.plannerPolicy.supported) ?? null;
+    if (!provider) {
+      return null;
+    }
+    const modelId =
+      bootstrap.preferences.defaultModelByProvider[provider.id] ??
+      provider.models[0]?.id ??
+      'qwen2.5-coder:14b-instruct-q6_K';
     const thread = await window.vicode.threads.create({
       projectId,
-      providerId,
+      providerId: provider.id,
       modelId,
       executionPermission: 'full_access'
     });
     await window.vicode.settings.save({
       selectedProjectId: projectId,
-      lastOpenedThreadId: thread.id
+      lastOpenedThreadId: thread.id,
+      defaultProviderId: provider.id,
+      defaultModelByProvider: {
+        ...bootstrap.preferences.defaultModelByProvider,
+        [provider.id]: modelId
+      }
     });
     return thread.id;
-  }, { projectId, providerId, modelId });
+  }, { projectId });
+
+  if (!threadId) {
+    return null;
+  }
 
   await window.reload({ waitUntil: 'domcontentloaded' });
   await waitForBridge(window, ['vicode.app', 'vicode.projects', 'vicode.threads', 'vicode.skills']);
@@ -244,29 +330,31 @@ test.describe.serial('composer command suite', () => {
   const workspaceDir = mkdtempSync(join(tmpdir(), 'vicode-composer-command-suite-'));
   let app: ElectronApplication | null = null;
   let window: Page | null = null;
+  let compatibleServer: Awaited<ReturnType<typeof startCompatibleServer>> | null = null;
   let fixture: {
     projectId: string | null;
     threadId: string | null;
     providerId: string;
     modelId: string;
-    openaiConnected: boolean;
-    sparkModelId: string | null;
+    customApiReady: boolean;
+    customModelId: string | null;
     skills: Array<{ id: string; name: string }>;
   } = {
     projectId: null,
     threadId: null,
-    providerId: 'openai',
-    modelId: 'gpt-5',
-    openaiConnected: false,
-    sparkModelId: null,
+    providerId: 'openai_compatible',
+    modelId: 'openai-compatible:test:composer-suite-model',
+    customApiReady: false,
+    customModelId: null,
     skills: []
   };
 
   test.beforeAll(async () => {
+    compatibleServer = await startCompatibleServer();
     ({ app, window } = await launchApp());
-    fixture = await seedComposerFixture(window, workspaceDir);
+    fixture = await seedComposerFixture(window, workspaceDir, compatibleServer.baseUrl);
     await window.reload({ waitUntil: 'domcontentloaded' });
-    await waitForBridge(window, ['vicode.app', 'vicode.projects', 'vicode.threads', 'vicode.skills']);
+    await waitForBridge(window, ['vicode.app', 'vicode.projects', 'vicode.threads', 'vicode.skills', 'vicode.providers']);
   });
 
   test.afterAll(async () => {
@@ -276,12 +364,13 @@ test.describe.serial('composer command suite', () => {
       skills: fixture.skills
     });
     await closeApp(app);
+    await compatibleServer?.close().catch(() => {});
     rmSync(workspaceDir, { recursive: true, force: true });
   });
 
   test('native slash commands select with Enter and rewrite the body locally', async () => {
     test.skip(!window);
-    const localCommands = nativeComposerCommands.filter((command) => !['autonomous-builds', 'enhance', 'plan'].includes(command.id));
+    const localCommands = nativeComposerCommands.filter((command) => !['enhance', 'plan'].includes(command.id));
 
     for (const command of localCommands) {
       await resetComposer(window!);
@@ -295,20 +384,20 @@ test.describe.serial('composer command suite', () => {
     }
   });
 
-  test('autonomous-builds starts a setup flow instead of rewriting the composer body locally', async () => {
+  test('parked autonomous-build commands are not exposed in the composer', async () => {
     test.skip(!window);
     await resetComposer(window!);
-    await selectSlashCommand(window!, 'autonomous-builds');
-    const composer = window!.getByTestId('composer-input');
-    await composer.fill('Ship the docs with a smaller release-ready surface.');
-    await window!.getByTestId('composer-submit-button').click();
-    await expect(window!.locator('.composer-command-chip')).toHaveCount(0);
-    await expect(composer).toHaveValue('');
+    await window!.getByTestId('composer-input').fill('/autonomous');
+    await expect(window!.locator('.composer-command-menu')).toHaveCount(0);
+    await window!.getByTestId('composer-input').fill('/build-plan');
+    await expect(window!.locator('.composer-command-menu')).toHaveCount(0);
     await restorePrimaryComposerThread(window!, fixture.projectId!, fixture.threadId!);
   });
 
   test('plan slash command switches plan mode and preserves the body', async () => {
     test.skip(!window);
+    const plannerThreadId = await createOllamaPlannerThread(window!, fixture.projectId);
+    test.skip(!plannerThreadId, 'Ollama planner provider must be available for native Plan mode validation.');
     await resetComposer(window!);
     await selectSlashCommand(window!, 'plan');
     const composer = window!.getByTestId('composer-input');
@@ -395,9 +484,9 @@ test.describe.serial('composer command suite', () => {
     await expect(window!.getByRole('heading', { name: 'Providers' })).toBeVisible();
   });
 
-  test('OpenAI Spark sends a normal prompt with Enter and starts a run', async () => {
+  test('Custom API model sends a normal prompt with Enter and starts a run', async () => {
     test.skip(!window);
-    test.skip(!fixture.openaiConnected || !fixture.sparkModelId, 'OpenAI Spark must be connected for live Enter-send validation.');
+    test.skip(!fixture.customApiReady || !fixture.customModelId, 'Custom API model must be configured for Enter-send validation.');
 
     await window!.evaluate(async ({ threadId }) => {
       if (!threadId) {
@@ -408,7 +497,7 @@ test.describe.serial('composer command suite', () => {
 
     await window!.reload({ waitUntil: 'domcontentloaded' });
     await waitForBridge(window!);
-    await setDefaultComposerModel(window!, 'openai', fixture.sparkModelId!);
+    await setDefaultComposerModel(window!, 'openai_compatible', fixture.customModelId!);
     await window!.reload({ waitUntil: 'domcontentloaded' });
     await waitForBridge(window!);
 
@@ -428,17 +517,15 @@ test.describe.serial('composer command suite', () => {
 
   test('plan-mode enhance flow enhances first, then second Enter sends', async () => {
     test.skip(!window);
-    test.skip(!fixture.openaiConnected || !fixture.sparkModelId, 'OpenAI Spark must be connected for live send validation.');
+    const plannerThreadId = await createOllamaPlannerThread(window!, fixture.projectId);
+    test.skip(!plannerThreadId, 'Ollama planner provider must be available for plan-mode enhance validation.');
     await window!.evaluate(async ({ threadId }) => {
       if (!threadId) {
         throw new Error('Expected a thread id.');
       }
       await window.vicode.planner.setMode({ threadId, mode: 'plan' });
-    }, { threadId: fixture.threadId });
+    }, { threadId: plannerThreadId });
 
-    await window!.reload({ waitUntil: 'domcontentloaded' });
-    await waitForBridge(window!);
-    await setDefaultComposerModel(window!, 'openai', fixture.sparkModelId!);
     await window!.reload({ waitUntil: 'domcontentloaded' });
     await waitForBridge(window!);
     await installEnhancePromptStub(window!);
@@ -463,13 +550,13 @@ test.describe.serial('composer command suite', () => {
       const enhancedPrompt = await composer.inputValue();
       expect(enhancedPrompt).toContain(insertedToken);
       expect(enhancedPrompt.trim()).not.toBe(promptBeforeEnhance.trim());
-      const userTurnCountBeforeSend = (await pollThread(window!, fixture.threadId!)).turns.filter((turn) => turn.role === 'user').length;
+      const userTurnCountBeforeSend = (await pollThread(window!, plannerThreadId)).turns.filter((turn) => turn.role === 'user').length;
 
       await composer.press('Enter');
       await expect(composer).toHaveValue('', { timeout: 30_000 });
       await expect
         .poll(async () => {
-          const detail = await pollThread(window!, fixture.threadId!);
+          const detail = await pollThread(window!, plannerThreadId);
           return detail.turns.filter((turn) => turn.role === 'user').length;
         }, { timeout: 60_000 })
         .toBeGreaterThan(userTurnCountBeforeSend);
@@ -480,7 +567,8 @@ test.describe.serial('composer command suite', () => {
 
   test('enhance shows a visible in-flight button state while rewriting', async () => {
     test.skip(!window);
-    const threadId = await createFreshComposerThread(window!, fixture.projectId!, fixture.providerId, fixture.modelId);
+    const threadId = await createOllamaPlannerThread(window!, fixture.projectId);
+    test.skip(!threadId, 'Ollama planner provider must be available for plan-mode enhance validation.');
 
     await window!.evaluate(async ({ threadId }) => {
       await window.vicode.planner.setMode({ threadId, mode: 'plan' });

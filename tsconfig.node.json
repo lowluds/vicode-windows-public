@@ -23,7 +23,6 @@
     "src/providers/adapter.ts",
     "src/providers/manager.ts",
     "src/providers/models.ts",
-    "src/storage/repository.ts",
     "src/shared/**/*.test.ts"
   ]
 }

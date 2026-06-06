@@ -1,0 +1,49 @@
+[
+  {
+    "name": "mobile frontend task selects mobile performance guidance",
+    "files": {
+      "README.md": "# Product Notes\nVicode helps local and cloud models use project context.",
+      "frontend/mobile.md": "# Mobile Web Performance\nKeep mobile UI fast, responsive, and readable.",
+      "backend/sqlite.md": "# SQLite Notes\nKeep migrations small."
+    },
+    "prompt": "Improve the product page on phones.",
+    "task": {
+      "objective": "Improve the mobile frontend layout and performance of the product page.",
+      "expectedToolGroups": ["workspace_write", "verification"]
+    },
+    "expectedFirstTitle": "Mobile Web Performance"
+  },
+  {
+    "name": "explicit obsidian route wins",
+    "files": {
+      "runtime.md": "# Runtime Patterns\nUse app-owned tools for workspace work.",
+      "search.md": "# Search And Retrieval\nKeep context packets small and ranked."
+    },
+    "prompt": "Use [[Search And Retrieval]] for this context-router plan.",
+    "task": null,
+    "expectedFirstTitle": "Search And Retrieval"
+  },
+  {
+    "name": "casual prompt retrieves nothing",
+    "files": {
+      "readme.md": "# Product Notes\nProject Knowledge should be used when tasks need context."
+    },
+    "prompt": "thanks",
+    "task": null,
+    "expectedFirstTitle": null
+  },
+  {
+    "name": "ollama retrieval task selects local model guidance",
+    "files": {
+      "Ollama And Local Models.md": "---\naliases: [Ollama, local models, embeddings]\n---\n# Ollama And Local Models\nLocal models need source-backed context, small retrieval packets, and embeddings through /api/embed only when deterministic markdown lookup is not enough.",
+      "Retrieval For Coding Projects.md": "# Retrieval For Coding Projects\nUse AGENTS.md, MEMORY.md, aliases, headings, and source paths to retrieve compact coding-project context.",
+      "Tool Use And Trust.md": "# Tool Use And Trust\nKeep prompt injection and permission boundaries explicit."
+    },
+    "prompt": "Help an Ollama local model use embeddings and Project Knowledge without dumping the whole folder.",
+    "task": {
+      "objective": "Design a small local-model retrieval packet for Ollama.",
+      "expectedToolGroups": ["project_knowledge", "verification"]
+    },
+    "expectedFirstTitle": "Ollama And Local Models"
+  }
+]

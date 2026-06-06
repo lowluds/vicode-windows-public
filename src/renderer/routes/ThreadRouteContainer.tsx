@@ -1,14 +1,25 @@
 import type { ReactNode, RefObject } from 'react';
 import type {
+  ExecutionPermission,
+  HarnessIsolationMode,
   ImageAttachment,
   Project,
   ProviderDescriptor,
   ProviderId,
   SkillDefinition,
+  StagedWorkspaceHunkApplyInput,
+  StagedWorkspaceHunkRejectInput,
+  StagedWorkspaceHunkRevertInput,
+  StagedWorkspaceReviewInput,
   SubagentSummary,
   TextAttachment,
   ThreadDetail,
-  ThreadTurn
+  ThreadTurn,
+  WorktreeCleanupInput,
+  WorktreeHunkApplyInput,
+  WorktreeHunkRejectInput,
+  WorktreeHunkRevertInput,
+  WorktreeReviewInput
 } from '../../shared/domain';
 import type { NativeComposerCommandId } from '../../shared/nativeCommands';
 import type { RunActivityViewModel, RunTranscriptItem } from '../lib/run-activity';
@@ -25,7 +36,6 @@ import { BookIcon } from '../components/icons';
 import { cx } from '../components/ui/utils';
 
 type ComposerMode = 'default' | 'plan';
-type ExecutionPermission = 'default' | 'acceptEdits' | 'fullAuto';
 type ComposerEffort = 'Low' | 'Medium' | 'High' | 'Extra high';
 
 interface ComposerState {
@@ -35,6 +45,7 @@ interface ComposerState {
   thinkingEnabled: boolean;
   mode: ComposerMode;
   executionPermission: ExecutionPermission;
+  isolationMode: HarnessIsolationMode;
   imageAttachments: ImageAttachment[];
   textAttachments: TextAttachment[];
 }
@@ -49,7 +60,6 @@ interface ThreadRouteContainerProps {
   canCreateTextAttachments: boolean;
   composer: ComposerState;
   composerActivityItems: ComposerActivityItem[];
-  composerContextWindow: string | null;
   composerEffort: ComposerEffort;
   composerProjectId: string | null;
   composerRef: RefObject<HTMLTextAreaElement | null>;
@@ -58,7 +68,7 @@ interface ThreadRouteContainerProps {
   enhancingPrompt: boolean;
   handleComposerVoice: () => void;
   installedComposerSkills: SkillDefinition[];
-  markTranscriptUserScrollIntent: () => void;
+  markTranscriptUserScrollIntent: (input?: { wheelDeltaY?: number }) => void;
   openProviderSettings: () => void;
   openProjectFromPicker: () => void | Promise<void>;
   pendingNativeCommandId: NativeComposerCommandId | null;
@@ -72,14 +82,16 @@ interface ThreadRouteContainerProps {
   setActiveImageAttachment: (attachment: ImageAttachment | null) => void;
   setComposerPrompt: (prompt: string) => void;
   setExecutionPermission: (executionPermission: ExecutionPermission) => void;
+  setIsolationMode: (isolationMode: HarnessIsolationMode) => void;
   setPendingNativeCommandId: (commandId: NativeComposerCommandId | null) => void;
   showToast: (level: 'info' | 'warning' | 'error', message: string, title?: string) => void;
   showTranscriptRailCentered: boolean;
   skills: SkillDefinition[];
   startupThreadRestoreState: 'idle' | 'pending' | 'resolved' | 'failed';
+  stagedWorkspaceReviewResolvingKey: string | null;
+  worktreeReviewResolvingKey: string | null;
   stopPrompt: () => void;
   submitPrompt: (promptOverride?: string, nativeCommandIdOverride?: NativeComposerCommandId | null) => Promise<boolean>;
-  thinkingEnabled: boolean;
   toggleAttachedSkill: (skillId: string) => void;
   toggleComposerMode: () => void;
   transcriptRef: RefObject<HTMLElement | null>;
@@ -92,14 +104,26 @@ interface ThreadRouteContainerProps {
   voiceLevel: number;
   voiceState: VoiceState;
   workspaceProject: Project | null;
+  applyStagedWorkspaceChange: (input: StagedWorkspaceReviewInput) => void | Promise<void>;
+  rejectStagedWorkspaceChange: (input: StagedWorkspaceReviewInput) => void | Promise<void>;
+  revertStagedWorkspaceChange: (input: StagedWorkspaceReviewInput) => void | Promise<void>;
+  applyStagedWorkspaceHunks: (input: StagedWorkspaceHunkApplyInput) => void | Promise<void>;
+  rejectStagedWorkspaceHunks: (input: StagedWorkspaceHunkRejectInput) => void | Promise<void>;
+  revertStagedWorkspaceHunks: (input: StagedWorkspaceHunkRevertInput) => void | Promise<void>;
+  applyWorktreeReview: (input: WorktreeReviewInput) => void | Promise<void>;
+  rejectWorktreeReview: (input: WorktreeReviewInput) => void | Promise<void>;
+  revertWorktreeReview: (input: WorktreeReviewInput) => void | Promise<void>;
+  applyWorktreeHunks: (input: WorktreeHunkApplyInput) => void | Promise<void>;
+  rejectWorktreeHunks: (input: WorktreeHunkRejectInput) => void | Promise<void>;
+  revertWorktreeHunks: (input: WorktreeHunkRevertInput) => void | Promise<void>;
+  cleanupWorktreeReview: (input: WorktreeCleanupInput) => void | Promise<void>;
   addComposerImageFiles: (files: FileList | File[] | null | undefined) => void;
   addComposerTextAttachment: (content: string, fileName?: string | null) => void;
   removeComposerImageAttachment: (attachmentId: string) => void;
   removeComposerTextAttachment: (attachmentId: string) => void;
   selectComposerEffort: (effort: ComposerEffort) => void;
   selectComposerModel: (providerId: ProviderId, modelId: string) => void;
-  selectProviderThinking: (thinkingEnabled: boolean) => void;
-  enhanceComposerPrompt: () => void;
+  enhanceComposerPrompt: (promptOverride?: string) => void;
   createThread: () => void | Promise<void>;
   attachedSkillIds: string[];
 }
@@ -112,12 +136,16 @@ export function ThreadRouteContainer({
   activeThread,
   addComposerImageFiles,
   addComposerTextAttachment,
+  applyStagedWorkspaceChange,
+  applyStagedWorkspaceHunks,
+  applyWorktreeReview,
+  applyWorktreeHunks,
   attachedSkillIds,
+  cleanupWorktreeReview,
   availableComposerSkills,
   canCreateTextAttachments,
   composer,
   composerActivityItems,
-  composerContextWindow,
   composerEffort,
   composerProjectId,
   composerRef,
@@ -134,6 +162,14 @@ export function ThreadRouteContainer({
   pendingNativeCommandId,
   plannerSubmitting,
   refreshProvider,
+  rejectStagedWorkspaceChange,
+  rejectStagedWorkspaceHunks,
+  rejectWorktreeReview,
+  rejectWorktreeHunks,
+  revertStagedWorkspaceChange,
+  revertStagedWorkspaceHunks,
+  revertWorktreeReview,
+  revertWorktreeHunks,
   removeComposerImageAttachment,
   removeComposerTextAttachment,
   resolveThreadTitle,
@@ -143,18 +179,19 @@ export function ThreadRouteContainer({
   selectedProject,
   selectComposerEffort,
   selectComposerModel,
-  selectProviderThinking,
   setActiveImageAttachment,
   setComposerPrompt,
   setExecutionPermission,
+  setIsolationMode,
   setPendingNativeCommandId,
   showToast,
   showTranscriptRailCentered,
   skills,
   startupThreadRestoreState,
+  stagedWorkspaceReviewResolvingKey,
+  worktreeReviewResolvingKey,
   stopPrompt,
   submitPrompt,
-  thinkingEnabled,
   toggleAttachedSkill,
   toggleComposerMode,
   transcriptRef,
@@ -168,6 +205,52 @@ export function ThreadRouteContainer({
   voiceState,
   workspaceProject
 }: ThreadRouteContainerProps) {
+  const transcriptWorkspaceRoot = workspaceProject?.folderPath ?? selectedProject?.folderPath ?? null;
+
+  function resolveTranscriptRunState(runId: string) {
+    const derivedState = runActivityByRunId[runId]?.state ?? null;
+    const threadStatus = activeThread?.status ?? null;
+    if (
+      activeThread &&
+      (threadStatus === 'queued' || threadStatus === 'running' || threadStatus === 'stopping') &&
+      activeThread.rawOutput.some((event) => event.runId === runId) &&
+      !activeThread.rawOutput.some((event) =>
+        event.runId === runId &&
+        (event.eventType === 'completed' || event.eventType === 'failed' || event.eventType === 'aborted')
+      )
+    ) {
+      return 'running' as const;
+    }
+
+    return derivedState;
+  }
+
+  function shouldShowTerminalOutcomeForRun(runId: string | null) {
+    if (!runId) {
+      return false;
+    }
+
+    const activity = runActivityByRunId[runId] ?? null;
+    if (!activity || (activity.state !== 'failed' && activity.state !== 'aborted') || !activity.outcomeMessage) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function renderTerminalOutcomeForRun(runId: string | null) {
+    if (!shouldShowTerminalOutcomeForRun(runId)) {
+      return null;
+    }
+
+    const activity = runId ? runActivityByRunId[runId] ?? null : null;
+    if (!activity) {
+      return null;
+    }
+
+    return <RunActivityPanel activity={activity} showTimeline={false} />;
+  }
+
   return (
     <section className="flex h-full min-h-0 flex-1 flex-col xl:flex-row">
       <section className="thread-view flex min-h-0 min-w-0 flex-1 flex-col gap-0">
@@ -178,7 +261,7 @@ export function ThreadRouteContainer({
               showTranscriptRailCentered && 'items-center justify-center pb-0 pt-0'
             )}
             ref={transcriptRef}
-            onWheelCapture={markTranscriptUserScrollIntent}
+            onWheelCapture={(event) => markTranscriptUserScrollIntent({ wheelDeltaY: event.deltaY })}
             onTouchMoveCapture={markTranscriptUserScrollIntent}
             onScroll={(event) => {
               updateTranscriptAutoFollow(event.currentTarget);
@@ -195,12 +278,32 @@ export function ThreadRouteContainer({
                   {transcriptTurns.length > 0 ? transcriptTurns.map((turn) => (
                     <div key={turn.id} className="thread-transcript-entry flex flex-col gap-4">
                       {turn.role === 'assistant' && turn.runId && runTranscriptItemsByRunId[turn.runId]?.length ? (
-                        <RunTranscriptTimeline
-                          items={runTranscriptItemsByRunId[turn.runId] ?? []}
-                          skills={skills}
-                          runState={runActivityByRunId[turn.runId]?.state ?? null}
-                          activityStartedAt={runActivityByRunId[turn.runId]?.startedAt ?? null}
-                        />
+                        <>
+                          <RunTranscriptTimeline
+                            items={runTranscriptItemsByRunId[turn.runId] ?? []}
+                            skills={skills}
+                            runState={resolveTranscriptRunState(turn.runId)}
+                            activityStartedAt={runActivityByRunId[turn.runId]?.startedAt ?? null}
+                            suppressResolutionOutcome={shouldShowTerminalOutcomeForRun(turn.runId)}
+                            stagedWorkspaceReviewResolvingKey={stagedWorkspaceReviewResolvingKey}
+                            worktreeReviewResolvingKey={worktreeReviewResolvingKey}
+                            onApplyStagedWorkspaceChange={applyStagedWorkspaceChange}
+                            onRejectStagedWorkspaceChange={rejectStagedWorkspaceChange}
+                            onRevertStagedWorkspaceChange={revertStagedWorkspaceChange}
+                            onApplyStagedWorkspaceHunks={applyStagedWorkspaceHunks}
+                            onRejectStagedWorkspaceHunks={rejectStagedWorkspaceHunks}
+                            onRevertStagedWorkspaceHunks={revertStagedWorkspaceHunks}
+                            onApplyWorktreeReview={applyWorktreeReview}
+                            onRejectWorktreeReview={rejectWorktreeReview}
+                            onRevertWorktreeReview={revertWorktreeReview}
+                            onApplyWorktreeHunks={applyWorktreeHunks}
+                            onRejectWorktreeHunks={rejectWorktreeHunks}
+                            onRevertWorktreeHunks={revertWorktreeHunks}
+                            onCleanupWorktreeReview={cleanupWorktreeReview}
+                            workspaceRoot={transcriptWorkspaceRoot}
+                          />
+                          {renderTerminalOutcomeForRun(turn.runId)}
+                        </>
                       ) : turn.role === 'assistant' && !turn.content.trim() ? null : (
                         <article
                           className={cx(
@@ -213,6 +316,7 @@ export function ThreadRouteContainer({
                             <MessageResponse
                               className="turn-content turn-content-assistant text-[15px] leading-7 text-[color:var(--ui-text-title)]"
                               normalizeSource
+                              workspaceRoot={transcriptWorkspaceRoot}
                             >
                               {turn.content || ''}
                             </MessageResponse>
@@ -256,7 +360,7 @@ export function ThreadRouteContainer({
                                   ))}
                                 </div>
                               ) : null}
-                              <MessageResponse className="turn-content turn-content-user rounded-[22px] bg-[image:var(--ui-panel-gradient-strong)] px-5 py-4 text-[15px] leading-7 text-[color:var(--ui-text-title)]">
+                              <MessageResponse className="turn-content turn-content-user" workspaceRoot={transcriptWorkspaceRoot}>
                                 {turn.content}
                               </MessageResponse>
                             </div>
@@ -265,22 +369,80 @@ export function ThreadRouteContainer({
                       )}
                       {turn.role === 'user' &&
                       activeRunActivity &&
-                      activeRunActivity.state === 'running' &&
+                      (activeRunActivity.state === 'running' ||
+                        activeRunActivity.state === 'failed' ||
+                        activeRunActivity.state === 'aborted') &&
                       !hasAssistantTurnForRun(activeThread, activeDisplayedRunId) &&
                       turn.id === transcriptRunAnchorTurnId ? (
                         activeRunTranscriptItems.length > 0 ? (
-                          <RunTranscriptTimeline
-                            items={activeRunTranscriptItems}
-                            skills={skills}
-                            runState={activeRunActivity.state}
-                            activityStartedAt={activeRunActivity.startedAt}
-                          />
+                          <>
+                            <RunTranscriptTimeline
+                              items={activeRunTranscriptItems}
+                              skills={skills}
+                              runState={activeRunActivity.state}
+                              activityStartedAt={activeRunActivity.startedAt}
+                              suppressResolutionOutcome={shouldShowTerminalOutcomeForRun(activeDisplayedRunId)}
+                              stagedWorkspaceReviewResolvingKey={stagedWorkspaceReviewResolvingKey}
+                              worktreeReviewResolvingKey={worktreeReviewResolvingKey}
+                              onApplyStagedWorkspaceChange={applyStagedWorkspaceChange}
+                              onRejectStagedWorkspaceChange={rejectStagedWorkspaceChange}
+                              onRevertStagedWorkspaceChange={revertStagedWorkspaceChange}
+                              onApplyStagedWorkspaceHunks={applyStagedWorkspaceHunks}
+                              onRejectStagedWorkspaceHunks={rejectStagedWorkspaceHunks}
+                              onRevertStagedWorkspaceHunks={revertStagedWorkspaceHunks}
+                              onApplyWorktreeReview={applyWorktreeReview}
+                              onRejectWorktreeReview={rejectWorktreeReview}
+                              onRevertWorktreeReview={revertWorktreeReview}
+                              onApplyWorktreeHunks={applyWorktreeHunks}
+                              onRejectWorktreeHunks={rejectWorktreeHunks}
+                              onRevertWorktreeHunks={revertWorktreeHunks}
+                              onCleanupWorktreeReview={cleanupWorktreeReview}
+                              workspaceRoot={transcriptWorkspaceRoot}
+                            />
+                            {renderTerminalOutcomeForRun(activeDisplayedRunId)}
+                          </>
                         ) : (
                           <RunActivityPanel activity={activeRunActivity} />
                         )
                       ) : null}
                     </div>
-                  )) : emptyThreadHero}
+                  )) : activeRunActivity &&
+                    (activeRunActivity.state === 'running' ||
+                      activeRunActivity.state === 'failed' ||
+                      activeRunActivity.state === 'aborted') ? (
+                    <div className="thread-transcript-entry flex flex-col gap-4">
+                      {activeRunTranscriptItems.length > 0 ? (
+                        <>
+                          <RunTranscriptTimeline
+                            items={activeRunTranscriptItems}
+                            skills={skills}
+                            runState={activeRunActivity.state}
+                            activityStartedAt={activeRunActivity.startedAt}
+                            suppressResolutionOutcome={shouldShowTerminalOutcomeForRun(activeDisplayedRunId)}
+                            stagedWorkspaceReviewResolvingKey={stagedWorkspaceReviewResolvingKey}
+                            worktreeReviewResolvingKey={worktreeReviewResolvingKey}
+                            onApplyStagedWorkspaceChange={applyStagedWorkspaceChange}
+                            onRejectStagedWorkspaceChange={rejectStagedWorkspaceChange}
+                            onRevertStagedWorkspaceChange={revertStagedWorkspaceChange}
+                            onApplyStagedWorkspaceHunks={applyStagedWorkspaceHunks}
+                            onRejectStagedWorkspaceHunks={rejectStagedWorkspaceHunks}
+                            onRevertStagedWorkspaceHunks={revertStagedWorkspaceHunks}
+                            onApplyWorktreeReview={applyWorktreeReview}
+                            onRejectWorktreeReview={rejectWorktreeReview}
+                            onRevertWorktreeReview={revertWorktreeReview}
+                            onApplyWorktreeHunks={applyWorktreeHunks}
+                            onRejectWorktreeHunks={rejectWorktreeHunks}
+                            onRevertWorktreeHunks={revertWorktreeHunks}
+                            onCleanupWorktreeReview={cleanupWorktreeReview}
+                            workspaceRoot={transcriptWorkspaceRoot}
+                          />
+                          {renderTerminalOutcomeForRun(activeDisplayedRunId)}
+                        </>
+                      ) : (
+                        <RunActivityPanel activity={activeRunActivity} />
+                      )}
+                    </div>
+                  ) : emptyThreadHero}
                   {activeSubagents.length > 0 ? (
                     <div className="thread-transcript-entry thread-transcript-subagent-entry flex flex-col gap-4">
                       <ThreadSubagentActivityCard
@@ -299,10 +461,7 @@ export function ThreadRouteContainer({
           </section>
 
           <div className="thread-composer-stack flex shrink-0 flex-col px-7 py-5">
-            <div className="thread-composer-rail flex w-full max-w-[980px] flex-col gap-3">
-              {activeRunActivity && (activeRunActivity.state === 'failed' || activeRunActivity.state === 'aborted') ? (
-                <RunActivityPanel activity={activeRunActivity} showTimeline={false} />
-              ) : null}
+            <div className="thread-composer-rail flex flex-col gap-3">
               <LiveRunStatus activity={activeRunActivity} />
               {selectedProject ? (
                 <ComposerPanel
@@ -321,20 +480,19 @@ export function ThreadRouteContainer({
                   providerId={composer.providerId}
                   modelId={composer.modelId}
                   composerMode={composer.mode}
-                  contextWindow={composerContextWindow}
                   executionPermission={composer.executionPermission}
+                  isolationMode={composer.isolationMode}
                   runtimeCommandPolicy={workspaceProject?.runtimeCommandPolicy}
                   runtimeNetworkPolicy={workspaceProject?.runtimeNetworkPolicy}
                   onSelectPermission={(executionPermission) => void setExecutionPermission(executionPermission)}
+                  onSelectIsolationMode={setIsolationMode}
                   effort={composerEffort}
-                  thinkingEnabled={thinkingEnabled}
                   installedSkills={installedComposerSkills}
                   availableSkills={availableComposerSkills}
                   attachedSkillIds={attachedSkillIds}
                   toggleAttachedSkill={toggleAttachedSkill}
                   selectComposerModel={selectComposerModel}
                   selectComposerEffort={selectComposerEffort}
-                  selectProviderThinking={selectProviderThinking}
                   refreshProvider={refreshProvider}
                   openProviderSettings={openProviderSettings}
                   openProjectFromPicker={openProjectFromPicker}
@@ -352,7 +510,7 @@ export function ThreadRouteContainer({
                   enhancingPrompt={enhancingPrompt}
                   submittingPrompt={composerSubmitting || plannerSubmitting}
                   submitPrompt={submitPrompt}
-                  activeRunId={activeDisplayedRunId}
+                  activeRunId={activeRunActivity?.state === 'running' ? activeDisplayedRunId : null}
                   showToast={showToast}
                 />
               ) : null}

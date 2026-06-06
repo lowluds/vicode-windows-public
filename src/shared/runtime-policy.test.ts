@@ -6,7 +6,8 @@ import {
   deriveRuntimePolicy,
   evaluateRuntimeCommandAccess,
   evaluateRuntimeCommandExecution,
-  evaluateRuntimeNetworkAccess
+  evaluateRuntimeNetworkAccess,
+  PROJECT_RUNTIME_COMMAND_POLICY_OPTIONS
 } from './runtime-policy';
 
 describe('runtime policy', () => {
@@ -28,6 +29,7 @@ describe('runtime policy', () => {
       'Shell commands are unavailable in this run.'
     );
     expect(policy.modelInstruction).toContain('use app-owned web research tools');
+    expect(policy.commandSummary).toContain('No local shell commands are available');
     expect(policy.commandDeniedMessage).toContain('requires Full access');
   });
 
@@ -45,6 +47,7 @@ describe('runtime policy', () => {
 
     expect(policy.commandAccess).toBe('approval_required');
     expect(policy.networkAccess).toBe('host_local');
+    expect(policy.summary).toContain('host-local shell commands can run after approval');
     expect(policy.commandSummary).toContain('isolated temp home/appdata directories');
     expect(policy.commandSummary).toContain('not sandboxed');
     expect(policy.networkSummary).toContain('does not isolate that network activity');
@@ -57,9 +60,31 @@ describe('runtime policy', () => {
 
     expect(policy.commandAccess).toBe('auto_approve');
     expect(policy.networkAccess).toBe('host_local');
+    expect(policy.summary).toContain('host-local shell commands can start immediately');
     expect(policy.commandSummary).toContain('isolated temp home/appdata directories');
+    expect(policy.commandSummary).toContain('not sandboxed');
     expect(policy.modelInstruction).toContain('without asking for approval');
     expect(policy.commandDeniedMessage).toBeNull();
+  });
+
+  it('keeps host-local sandbox boundaries explicit when shell network access is disabled', () => {
+    const approvalRequired = deriveRuntimePolicy('full_access', 'approval_required', 'disabled');
+    const autoApprove = deriveRuntimePolicy('full_access', 'auto_approve', 'disabled');
+
+    expect(approvalRequired.modelInstruction).toContain('host-local');
+    expect(approvalRequired.modelInstruction).toContain('not sandboxed');
+    expect(autoApprove.modelInstruction).toContain('host-local');
+    expect(autoApprove.modelInstruction).toContain('not sandboxed');
+  });
+
+  it('describes runtime command policy options without implying command containment', () => {
+    const approvalRequired = PROJECT_RUNTIME_COMMAND_POLICY_OPTIONS.find((option) => option.value === 'approval_required');
+    const autoApprove = PROJECT_RUNTIME_COMMAND_POLICY_OPTIONS.find((option) => option.value === 'auto_approve');
+
+    expect(approvalRequired?.description).toContain('host-local');
+    expect(approvalRequired?.description).toContain('not sandboxed');
+    expect(autoApprove?.description).toContain('host-local');
+    expect(autoApprove?.description).toContain('not sandboxed');
   });
 
   it('blocks host network by default even when full access is enabled', () => {

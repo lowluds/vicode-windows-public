@@ -438,14 +438,14 @@ describe("JobsService", () => {
       projectId: project.id,
       sourceType: "manual",
       sourceId: `user-preference:${thread.id}`,
-      title: `Suggest USER.md update for "${thread.title}"`,
+      title: `Save project preference for "${thread.title}"`,
       status: "waiting_for_review",
       threadId: thread.id,
     });
     const pendingReview = db.addReviewItem({
       jobId: pendingJob.id,
       kind: "manual_review",
-      summary: `Review USER.md update for "${thread.title}"`,
+      summary: `Review project preference for "${thread.title}"`,
       details: {
         actionType: "user_preference",
         projectId: project.id,
@@ -514,14 +514,14 @@ describe("JobsService", () => {
       projectId: project.id,
       sourceType: "manual",
       sourceId: `daily-note:${thread.id}:manual-test`,
-      title: "Capture daily note",
+      title: "Capture project checkpoint",
       status: "waiting_for_review",
       threadId: thread.id,
     });
     const queued = db.addReviewItem({
       jobId: queuedJob.id,
       kind: "manual_review",
-      summary: "Review daily note update",
+      summary: "Review project checkpoint",
       details: {
         actionType: "daily_note_capture",
         projectId: project.id,
@@ -662,19 +662,27 @@ describe("JobsService", () => {
         "utf8",
       ),
     ).toContain("Long implementation thread");
-    expect(
-      db
-        .getThread(thread.id)
-        .rawOutput.some(
-          (event) =>
-            event.runId === "run-auto-daily" &&
-            event.eventType === "info" &&
-            String(
-              event.payload?.activity &&
-                (event.payload.activity as { kind?: unknown }).kind,
-            ) === "memory_checkpoint",
-        ),
-    ).toBe(true);
+    const checkpointEvent = db
+      .getThread(thread.id)
+      .rawOutput.find(
+        (event) =>
+          event.runId === "run-auto-daily" &&
+          event.eventType === "info" &&
+          String(
+            event.payload?.activity &&
+              (event.payload.activity as { kind?: unknown }).kind,
+          ) === "memory_checkpoint",
+      );
+    expect(checkpointEvent).toBeTruthy();
+    const checkpointActivity = (checkpointEvent?.payload as { activity?: unknown } | undefined)?.activity;
+    expect(checkpointActivity).toEqual(
+      expect.objectContaining({
+        summary: "Project checkpoint saved",
+        text: "Saved a project checkpoint from this thread.",
+      }),
+    );
+    expect(String((checkpointActivity as { path?: unknown } | undefined)?.path ?? "")).toBe("");
+    expect(JSON.stringify(checkpointActivity)).not.toMatch(/MEMORY\.md|USER\.md|daily note/iu);
 
     jobs.dispose();
   });

@@ -26,6 +26,7 @@ const canonicalTargets = [
   'CONTRIBUTING.md',
   'HEARTBEAT.md',
   'docs/engineering/README.md',
+  'docs/engineering/public-beta-verification-goal-0.2.8.md',
   'docs/engineering/public-launch-checklist.md',
   'docs/engineering/release-gates.md',
   'docs/engineering/release-program.md',
@@ -94,7 +95,7 @@ function scanFile(relativePath, findings) {
   }
 }
 
-function scanForbiddenArtifactDirs(findings) {
+function scanForbiddenArtifactDirs(findings, exportIgnoreLines) {
   for (const relativePath of forbiddenPublicPaths) {
     const absolutePath = path.join(root, relativePath);
     try {
@@ -107,6 +108,11 @@ function scanForbiddenArtifactDirs(findings) {
   }
 
   for (const parent of ['docs/engineering/memory-validation-runs', 'docs/engineering/validation-runs', 'docs/engineering/reference-captures']) {
+    const normalizedParent = normalizeTarget(parent);
+    if (exportIgnoreLines.has(`${normalizedParent}/ export-ignore`)) {
+      continue;
+    }
+
     const absoluteParent = path.join(root, parent);
     try {
       if (!statSync(absoluteParent).isDirectory()) {
@@ -126,14 +132,14 @@ function scanForbiddenArtifactDirs(findings) {
   }
 }
 
-function verifyExportIgnoreCoverage(findings) {
+function getExportIgnoreLines(findings) {
   const gitattributesPath = path.join(root, '.gitattributes');
   let content = '';
   try {
     content = readFileSync(gitattributesPath, 'utf8');
   } catch {
     findings.push('.gitattributes is required for public-source snapshot exclusions');
-    return;
+    return new Set();
   }
 
   const lines = new Set(
@@ -148,12 +154,14 @@ function verifyExportIgnoreCoverage(findings) {
       findings.push(`.gitattributes is missing required export-ignore entry: ${entry}`);
     }
   }
+
+  return lines;
 }
 
 function main() {
   const findings = [];
-  scanForbiddenArtifactDirs(findings);
-  verifyExportIgnoreCoverage(findings);
+  const exportIgnoreLines = getExportIgnoreLines(findings);
+  scanForbiddenArtifactDirs(findings, exportIgnoreLines);
   for (const target of canonicalTargets) {
     scanFile(target, findings);
   }

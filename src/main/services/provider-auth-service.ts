@@ -1,5 +1,6 @@
 import { safeStorage } from 'electron';
 import type { ProviderAdapter } from '../../providers/types';
+import { RetiredProviderAdapter } from '../../providers/retired-adapter';
 import type {
   ProviderAccount,
   ProviderAuthMode,
@@ -7,7 +8,7 @@ import type {
   ProviderId
 } from '../../shared/domain';
 import type { AppEvent } from '../../shared/events';
-import { providerAuthBrand, providerCliLabel, providerDisplayName } from '../../shared/providers';
+import { isRetiredProviderId, providerAuthBrand, providerCliLabel, providerDisplayName } from '../../shared/providers';
 import { DatabaseService } from '../../storage/database';
 
 const AUTH_POLLING_WINDOW_MS = 90_000;
@@ -18,6 +19,7 @@ export interface ProviderAuthServiceHost {
   emit(event: AppEvent): void;
   getProvider(providerId: ProviderId, options?: { forceRefresh?: boolean }): Promise<ProviderDescriptor>;
   resolveAvailableAuthMode(
+    providerId: ProviderId,
     auth: { authState: ProviderAccount['authState']; authMode: ProviderAuthMode | null },
     account: ProviderAccount | null
   ): ProviderAuthMode | null;
@@ -59,6 +61,11 @@ export class ProviderAuthService {
   async startAuth(providerId: ProviderId, mode: 'cli' | 'api_key' | undefined, options: { force?: boolean } = {}) {
     const current = await this.host.getProvider(providerId);
 
+    if (this.isRetiredProviderUnavailable(providerId)) {
+      this.host.emit({ type: 'provider.updated', provider: current });
+      return current;
+    }
+
     if (!current.installed) {
       this.host.emit({ type: 'provider.updated', provider: current });
       return current;
@@ -94,6 +101,11 @@ export class ProviderAuthService {
 
   async adoptAuth(providerId: ProviderId) {
     const current = await this.host.getProvider(providerId);
+    if (this.isRetiredProviderUnavailable(providerId)) {
+      this.host.emit({ type: 'provider.updated', provider: current });
+      return current;
+    }
+
     if (!current.installed) {
       this.host.emit({ type: 'provider.updated', provider: current });
       return current;
@@ -127,9 +139,15 @@ export class ProviderAuthService {
 
   async clearAuth(providerId: ProviderId) {
     this.clearPendingAuth(providerId);
+    if (this.isRetiredProviderUnavailable(providerId)) {
+      const provider = await this.host.getProvider(providerId);
+      this.host.emit({ type: 'provider.updated', provider });
+      return provider;
+    }
+
     const account = this.host.db.getProviderAccount(providerId);
     const auth = await this.host.adapters[providerId].getAuthState(account);
-    const nextAuthMode = this.host.resolveAvailableAuthMode(auth, account);
+    const nextAuthMode = this.host.resolveAvailableAuthMode(providerId, auth, account);
     const encryptedApiKey = account?.encryptedApiKey ?? null;
 
     if (nextAuthMode !== null || encryptedApiKey) {
@@ -155,23 +173,37 @@ export class ProviderAuthService {
 
   async saveApiKey(providerId: ProviderId, apiKey: string) {
     this.clearPendingAuth(providerId);
+    if (this.isRetiredProviderUnavailable(providerId)) {
+      const provider = await this.host.getProvider(providerId);
+      this.host.emit({ type: 'provider.updated', provider });
+      return provider;
+    }
+    if (providerId === 'ollama') {
+      const provider = await this.host.getProvider(providerId);
+      this.host.emit({
+        type: 'provider.updated',
+        provider: {
+          ...provider,
+          message: 'Ollama API keys are retired in this Vicode beta. Use the local Ollama runtime, or add API keys through Custom API.'
+        }
+      });
+      return provider;
+    }
+
     const adapter = this.host.adapters[providerId];
     const previous = this.host.db.getProviderAccount(providerId);
     const encrypted = safeStorage.isEncryptionAvailable()
       ? safeStorage.encryptString(apiKey).toString('base64')
       : Buffer.from(apiKey, 'utf8').toString('base64');
+    const updatedAt = new Date().toISOString();
     const provisionalAccount: ProviderAccount = {
       providerId,
-      encryptedApiKey: encrypted,
-      updatedAt: new Date().toISOString()
-    } as ProviderAccount;
-    const resolvedAuth = await adapter.getAuthState({
-      providerId,
       authState: previous?.authState ?? 'disconnected',
-      authMode: previous?.authMode ?? null,
+      authMode: 'api_key',
       encryptedApiKey: encrypted,
-      updatedAt: provisionalAccount.updatedAt
-    });
+      updatedAt
+    };
+    const resolvedAuth = await adapter.getAuthState(provisionalAccount);
     const nextAccount: ProviderAccount = {
       providerId,
       authState: resolvedAuth.authState,
@@ -208,5 +240,11 @@ export class ProviderAuthService {
         });
     }, 2_500);
     this.authPolling.set(providerId, timer);
+  }
+
+  private isRetiredProviderUnavailable(providerId: ProviderId) {
+    return providerId === 'qwen'
+      || providerId === 'kimi'
+      || (isRetiredProviderId(providerId) && this.host.adapters[providerId] instanceof RetiredProviderAdapter);
   }
 }

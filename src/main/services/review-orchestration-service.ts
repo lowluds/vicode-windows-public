@@ -267,10 +267,10 @@ export class ReviewOrchestrationService {
     const summary =
       result?.summary
       ?? (actionType === 'daily_note_capture'
-        ? `Review daily note update for "${normalizeDisplayText(thread.title)}"`
+        ? `Review project checkpoint for "${normalizeDisplayText(thread.title)}"`
         : actionType === 'memory_promotion'
-          ? `Review durable memory promotion for "${normalizeDisplayText(thread.title)}"`
-          : `Review USER.md update for "${normalizeDisplayText(thread.title)}"`);
+          ? `Review project memory for "${normalizeDisplayText(thread.title)}"`
+          : `Review project preference for "${normalizeDisplayText(thread.title)}"`);
 
     const reviewItem = this.db.addReviewItem({
       jobId: job.id,

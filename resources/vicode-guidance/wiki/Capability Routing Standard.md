@@ -4,7 +4,7 @@
 ---
 type: workflow
 status: active
-updated: 2026-04-24
+updated: 2026-05-24
 ---
 
 # Capability Routing Standard
@@ -13,7 +13,7 @@ updated: 2026-04-24
 
 Use the wiki, skills, and plugins together.
 
-The wiki chooses the route, source order, and quality bar. Skills and plugins handle specialized execution when they materially improve the work. No layer should block a stronger applicable capability.
+The wiki chooses the route, source order, and quality bar. Skills and plugins handle specialized execution when they materially improve the work. No layer should block a stronger applicable capability, and no support capability should silently become the lead route.
 
 ## Fast Decision
 
@@ -22,7 +22,8 @@ Before substantial work, make this small decision:
 1. Is there a clearly applicable repo-local instruction or doc?
 2. Is there a clearly applicable session-visible skill, plugin, plugin skill, app, or automation?
 3. Which wiki page sets the quality bar or routing rule?
-4. What is the smallest useful context packet to proceed?
+4. What role is each source or capability playing: lead, execution, support, evidence, or verification?
+5. What is the smallest useful context packet to proceed?
 
 If a skill or plugin clearly matches the task, use it. If the wiki clearly names a route, use it. If both apply, use the skill or plugin for execution and the wiki for constraints, verification, and source order.
 
@@ -34,6 +35,20 @@ If a skill or plugin clearly matches the task, use it. If the wiki clearly names
 - plugins provide bundled skills, apps, tools, and platform-specific workflows
 - automations provide future or recurring follow-up when the user asks for monitoring, reminders, scheduled work, or continuation
 - official docs resolve version-sensitive or platform-sensitive facts
+
+## Route Stack Roles
+
+Use role labels before choosing extra context:
+
+- Project truth: repo-local instructions, docs, code, tests, screenshots, and current runtime state.
+- Lead standard: one wiki page that owns the task family.
+- Execution capability: a skill, plugin, app, MCP, automation, or tool that performs specialized work.
+- Support guard: a narrow page or skill that prevents a known failure without replacing the lead standard.
+- Evidence source: source note, official doc, paper, live reference, or screenshot used when proof matters.
+- Verification sensor: command, rendered check, trace, screenshot, eval, lint, typecheck, or test.
+- Maintenance signal: the one route, trigger, skill, page, hook, or golden task to change if the route fails.
+
+A capability can be correct but in the wrong role. For example, `frontend-anti-patterns` may be the right support guard for shadows and decorative pills, but it is not the primary frontend implementation workflow.
 
 ## Context Budget Rule
 
@@ -81,7 +96,7 @@ For substantial work, briefly report:
 
 - wiki pages used
 - skill, plugin, app, or automation used, if any
-- why this was the smallest useful route
+- why this was the smallest useful route stack
 
 Example:
 
@@ -90,8 +105,10 @@ Example:
 ## Sources
 
 - [[Task Routing]]
+- [[LLM Wiki Utilization Model]]
 - [[Skill Routing Catalog]]
 - [[Operating Model]]
 - [[Agent Runtime Patterns]]
 - [[Search And Retrieval]]
 - [[Source - Installed Codex Skills]]
+- [[Source - LLM Wiki Routing And Skill Selection 2026]]

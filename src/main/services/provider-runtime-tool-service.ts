@@ -5,26 +5,21 @@ import type {
   ProjectRuntimeCommandPolicy,
   ProjectRuntimeNetworkPolicy,
   ProviderId,
-  RunActivityInfo
+  RunActivityInfo,
+  RunToolApprovalRequestInput
 } from '../../shared/domain';
 import { providerCapabilities } from '../../shared/providers';
 import type { AgentRuntimeService } from './agent-runtime';
 import type { ProjectPolicyService } from './project-policy-service';
+import type { ToolApprovalRequestOptions } from './tool-approval-service';
 
 export interface ProviderRuntimeToolServiceHost {
   agentRuntime: AgentRuntimeService;
   projectPolicy: ProjectPolicyService;
   requestToolApproval(
-    input: {
-      threadId: string;
-      runId: string;
-      providerId: ProviderId;
-      toolName: string;
-      command: string;
-      cwd: string | null;
-      workspaceRoot: string;
-    },
-    runtimeCommandPolicy: ProjectRuntimeCommandPolicy
+    input: RunToolApprovalRequestInput,
+    runtimeCommandPolicy: ProjectRuntimeCommandPolicy,
+    options?: ToolApprovalRequestOptions
   ): Promise<'approved' | 'rejected' | 'cancelled'>;
 }
 
@@ -49,6 +44,7 @@ export class ProviderRuntimeToolService {
     threadId: string;
     runId: string;
     providerId: ProviderId;
+    appAuthoritativeToolApproval?: boolean;
     executionPermission: ExecutionPermission;
     executionConstraints?: AgentExecutionConstraints | null;
     runtimeCommandPolicy: ProjectRuntimeCommandPolicy;
@@ -58,6 +54,9 @@ export class ProviderRuntimeToolService {
       activity?: RunActivityInfo | null;
     }) => void;
   }): Promise<AgentToolExecutionResult> {
+    const appAuthoritativeToolApproval =
+      input.appAuthoritativeToolApproval ?? this.usesAppAuthoritativeToolApproval(input.providerId);
+
     return this.host.agentRuntime.executeToolCall(input.call, {
       workspaceRoot: input.workspaceRoot,
       trustedWorkspace: input.trustedWorkspace,
@@ -68,7 +67,7 @@ export class ProviderRuntimeToolService {
       runtimeCommandPolicy: input.runtimeCommandPolicy,
       runtimeNetworkPolicy: input.runtimeNetworkPolicy,
       onInfo: input.onInfo,
-      requestApproval: this.usesAppAuthoritativeToolApproval(input.providerId)
+      requestApproval: appAuthoritativeToolApproval
         ? (request) =>
             this.host.requestToolApproval(
               {
@@ -77,7 +76,10 @@ export class ProviderRuntimeToolService {
                 providerId: input.providerId,
                 ...request
               },
-              input.runtimeCommandPolicy
+              input.runtimeCommandPolicy,
+              {
+                appAuthoritative: appAuthoritativeToolApproval
+              }
             )
         : undefined
     });

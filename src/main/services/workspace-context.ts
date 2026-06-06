@@ -4,9 +4,14 @@ import type { ProviderId, SkillKind } from '../../shared/domain';
 import { providerCapabilities, providerDisplayName } from '../../shared/providers';
 import type { GeneratedMemoryContextBlock } from './generated-memory-retrieval';
 import type { WorkspaceMemoryContextBlock } from './memory';
+import type { ProjectKnowledgeContextBlock } from './project-knowledge';
+import type {
+  ProjectKnowledgeRouterInput,
+  ProjectKnowledgeRouterResult
+} from './project-knowledge-router';
 import type { ResolvedSkillContext } from './skill-context';
 
-export type WorkspaceContextBlockKind = 'agents' | 'soul' | 'user' | 'provider_compat';
+export type WorkspaceContextBlockKind = 'agents' | 'user' | 'provider_compat';
 export type WorkspaceSkillContextBlockKind = 'prompt_skill' | 'runtime_skill';
 export type WorkspaceContextProfile = 'main' | 'delegated';
 
@@ -36,9 +41,11 @@ export interface WorkspaceContextDiagnostics {
   runtimeSkillResolutionMs: number;
   memoryRetrievalMs: number;
   generatedMemoryRetrievalMs: number;
+  projectKnowledgeRetrievalMs: number;
   blockCount: number;
   memoryBlockCount: number;
   generatedMemoryBlockCount: number;
+  projectKnowledgeBlockCount: number;
   skillBlockCount: number;
   runtimeSkillResourceCount: number;
 }
@@ -50,9 +57,12 @@ export interface WorkspaceContextResult {
   blocks: WorkspaceContextBlock[];
   memoryBlocks: WorkspaceMemoryContextBlock[];
   generatedMemoryBlocks: GeneratedMemoryContextBlock[];
+  projectKnowledgeBlocks: ProjectKnowledgeContextBlock[];
+  projectKnowledgeRouter: ProjectKnowledgeRouterResult['evidence'] | null;
   skillBlocks: WorkspaceSkillContextBlock[];
   runtimeSkillResources: WorkspaceRuntimeSkillResource[];
   selectedSkillIds: string[];
+  autoSelectedSkillIds: string[];
   mentionedSkillIds: string[];
   diagnostics: WorkspaceContextDiagnostics;
 }
@@ -68,10 +78,14 @@ export interface WorkspaceContextInput {
   memoryMaxResults?: number;
   generatedMemoryQuery?: string;
   generatedMemoryMaxResults?: number;
+  projectKnowledgePath?: string | null;
+  projectKnowledgeMaxResults?: number;
+  projectKnowledgeTask?: ProjectKnowledgeRouterInput['task'];
   explicitSkillIds?: string[];
   includeWorkspaceInstructions?: boolean;
   includeMemory?: boolean;
   includeGeneratedMemory?: boolean;
+  includeProjectKnowledge?: boolean;
   includeRuntimeSkills?: boolean;
 }
 
@@ -110,6 +124,10 @@ export interface GeneratedMemoryRetriever {
   }): GeneratedMemoryContextBlock[];
 }
 
+export interface ProjectKnowledgeRetriever {
+  retrieve(input: ProjectKnowledgeRouterInput): ProjectKnowledgeRouterResult;
+}
+
 interface WorkspaceContextCandidate {
   kind: WorkspaceContextBlockKind;
   label: string;
@@ -121,7 +139,7 @@ function shouldResolveSkills(query: string | undefined, explicitSkillIds: string
     return true;
   }
 
-  return typeof query === 'string' && query.includes('$');
+  return typeof query === 'string' && query.trim().length > 0;
 }
 
 export class WorkspaceContextService {
@@ -129,6 +147,7 @@ export class WorkspaceContextService {
     private readonly options: {
       memoryRetriever?: WorkspaceMemoryRetriever;
       generatedMemoryRetriever?: GeneratedMemoryRetriever;
+      projectKnowledgeRetriever?: ProjectKnowledgeRetriever;
       skillResolver?: WorkspaceSkillResolver;
     } = {}
   ) {}
@@ -140,8 +159,11 @@ export class WorkspaceContextService {
     let runtimeSkillResolutionMs = 0;
     let memoryRetrievalMs = 0;
     let generatedMemoryRetrievalMs = 0;
+    let projectKnowledgeRetrievalMs = 0;
     let memoryBlocks: WorkspaceMemoryContextBlock[] = [];
     let generatedMemoryBlocks: GeneratedMemoryContextBlock[] = [];
+    let projectKnowledgeBlocks: ProjectKnowledgeContextBlock[] = [];
+    let projectKnowledgeRouter: ProjectKnowledgeRouterResult['evidence'] | null = null;
     const blocks =
       input.includeWorkspaceInstructions !== false && input.trusted && input.folderPath
         ? (() => {
@@ -244,6 +266,25 @@ export class WorkspaceContextService {
       generatedMemoryRetrievalMs = Date.now() - sectionStartedAt;
     }
 
+    if (
+      input.includeProjectKnowledge !== false &&
+      this.options.projectKnowledgeRetriever &&
+      input.projectKnowledgePath &&
+      input.query
+    ) {
+      const sectionStartedAt = Date.now();
+      const result = this.options.projectKnowledgeRetriever.retrieve({
+        rootPath: input.projectKnowledgePath,
+        prompt: input.query,
+        memoryQuery: input.memoryQuery,
+        task: input.projectKnowledgeTask ?? null,
+        maxResults: input.projectKnowledgeMaxResults
+      });
+      projectKnowledgeBlocks = result.blocks;
+      projectKnowledgeRouter = result.evidence;
+      projectKnowledgeRetrievalMs = Date.now() - sectionStartedAt;
+    }
+
     return {
       folderPath: input.folderPath,
       trusted: input.trusted,
@@ -251,9 +292,12 @@ export class WorkspaceContextService {
       blocks,
       memoryBlocks,
       generatedMemoryBlocks,
+      projectKnowledgeBlocks,
+      projectKnowledgeRouter,
       skillBlocks,
       runtimeSkillResources,
       selectedSkillIds: resolvedSkills?.selectedSkillIds ?? [...new Set(input.explicitSkillIds ?? [])],
+      autoSelectedSkillIds: resolvedSkills?.autoSelectedSkillIds ?? [],
       mentionedSkillIds: resolvedSkills?.mentionedSkillIds ?? [],
       diagnostics: {
         durationMs: Date.now() - startedAt,
@@ -262,9 +306,11 @@ export class WorkspaceContextService {
         runtimeSkillResolutionMs,
         memoryRetrievalMs,
         generatedMemoryRetrievalMs,
+        projectKnowledgeRetrievalMs,
         blockCount: blocks.length,
         memoryBlockCount: memoryBlocks.length,
         generatedMemoryBlockCount: generatedMemoryBlocks.length,
+        projectKnowledgeBlockCount: projectKnowledgeBlocks.length,
         skillBlockCount: skillBlocks.length,
         runtimeSkillResourceCount: runtimeSkillResources.length
       }
@@ -292,11 +338,6 @@ export class WorkspaceContextService {
         kind: 'agents',
         label: 'Workspace AGENTS.md',
         fileName: 'AGENTS.md'
-      },
-      {
-        kind: 'soul',
-        label: 'Workspace SOUL.md',
-        fileName: 'SOUL.md'
       },
       {
         kind: 'user',

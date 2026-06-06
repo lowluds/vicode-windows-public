@@ -1,5 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
-import { startDeferredAppServices } from './startup';
+import { createOllamaRuntimeServiceFromEnvironment, startDeferredAppServices } from './startup';
+
+describe('createOllamaRuntimeServiceFromEnvironment', () => {
+  it('uses VICODE_OLLAMA_BASE_URL for the local Ollama runtime service', () => {
+    const previousBaseUrl = process.env.VICODE_OLLAMA_BASE_URL;
+    process.env.VICODE_OLLAMA_BASE_URL = ' http://127.0.0.1:15432 ';
+
+    try {
+      const service = createOllamaRuntimeServiceFromEnvironment();
+      expect(service.baseUrl).toBe('http://127.0.0.1:15432');
+    } finally {
+      if (previousBaseUrl === undefined) {
+        delete process.env.VICODE_OLLAMA_BASE_URL;
+      } else {
+        process.env.VICODE_OLLAMA_BASE_URL = previousBaseUrl;
+      }
+    }
+  });
+});
 
 describe('startDeferredAppServices', () => {
   it('starts deferred tasks and unsubscribes the provider relay on cleanup', async () => {
@@ -19,6 +37,10 @@ describe('startDeferredAppServices', () => {
       },
       automations: {
         refresh: vi.fn(async () => {})
+      },
+      libraryWatch: {
+        start: vi.fn(),
+        stop: vi.fn()
       },
       heartbeat: {
         refresh: vi.fn(async () => {})
@@ -40,17 +62,20 @@ describe('startDeferredAppServices', () => {
     expect(services.updater.initialize).toHaveBeenCalledOnce();
     expect(services.mcp.initialize).toHaveBeenCalledOnce();
     expect(services.automations.refresh).toHaveBeenCalledOnce();
+    expect(services.libraryWatch.start).toHaveBeenCalledOnce();
     expect(services.heartbeat.refresh).toHaveBeenCalledOnce();
     expect(reportTiming).toHaveBeenCalledWith('updater', expect.any(Number));
     expect(reportTiming).toHaveBeenCalledWith('providers', expect.any(Number));
     expect(reportTiming).toHaveBeenCalledWith('mcp', expect.any(Number));
     expect(reportTiming).toHaveBeenCalledWith('automations', expect.any(Number));
+    expect(reportTiming).toHaveBeenCalledWith('libraryWatch', expect.any(Number));
     expect(reportTiming).toHaveBeenCalledWith('heartbeat', expect.any(Number));
     expect(services.collab.initialize).not.toHaveBeenCalled();
     expect(handleAppEvent).not.toHaveBeenCalled();
 
     cleanup();
     expect(unsubscribe).not.toHaveBeenCalled();
+    expect(services.libraryWatch.stop).toHaveBeenCalledOnce();
   });
 
   it('reports deferred startup failures through the supplied reporter', async () => {
@@ -71,6 +96,12 @@ describe('startDeferredAppServices', () => {
         refresh: vi.fn(async () => {
           throw new Error('automations failed');
         })
+      },
+      libraryWatch: {
+        start: vi.fn(() => {
+          throw new Error('library watch failed');
+        }),
+        stop: vi.fn()
       },
       heartbeat: {
         refresh: vi.fn(async () => {
@@ -98,7 +129,9 @@ describe('startDeferredAppServices', () => {
     expect(reportError).toHaveBeenCalledWith('providers', expect.any(Error));
     expect(reportError).toHaveBeenCalledWith('mcp', expect.any(Error));
     expect(reportError).toHaveBeenCalledWith('automations', expect.any(Error));
+    expect(reportError).toHaveBeenCalledWith('libraryWatch', expect.any(Error));
     expect(reportError).toHaveBeenCalledWith('heartbeat', expect.any(Error));
     cleanup();
+    expect(services.libraryWatch.stop).toHaveBeenCalledOnce();
   });
 });

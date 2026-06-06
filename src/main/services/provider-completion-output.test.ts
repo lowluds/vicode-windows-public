@@ -9,13 +9,12 @@ describe('provider-completion-output', () => {
   const denseMars =
     'Sure! Here are some fun facts about Mars:- 🌍 **The Red Planet:** Mars looks red due to iron oxide. - 🌙 **Moons:** Mars has Phobos and Deimos. - 🏔️ **Olympus Mons:** It is the tallest volcano in the solar system. Let me know if you want more.';
 
-  it('formats dense ollama completion text through the shared completion-output seam', () => {
-    expect(formatProviderCompletionOutput('ollama', denseMars)).toBe(
-      'Sure! Here are some fun facts about Mars:\n\n- 🌍 **The Red Planet:** Mars looks red due to iron oxide.\n\n- 🌙 **Moons:** Mars has Phobos and Deimos.\n\n- 🏔️ **Olympus Mons:** It is the tallest volcano in the solar system.\n\nLet me know if you want more.'
-    );
+  it('formats ollama completion text through the shared safe cleanup seam', () => {
+    expect(formatProviderCompletionOutput('ollama', denseMars)).toBe(denseMars);
+    expect(formatProviderCompletionOutput('ollama', 'hello , world !')).toBe('hello, world!');
   });
 
-  it('resolves dense ollama completion output to the formatted final answer', () => {
+  it('resolves dense ollama completion output without model-powered restructuring', () => {
     expect(
       resolveProviderCompletionOutput({
         providerId: 'ollama',
@@ -23,9 +22,7 @@ describe('provider-completion-output', () => {
         streamedDeltaOutput: denseMars,
         assistantTurnOutput: denseMars
       })
-    ).toBe(
-      'Sure! Here are some fun facts about Mars:\n\n- 🌍 **The Red Planet:** Mars looks red due to iron oxide.\n\n- 🌙 **Moons:** Mars has Phobos and Deimos.\n\n- 🏔️ **Olympus Mons:** It is the tallest volcano in the solar system.\n\nLet me know if you want more.'
-    );
+    ).toBe(denseMars);
   });
 
   it('keeps resolved assistant text separate from provider-specific completion formatting', () => {

@@ -13,7 +13,6 @@ import {
   type NativeComposerCommandId
 } from '../../shared/nativeCommands';
 import { providerDisplayName } from '../../shared/providers';
-import { getBuildPlanThreadReadiness } from './build-plan';
 
 type ToastLevel = 'info' | 'warning' | 'error';
 
@@ -24,14 +23,6 @@ type ComposerEffortResolver = (
 
 export interface ComposerNativeCommandFlowHost {
   enhancePromptBody(prompt: string): Promise<void>;
-  startBuildPlanSetupThread(input: {
-    goal: string;
-    providerId: ProviderId;
-    modelId: string;
-    reasoningEffort: ProviderReasoningEffort | null;
-    successMessage: string;
-  }): Promise<void>;
-  createBuildPlanFromActiveThread(): Promise<void>;
   setComposerMode(mode: ComposerMode): Promise<ComposerMode>;
   setComposerPrompt(prompt: string): void;
   clearPendingNativeCommand(): void;
@@ -40,7 +31,7 @@ export interface ComposerNativeCommandFlowHost {
 }
 
 function requiresSlashCommandBody(commandId: NativeComposerCommandId) {
-  return commandId !== 'plan' && commandId !== 'autonomous-builds';
+  return commandId !== 'plan';
 }
 
 export async function executeLeadingNativeSlashCommand(
@@ -83,35 +74,6 @@ export async function executeLeadingNativeSlashCommand(
   const { command, body } = parsed;
   if (requiresSlashCommandBody(command.id) && !body) {
     host.showToast('warning', `Add some text after /${command.token} first.`);
-    return true;
-  }
-
-  if (command.id === 'autonomous-builds') {
-    if (body) {
-      await host.startBuildPlanSetupThread({
-        goal: body,
-        providerId: input.composer.providerId,
-        modelId: input.composer.modelId,
-        reasoningEffort: input.resolveComposerReasoningEffort(
-          input.composer.providerId,
-          input.composerEffort
-        ),
-        successMessage:
-          'Autonomous Builds setup thread started from the composer.'
-      });
-    } else {
-      const readiness = getBuildPlanThreadReadiness(input.activeThread);
-      if (readiness.enabled) {
-        await host.createBuildPlanFromActiveThread();
-      } else {
-        host.showToast(
-          'warning',
-          'Add a goal after /autonomous-builds, or run it inside a ready Autonomous Builds setup thread.'
-        );
-      }
-    }
-    host.clearPendingNativeCommand();
-    host.focusComposer();
     return true;
   }
 

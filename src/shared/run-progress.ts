@@ -7,6 +7,7 @@ import type {
   RunTaskItem,
   RunTaskStatus
 } from './domain';
+import type { ResolvedConversationTaskPacket } from './conversation-task-resolver';
 
 export interface ProviderTodoItem {
   description: string;
@@ -261,12 +262,69 @@ export function deriveRunProgressFromPlanner(plan: PlannerPlan | null, turnState
     return null;
   }
 
-  const labels = derivePlannerTaskLabels(plan).slice(0, 8);
+  const labels = derivePlannerTaskLabels(plan);
   return {
     runId,
     threadId,
     title: plan.structuredPlan?.title ?? 'Approved plan',
     items: createItems(labels, runId),
+    updatedAt: nextUpdatedAt(),
+    diffStats: null,
+    reviewAvailable: false,
+    changeArtifact: null,
+    delegation: null,
+    contextPressure: null,
+    checkpointReminder: null,
+    queueSummary: null
+  };
+}
+
+function mapResolvedTaskSliceStatus(status: ResolvedConversationTaskPacket['slices'][number]['status']): RunTaskStatus {
+  if (status === 'active') {
+    return 'in_progress';
+  }
+
+  return status;
+}
+
+export function deriveRunProgressFromResolvedTaskPacket(
+  packet: ResolvedConversationTaskPacket | null | undefined,
+  runId: string,
+  threadId: string
+): RunProgressState | null {
+  if (!packet || packet.slices.length === 0) {
+    return null;
+  }
+  if (packet.executionPolicy && packet.executionPolicy !== 'auto_execute') {
+    return null;
+  }
+
+  const items = packet.slices.slice(0, 8).map((slice, index) => ({
+    id: `${runId}:resolved:${slice.id || index}`,
+    label: normalizeTaskLabel(slice.title),
+    order: index,
+    status: mapResolvedTaskSliceStatus(slice.status)
+  })).filter((item) => item.label);
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  if (!items.some((item) => item.status === 'in_progress')) {
+    const firstPendingIndex = items.findIndex((item) => item.status === 'pending');
+    if (firstPendingIndex >= 0) {
+      items[firstPendingIndex] = {
+        ...items[firstPendingIndex],
+        status: 'in_progress'
+      };
+    }
+  }
+
+  return {
+    runId,
+    threadId,
+    title: packet.phase === 'task_plan' ? 'Resolved task plan' : 'Resolved task',
+    items,
     updatedAt: nextUpdatedAt(),
     diffStats: null,
     reviewAvailable: false,

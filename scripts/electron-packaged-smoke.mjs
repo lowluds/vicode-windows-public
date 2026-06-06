@@ -54,10 +54,6 @@ async function waitForAppReady(window, timeoutMs = 45_000) {
 async function waitForStartupSurface(window, timeoutMs = 45_000) {
   const startupSurfaces = [
     {
-      label: 'welcome-screen',
-      isVisible: () => window.getByRole('button', { name: 'Get Started' }).isVisible()
-    },
-    {
       label: 'composer',
       isVisible: () => window.getByTestId('composer-input').isVisible()
     },
@@ -96,30 +92,6 @@ async function waitForThreadTitle(window, expectedTitle) {
   }
 }
 
-async function dismissWelcomeIfVisible(window) {
-  const getStarted = window.getByRole('button', { name: 'Get Started' });
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (await getStarted.isVisible().catch(() => false)) {
-      await getStarted.click();
-      await getStarted.waitFor({ state: 'detached', timeout: 5_000 }).catch(() => {});
-      return true;
-    }
-    const shellReady = (
-      await Promise.all([
-        window.getByTestId('nav-settings').isVisible().catch(() => false),
-        window.getByTestId('composer-input').isVisible().catch(() => false),
-        window.getByRole('button', { name: 'Open project' }).isVisible().catch(() => false)
-      ])
-    ).some(Boolean);
-    if (shellReady) {
-      return false;
-    }
-    await sleep(250);
-  }
-  return false;
-}
-
 async function waitForSettingsSurface(window, timeoutMs = 30_000) {
   await window
     .getByRole('heading', { name: 'App' })
@@ -130,17 +102,45 @@ async function waitForSettingsSurface(window, timeoutMs = 30_000) {
     .waitFor({ state: 'visible', timeout: timeoutMs });
 }
 
-async function waitForPluginsSurface(window, timeoutMs = 30_000) {
+async function waitForProvidersSurface(window, timeoutMs = 30_000) {
   await window
     .getByRole('heading', { name: /^Providers$/ })
     .waitFor({ state: 'visible', timeout: timeoutMs });
   await window
-    .getByText('Connect the CLIs and keys Vicode can run.')
+    .getByText('Connect the local Ollama runtime and OpenAI-compatible Custom API keys Vicode can run.')
     .waitFor({ state: 'visible', timeout: timeoutMs });
   await window
     .getByText('Default model')
     .first()
     .waitFor({ state: 'visible', timeout: timeoutMs });
+}
+
+async function verifyNarrowChrome(window, expectedThreadTitle) {
+  if ((await window.getByTestId('nav-plugins').count()) !== 0) {
+    throw new Error('Packaged app exposed legacy Plugins primary chrome during the narrow beta.');
+  }
+  if ((await window.getByTestId('nav-automations').count()) !== 0) {
+    throw new Error('Packaged app exposed legacy Automations primary chrome during the narrow beta.');
+  }
+  if (!(await window.getByTestId('nav-skills').isVisible().catch(() => false))) {
+    throw new Error('Packaged app did not expose the narrow titlebar Skills entrypoint.');
+  }
+
+  await window.getByTestId('nav-skills').click();
+  await window.locator('.skills-page-shell').waitFor({
+    state: 'visible',
+    timeout: 30_000
+  });
+  await window.getByTestId('skills-tab-plugins').waitFor({
+    state: 'visible',
+    timeout: 30_000
+  });
+  await window.getByTestId('skills-tab-skills').waitFor({
+    state: 'visible',
+    timeout: 30_000
+  });
+  await window.getByRole('button', { name: /^(Close plugins and skills|Close catalog)$/u }).click();
+  await waitForThreadTitle(window, expectedThreadTitle);
 }
 
 async function main() {
@@ -189,18 +189,16 @@ async function main() {
     const window = await getAppWindow(app);
     console.log('[packaged-smoke] Packaged Vicode window ready');
     await waitForAppReady(window);
-    let startupSurface = await waitForStartupSurface(window);
-    if (startupSurface === 'welcome-screen') {
-      await dismissWelcomeIfVisible(window);
-      startupSurface = await waitForStartupSurface(window);
-    }
+    await waitForStartupSurface(window);
 
     const bootstrap = await window.evaluate(() => window.vicode.app.getBootstrap());
-    if (!bootstrap.providers.some((provider) => provider.id === 'openai')) {
-      throw new Error('Packaged bootstrap did not include the OpenAI provider.');
+    if (!bootstrap.providers.some((provider) => provider.id === 'ollama')) {
+      throw new Error('Packaged bootstrap did not include the Ollama provider.');
     }
-    if (!bootstrap.providers.some((provider) => provider.id === 'gemini')) {
-      throw new Error('Packaged bootstrap did not include the Gemini provider.');
+    const discontinuedProviderIds = new Set(['openai', 'gemini', 'qwen', 'kimi']);
+    const discontinuedProvider = bootstrap.providers.find((provider) => discontinuedProviderIds.has(provider.id));
+    if (discontinuedProvider) {
+      throw new Error(`Packaged bootstrap surfaced discontinued provider ${discontinuedProvider.id}.`);
     }
 
     const seeded = await window.evaluate(async (targetWorkspaceDir) => {
@@ -216,7 +214,7 @@ async function main() {
         project.defaultModelByProvider[providerId] ??
         appBootstrap.preferences.defaultModelByProvider[providerId] ??
         appBootstrap.providers.find((provider) => provider.id === providerId)?.models[0]?.id ??
-        'gpt-5';
+        'qwen3-coder';
 
       const thread = await window.vicode.threads.create({
         projectId: project.id,
@@ -242,9 +240,7 @@ async function main() {
 
     await window.reload();
     await waitForAppReady(window);
-    if ((await waitForStartupSurface(window)) === 'welcome-screen') {
-      await dismissWelcomeIfVisible(window);
-    }
+    await waitForStartupSurface(window);
     await waitForThreadTitle(window, seeded.threadTitle);
 
     const archivedRoundTrip = await window.evaluate(async (targetThreadId) => {
@@ -254,10 +250,12 @@ async function main() {
       return archived.some((thread) => thread.id === targetThreadId);
     }, seeded.threadId);
 
+    await verifyNarrowChrome(window, seeded.threadTitle);
+
     await window.getByTestId('nav-settings').click();
     await waitForSettingsSurface(window);
     await window.getByRole('button', { name: 'Providers' }).click();
-    await waitForPluginsSurface(window);
+    await waitForProvidersSurface(window);
 
     console.log(
       JSON.stringify(

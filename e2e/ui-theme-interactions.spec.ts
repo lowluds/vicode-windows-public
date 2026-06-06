@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { closeApp, launchApp, openTitlebarSurface, waitForBridge } from './helpers/electron';
+import { closeApp, launchApp, waitForBridge } from './helpers/electron';
 
 type ThemeName = 'dark' | 'light';
 
@@ -64,7 +64,7 @@ function maxPixelValue(styleValue: string) {
 async function seedUiFixture(window: Page, workspaceDir: string) {
   return await window.evaluate(async ({ workspaceDir }) => {
     const bootstrap = await window.vicode.app.getBootstrap();
-    const provider = bootstrap.providers.find((entry) => entry.id === 'openai') ?? bootstrap.providers[0];
+    const provider = bootstrap.providers.find((entry) => entry.id === 'ollama') ?? bootstrap.providers[0];
     if (!provider) {
       throw new Error('Expected at least one provider for UI theme audit.');
     }
@@ -72,7 +72,7 @@ async function seedUiFixture(window: Page, workspaceDir: string) {
     const modelId =
       bootstrap.preferences.defaultModelByProvider[provider.id] ??
       provider.models[0]?.id ??
-      'gpt-5';
+      'qwen2.5-coder:14b-instruct-q6_K';
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 
     const project = await window.vicode.projects.create({
@@ -86,18 +86,6 @@ async function seedUiFixture(window: Page, workspaceDir: string) {
       modelId,
       executionPermission: 'default'
     });
-    const automation = await window.vicode.automations.save({
-      name: `Neutral audit ${suffix}`,
-      projectId: project.id,
-      providerId: provider.id,
-      modelId,
-      promptTemplate: 'Check the workspace and summarize any UI polish issues.',
-      skillId: null,
-      enabled: true,
-      scheduleType: 'manual',
-      intervalMinutes: null
-    });
-
     await window.vicode.settings.save({
       selectedProjectId: project.id,
       lastOpenedThreadId: thread.id,
@@ -107,19 +95,23 @@ async function seedUiFixture(window: Page, workspaceDir: string) {
 
     return {
       projectId: project.id,
-      threadId: thread.id,
-      automationId: automation.id
+      threadId: thread.id
     };
   }, { workspaceDir });
 }
 
 async function setTheme(window: Page, theme: ThemeName) {
+  await window.evaluate(async () => {
+    await window.vicode.app.getNativeTheme().catch(() => null);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  });
   await window.evaluate(async ({ theme }) => {
     await window.vicode.settings.save({
       appearanceMode: theme,
       accentMode: 'custom',
       accentColor: '#3f3f3f'
     });
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     document.documentElement.classList.toggle('dark', theme === 'dark');
     document.documentElement.classList.toggle('light', theme === 'light');
     document.documentElement.dataset.theme = theme;
@@ -242,8 +234,7 @@ test.describe.serial('theme interaction visual audit', () => {
           'vicode.settings',
           'vicode.skills',
           'vicode.mcp',
-          'vicode.providers',
-          'vicode.automations'
+          'vicode.providers'
         ]
       });
 
@@ -258,8 +249,7 @@ test.describe.serial('theme interaction visual audit', () => {
           'vicode.settings',
           'vicode.skills',
           'vicode.mcp',
-          'vicode.providers',
-          'vicode.automations'
+          'vicode.providers'
         ]);
         await expect(window.getByTestId('composer-input')).toBeVisible();
         await setTheme(window, theme);
@@ -276,16 +266,8 @@ test.describe.serial('theme interaction visual audit', () => {
         await window.getByTestId(`project-row-${fixture.projectId}`).hover();
         await expectOpenMenuNeutral(window, window.getByLabel('Project and thread actions'), `${theme} project actions`);
 
-        await window.getByTestId('nav-automations').click();
-        await expect(window.getByRole('heading', { name: 'Automations', exact: true })).toBeVisible();
-        const automationTemplate = window.locator('.automation-template-card').first();
-        const automationCard = window.locator('.automation-card').filter({ hasText: `Neutral audit` }).first();
-        await expectStableHover(automationTemplate, `${theme} automation template`);
-        await expectFlatNeutralSurface(automationTemplate, `${theme} automation template`);
-        await expectStableHover(automationCard, `${theme} automation card`);
-        await expectFlatNeutralSurface(automationCard, `${theme} automation card`);
-        await expectStableHover(window.getByRole('button', { name: 'Create automation' }), `${theme} create automation`);
-        await expectFlatNeutralSurface(window.getByRole('button', { name: 'Create automation' }), `${theme} create automation`);
+        await expect(window.getByTestId('nav-automations')).toHaveCount(0);
+        await expect(window.getByTestId('nav-plugins')).toHaveCount(0);
 
         await window.getByTestId('nav-settings').click();
         await expect(window.getByRole('heading', { name: 'App' })).toBeVisible();
@@ -295,32 +277,6 @@ test.describe.serial('theme interaction visual audit', () => {
           window.locator('.settings-row').filter({ hasText: 'Theme mode' }).locator('.ui-select-trigger'),
           `${theme} theme mode select`
         );
-
-        await openTitlebarSurface(window, 'nav-plugins', window.getByTestId('skills-tab-plugins'));
-        await window.getByTestId('skills-tab-plugins').click();
-        await expect(window.getByRole('heading', { name: 'Make Vicode work your way' })).toBeVisible();
-        await expectNeutralPaint(window.locator('.skills-page-shell'), `${theme} plugins shell`);
-        const pluginSearch = window.locator('.skills-search');
-        await expectFlatNeutralSurface(pluginSearch, `${theme} plugin search`);
-        await pluginSearch.fill('play');
-        await expect(pluginSearch).toHaveValue('play');
-        await pluginSearch.fill('');
-        const pluginCreateButton = window.getByRole('button', { name: 'Create', exact: true });
-        await expectStableHover(pluginCreateButton, `${theme} plugin create menu`);
-        await expectFlatNeutralSurface(pluginCreateButton, `${theme} plugin create menu`);
-        await expectStableHover(window.getByTestId('mcp-official-add-shadcn'), `${theme} plugin add`);
-        await expectFlatNeutralSurface(window.getByTestId('mcp-official-add-shadcn'), `${theme} plugin add`);
-
-        await window.getByTestId('skills-tab-skills').click();
-        await expect(window.getByRole('heading', { name: 'Recommended' })).toBeVisible();
-        const skillCreateButton = window.getByRole('button', { name: 'Create', exact: true });
-        await expectStableHover(skillCreateButton, `${theme} skill create menu`);
-        await expectFlatNeutralSurface(skillCreateButton, `${theme} skill create menu`);
-        await window.locator('.skills-list-item').first().click({ position: { x: 24, y: 24 } });
-        const dialog = window.locator('.ui-dialog-content').last();
-        await expect(dialog).toBeVisible();
-        await expectNeutralPaint(dialog, `${theme} skill detail dialog`);
-        await window.keyboard.press('Escape');
 
         await expectNoHorizontalOverflow(window, [
           '.sidebar',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatRunFailureToastMessage, formatUserErrorMessage, parseWorkspaceUnavailableError } from './error-format';
+import { formatRunFailureToastMessage, formatUserErrorMessage, formatVisibleRunErrorMessage, parseWorkspaceUnavailableError } from './error-format';
 
 describe('formatUserErrorMessage', () => {
   it('unwraps Electron invoke prefixes and maps untrusted workspace errors', () => {
@@ -32,12 +32,10 @@ describe('formatUserErrorMessage', () => {
     });
   });
 
-  it('maps Gemini no-output failures to a retry-oriented message', () => {
+  it('preserves retired provider CLI no-output failures without active setup advice', () => {
     const error = new Error("Error invoking remote method 'composer:submit': Error: Gemini CLI exited successfully without producing assistant output.");
 
-    expect(formatUserErrorMessage(error, 'fallback')).toBe(
-      'Gemini finished the run without returning a reply. Retry once. If it keeps happening, switch the model to Auto Gemini 2.5 or Gemini 2.5 Flash.'
-    );
+    expect(formatUserErrorMessage(error, 'fallback')).toBe('Gemini CLI exited successfully without producing assistant output.');
   });
 
   it('uses the action fallback for generic fetch failures', () => {
@@ -48,6 +46,17 @@ describe('formatUserErrorMessage', () => {
 });
 
 describe('formatRunFailureToastMessage', () => {
+  it('unwraps JSON error envelopes and hides provider references for unsupported image input', () => {
+    const raw = '{"error":"this model does not support image input (ref: e1e07aae-e61d-45ad-b4a2-f680e2481657)"}';
+
+    expect(formatVisibleRunErrorMessage(raw)).toBe(
+      'This model does not support image input. Choose a model with image support and try again.'
+    );
+    expect(formatRunFailureToastMessage(raw)).toBe(
+      'This model does not support image input. Choose a model with image support and try again.'
+    );
+  });
+
   it('maps patch hunk failures to a clear run failure toast', () => {
     expect(formatRunFailureToastMessage('error on hunk 3')).toBe(
       'Patch could not be applied. The file likely changed or the generated patch was stale; details are in the thread.'

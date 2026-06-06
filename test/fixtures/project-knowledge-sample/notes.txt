@@ -1,0 +1,2 @@
+Plain text is intentionally present so Project Knowledge diagnostics can show unsupported files.
+

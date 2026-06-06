@@ -19,7 +19,7 @@ export function PopoverContent({
         align={align}
         collisionPadding={12}
         className={cx(
-          'ui-popover-content z-50 rounded-[calc(var(--ui-radius-lg)+2px)] border border-[color:var(--ui-border)] bg-[color:var(--ui-menu-bg)] p-3 text-[color:var(--ui-text)] shadow-[var(--ui-shadow-menu)] backdrop-blur-xl outline-none',
+          'ui-popover-content z-50 rounded-[var(--ui-radius-lg)] border border-[color:var(--ui-border)] bg-[color:var(--ui-menu-bg)] p-2 text-[color:var(--ui-text)] shadow-[var(--ui-shadow-apple)] outline-none',
           className
         )}
         {...props}

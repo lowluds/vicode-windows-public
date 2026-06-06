@@ -7,7 +7,10 @@ import { launchApp } from './helpers/electron';
 async function seedSidebarFixture(page: Page, workspaceRoot: string) {
   return await page.evaluate(async ({ workspaceRoot }) => {
     const bootstrap = await window.vicode.app.getBootstrap();
-    const provider = bootstrap.providers.find((entry) => entry.id === 'openai') ?? bootstrap.providers[0];
+    const provider =
+      bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+      bootstrap.providers.find((entry) => entry.id === 'openai_compatible') ??
+      bootstrap.providers[0];
     if (!provider) {
       throw new Error('Expected at least one provider for sidebar coverage.');
     }
@@ -15,7 +18,7 @@ async function seedSidebarFixture(page: Page, workspaceRoot: string) {
     const modelId =
       bootstrap.preferences.defaultModelByProvider[provider.id] ??
       provider.models[0]?.id ??
-      'gpt-5';
+      'qwen2.5-coder:14b-instruct-q6_K';
 
     const projectIds: string[] = [];
 

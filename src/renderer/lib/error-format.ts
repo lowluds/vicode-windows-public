@@ -9,7 +9,40 @@ function normalizeMessageText(value: string) {
     message = message.replace(/^Error:\s*/u, '').trim();
   }
 
+  const envelopeMessage = readJsonErrorEnvelopeMessage(message);
+  if (envelopeMessage) {
+    message = envelopeMessage;
+  }
+
+  message = message.replace(/\s*\((?:ref|reference|request id):\s*[^)]+\)\s*$/iu, '').trim();
+
   return message;
+}
+
+function readJsonErrorEnvelopeMessage(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+
+    const record = parsed as Record<string, unknown>;
+    for (const key of ['error', 'message', 'detail']) {
+      const candidate = record[key];
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 function normalizeErrorMessage(error: unknown) {
@@ -25,8 +58,21 @@ function isGenericFetchFailure(message: string) {
   return normalized === 'fetch failed' || normalized === 'failed to fetch' || normalized.includes('fetch failed');
 }
 
-export function formatRunFailureToastMessage(message: string | null | undefined) {
+export function formatVisibleRunErrorMessage(message: string | null | undefined) {
   const normalized = message ? normalizeMessageText(message) : '';
+  if (!normalized) {
+    return 'The run failed. Open the thread details for more information.';
+  }
+
+  if (/model does not support image input/iu.test(normalized)) {
+    return 'This model does not support image input. Choose a model with image support and try again.';
+  }
+
+  return normalized;
+}
+
+export function formatRunFailureToastMessage(message: string | null | undefined) {
+  const normalized = formatVisibleRunErrorMessage(message);
   if (!normalized) {
     return 'The run failed. Open the thread details for more information.';
   }
@@ -97,10 +143,6 @@ export function formatUserErrorMessage(error: unknown, fallback: string) {
 
   if (isGenericFetchFailure(message)) {
     return fallback;
-  }
-
-  if (message === 'Gemini CLI exited successfully without producing assistant output.') {
-    return 'Gemini finished the run without returning a reply. Retry once. If it keeps happening, switch the model to Auto Gemini 2.5 or Gemini 2.5 Flash.';
   }
 
   return message || fallback;

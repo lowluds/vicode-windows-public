@@ -46,4 +46,15 @@ describe('renderer style audit', () => {
 
     expect(violations).toEqual([]);
   });
+
+  it('keeps startup preloader styles loaded independently from the removed welcome screen', () => {
+    const indexCss = readFileSync(resolve(rendererRoot, 'styles/index.css'), 'utf8');
+    const bootCss = readFileSync(resolve(rendererRoot, 'styles/boot.css'), 'utf8');
+
+    expect(indexCss).toContain("@import './boot.css';");
+    expect(bootCss).toContain('.loading-state.loading-state-boot');
+    expect(bootCss).toContain('.loading-boot-card');
+    expect(bootCss).toContain('.landing-beams');
+    expect(bootCss).toContain('@keyframes loading-ellipsis');
+  });
 });

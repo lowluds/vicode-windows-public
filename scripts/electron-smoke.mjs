@@ -57,11 +57,6 @@ async function waitForAppReady(window) {
 async function waitForStartupSurface(window) {
   const startupSurfaces = [
     {
-      label: "welcome-screen",
-      isVisible: () =>
-        window.getByRole("button", { name: "Get Started" }).isVisible(),
-    },
-    {
       label: "composer",
       isVisible: () => window.getByTestId("composer-input").isVisible(),
     },
@@ -106,41 +101,6 @@ async function waitForThreadTitle(window, expectedTitle) {
   }
 }
 
-async function dismissWelcomeIfVisible(window) {
-  const getStarted = window.getByRole("button", { name: "Get Started" });
-  const deadline = Date.now() + 15000;
-  while (Date.now() < deadline) {
-    if (await getStarted.isVisible().catch(() => false)) {
-      await getStarted.click();
-      await getStarted
-        .waitFor({ state: "detached", timeout: 5_000 })
-        .catch(() => {});
-      return true;
-    }
-    const shellReady = (
-      await Promise.all([
-        window
-          .getByTestId("nav-settings")
-          .isVisible()
-          .catch(() => false),
-        window
-          .getByTestId("composer-input")
-          .isVisible()
-          .catch(() => false),
-        window
-          .getByRole("button", { name: "Open project" })
-          .isVisible()
-          .catch(() => false),
-      ])
-    ).some(Boolean);
-    if (shellReady) {
-      return false;
-    }
-    await sleep(250);
-  }
-  return false;
-}
-
 async function waitForSettingsSurface(window) {
   await window
     .getByRole('heading', { name: 'App' })
@@ -151,18 +111,6 @@ async function waitForSettingsSurface(window) {
       name: /Check now|Checking\.\.\.|Downloading\.\.\.|Restart to update/,
     })
     .waitFor({ state: "visible", timeout: 30_000 });
-}
-
-async function waitForPluginsSurface(window) {
-  await window
-    .getByRole('heading', { name: 'Make Vicode work your way' })
-    .waitFor({ state: 'visible', timeout: 30_000 });
-  await window
-    .getByTestId('skills-tab-plugins')
-    .waitFor({ state: 'visible', timeout: 30_000 });
-  await window
-    .getByPlaceholder('Search plugins')
-    .waitFor({ state: 'visible', timeout: 30_000 });
 }
 
 async function main() {
@@ -188,11 +136,7 @@ async function main() {
     const window = await getAppWindow(app);
     console.log("[smoke] Vicode window ready");
     await waitForAppReady(window);
-    let startupSurface = await waitForStartupSurface(window);
-    if (startupSurface === "welcome-screen") {
-      await dismissWelcomeIfVisible(window);
-      startupSurface = await waitForStartupSurface(window);
-    }
+    await waitForStartupSurface(window);
     const bootstrap = await window.evaluate(() =>
       window.vicode.app.getBootstrap(),
     );
@@ -200,11 +144,17 @@ async function main() {
     if (bootstrap.providers.length === 0) {
       throw new Error("Bootstrap returned no providers.");
     }
-    if (!bootstrap.providers.some((provider) => provider.id === "openai")) {
-      throw new Error("Bootstrap did not include the OpenAI provider.");
+    if (!bootstrap.providers.some((provider) => provider.id === "ollama")) {
+      throw new Error("Bootstrap did not include the Ollama provider.");
     }
-    if (!bootstrap.providers.some((provider) => provider.id === "gemini")) {
-      throw new Error("Bootstrap did not include the Gemini provider.");
+    const discontinuedProviderIds = new Set(["openai", "gemini", "qwen", "kimi"]);
+    const discontinuedProvider = bootstrap.providers.find((provider) =>
+      discontinuedProviderIds.has(provider.id),
+    );
+    if (discontinuedProvider) {
+      throw new Error(
+        `Bootstrap surfaced discontinued provider ${discontinuedProvider.id}.`,
+      );
     }
 
     const smokeWorkspacePath = path.join(isolatedStateRoot, "smoke-workspace");
@@ -237,7 +187,7 @@ async function main() {
           appBootstrap.preferences.defaultModelByProvider[providerId] ??
           appBootstrap.providers.find((provider) => provider.id === providerId)
             ?.models[0]?.id ??
-          "gpt-5";
+          "qwen3-coder";
 
         const thread = await window.vicode.threads.create({
           projectId: selectedProject.id,
@@ -262,9 +212,7 @@ async function main() {
 
     await window.reload();
     await waitForAppReady(window);
-    if ((await waitForStartupSurface(window)) === "welcome-screen") {
-      await dismissWelcomeIfVisible(window);
-    }
+    await waitForStartupSurface(window);
     await waitForThreadTitle(window, seeded.threadTitle);
 
     const archivedRoundTrip = await window.evaluate(async (threadId) => {
@@ -279,24 +227,32 @@ async function main() {
     await window.getByTestId("nav-settings").click();
     await waitForThreadTitle(window, seeded.threadTitle);
 
-    await window.getByTestId("nav-plugins").click();
-    await waitForPluginsSurface(window);
-    await window.getByTestId("nav-plugins").click();
-    await waitForThreadTitle(window, seeded.threadTitle);
-
-    await window.getByTestId("nav-settings").click();
-    await waitForSettingsSurface(window);
-    await window.getByTestId("nav-plugins").click();
-    await waitForPluginsSurface(window);
-    if (
-      await window
-        .getByRole("heading", { name: "General" })
-        .isVisible()
-        .catch(() => false)
-    ) {
-      throw new Error("Settings remained visible after opening Plugins.");
+    if ((await window.getByTestId("nav-plugins").count()) !== 0) {
+      throw new Error("Plugins should not be exposed in primary chrome during the narrow beta.");
     }
-    await window.getByTestId("nav-plugins").click();
+    if ((await window.getByTestId("nav-automations").count()) !== 0) {
+      throw new Error("Automations should not be exposed in primary chrome during the narrow beta.");
+    }
+    if (!(await window.getByTestId("nav-skills").isVisible().catch(() => false))) {
+      throw new Error("Skills should remain reachable from the titlebar during the narrow beta.");
+    }
+
+    await window.getByTestId("nav-skills").click();
+    await window.locator(".skills-page-shell").waitFor({
+      state: "visible",
+      timeout: 30_000,
+    });
+    await window.getByTestId("skills-tab-plugins").waitFor({
+      state: "visible",
+      timeout: 30_000,
+    });
+    await window.getByTestId("skills-tab-skills").waitFor({
+      state: "visible",
+      timeout: 30_000,
+    });
+    await window
+      .getByRole("button", { name: /^(Close plugins and skills|Close catalog)$/u })
+      .click();
     await waitForThreadTitle(window, seeded.threadTitle);
 
     await window.evaluate(() => window.vicode.collab.clearConfig());

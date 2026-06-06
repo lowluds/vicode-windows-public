@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import type {
   ComposerSubmitInput,
   ProviderId,
@@ -27,9 +28,12 @@ export class ProviderWorkspaceContextSupportService {
       contextProfile?: 'main' | 'delegated';
       includeMemory?: boolean;
       includeGeneratedMemory?: boolean;
+      resolvedTaskPacket?: {
+        objective: string | null;
+        expectedToolGroups: string[];
+      } | null;
     }
   ) {
-    const personalization = this.db.getPersonalization();
     const preferences = this.db.getPreferences();
     const priorContextUsage = this.contextSupport.deriveLatestContextWindowUsage(
       thread.rawOutput,
@@ -64,13 +68,100 @@ export class ProviderWorkspaceContextSupportService {
             )
           )
         : 3,
+      projectKnowledgePath: preferences.llmWikiLibraryPath ? resolve(preferences.llmWikiLibraryPath) : null,
+      projectKnowledgeMaxResults: 3,
+      projectKnowledgeTask: options.resolvedTaskPacket
+        ? {
+            objective: options.resolvedTaskPacket.objective,
+            expectedToolGroups: options.resolvedTaskPacket.expectedToolGroups
+          }
+        : null,
       explicitSkillIds: input.skillIds,
-      includeWorkspaceInstructions: personalization.useWorkspaceInstructions,
+      includeWorkspaceInstructions: true,
       includeMemory: options.includeMemory ?? true,
       includeGeneratedMemory:
         options.includeGeneratedMemory ?? preferences.generatedMemoryUseEnabled,
+      includeProjectKnowledge: true,
       includeRuntimeSkills: options.includeRuntimeSkills
     });
+  }
+
+  createProjectKnowledgeActivity(
+    projectKnowledgeBlocks: WorkspaceContextResult['projectKnowledgeBlocks'],
+    routerEvidence?: WorkspaceContextResult['projectKnowledgeRouter'] | null
+  ): RunActivityInfo | null {
+    if (projectKnowledgeBlocks.length === 0) {
+      return null;
+    }
+
+    const titles = [
+      ...new Set(projectKnowledgeBlocks.map((block) => block.title.trim()).filter(Boolean))
+    ];
+    const visibleTitles = titles.slice(0, 3);
+    const remainingCount = titles.length - visibleTitles.length;
+    const titleText = remainingCount > 0
+      ? `${visibleTitles.join(', ')}, and ${remainingCount} more`
+      : visibleTitles.join(', ');
+    const summary = `Context: ${
+      titleText || `${projectKnowledgeBlocks.length} source${projectKnowledgeBlocks.length === 1 ? '' : 's'}`
+    }`;
+    const detailLines = projectKnowledgeBlocks.map((block) => {
+      const location = block.heading
+        ? `${block.relativePath} > ${block.heading}`
+        : block.relativePath;
+      return `- ${block.title} (${location}): ${block.retrievalReason.reason}`;
+    });
+    const routerLine = routerEvidence
+      ? `- Router: ${routerEvidence.reason}`
+      : null;
+
+    return {
+      kind: 'guidance',
+      summary,
+      text: `${summary}\n${[routerLine, ...detailLines].filter(Boolean).join('\n')}`,
+      path: null,
+      providerEventType: 'project_knowledge_context'
+    };
+  }
+
+  createSkillActivity(
+    workspaceContext: Pick<WorkspaceContextResult, 'selectedSkillIds' | 'autoSelectedSkillIds' | 'mentionedSkillIds'>
+  ): RunActivityInfo | null {
+    if (workspaceContext.selectedSkillIds.length === 0) {
+      return null;
+    }
+
+    const skillsById = new Map(this.db.listSkills().map((skill) => [skill.id, skill]));
+    const selectedSkills = workspaceContext.selectedSkillIds
+      .map((skillId) => skillsById.get(skillId) ?? null)
+      .filter((skill): skill is NonNullable<typeof skill> => Boolean(skill));
+
+    if (selectedSkills.length === 0) {
+      return null;
+    }
+
+    const visibleNames = selectedSkills.map((skill) => skill.name.trim()).filter(Boolean).slice(0, 3);
+    const remainingCount = selectedSkills.length - visibleNames.length;
+    const summary = `Using: ${
+      remainingCount > 0 ? `${visibleNames.join(', ')}, and ${remainingCount} more` : visibleNames.join(', ')
+    }`;
+    const autoSelected = new Set(workspaceContext.autoSelectedSkillIds);
+    const mentioned = new Set(workspaceContext.mentionedSkillIds);
+    const detailLines = selectedSkills.map((skill) => {
+      const reason = autoSelected.has(skill.id)
+        ? 'auto-selected from prompt'
+        : mentioned.has(skill.id)
+          ? 'mentioned in prompt'
+          : 'selected by user';
+      return `- ${skill.name}: ${reason}`;
+    });
+
+    return {
+      kind: 'skill',
+      summary,
+      text: `${summary}\n${detailLines.join('\n')}`,
+      providerEventType: 'skills_using'
+    };
   }
 
   createMemoryRecallActivity(

@@ -4,75 +4,13 @@ import type {
   AutonomousTaskStatus,
   AutonomousTaskSummary,
   JobDefinition,
-  SubagentSummary,
-  VicodeBuildTicketSnapshot,
-  VicodeBuildLaneSnapshot
+  SubagentSummary
 } from '../../shared/domain';
 import type { AppEvent } from '../../shared/events';
-import { deriveRelevantBuildTeam, sortAutonomousTasks } from '../../shared/autonomous-tasks';
+import { sortAutonomousTasks } from '../../shared/autonomous-tasks';
 import { DatabaseService } from '../../storage/database';
 import { JobsService } from './jobs';
 import { SubagentOrchestratorService } from './subagents';
-import { VicodeBuildControlService } from './vicode-build-control';
-
-function deriveBuildLaneTaskStatus(lane: VicodeBuildLaneSnapshot): AutonomousTaskStatus {
-  if (lane.paused) {
-    return 'waiting';
-  }
-  switch (lane.status) {
-    case 'running':
-      return 'running';
-    case 'waiting_for_review':
-      return 'waiting';
-    case 'completed':
-      return 'completed';
-    case 'failed':
-      return 'failed';
-    case 'cancelled':
-      return 'cancelled';
-    case 'skipped':
-      return 'blocked';
-    case 'idle':
-      return 'idle';
-    default:
-      return 'queued';
-  }
-}
-
-function deriveBuildLaneTaskSummary(
-  lane: VicodeBuildLaneSnapshot,
-  teamLabel: string
-): AutonomousTaskSummary {
-  const status = deriveBuildLaneTaskStatus(lane);
-  const summary =
-    lane.recommendedAction
-    ?? lane.blockedReason
-    ?? lane.lastPreview
-    ?? `Lane status: ${lane.status.replace(/_/gu, ' ')}.`;
-  return {
-    id: `build-lane:${teamLabel}:${lane.laneId}`,
-    kind: 'build_lane',
-    title: lane.label,
-    summary,
-    ownerLabel: teamLabel,
-    provenanceLabel: 'build control',
-    trustLabel: 'trusted worktree',
-    approvalLabel: lane.paused ? 'manual wake required' : null,
-    status,
-    statusLabel: lane.paused ? 'paused' : lane.status.replace(/_/gu, ' '),
-    threadId: lane.threadId,
-    updatedAt: lane.lastRunAt ?? lane.lastWakeAt ?? lane.nextRunAt,
-    attention: status === 'failed' || status === 'blocked'
-  };
-}
-
-function buildLaneTaskSourceId(projectId: string, teamId: string, laneId: VicodeBuildLaneSnapshot['laneId']) {
-  return `build-lane:${projectId}:${teamId}:${laneId}`;
-}
-
-function buildTicketTaskSourceId(projectId: string, teamId: string, ticketId: string) {
-  return `build-ticket:${projectId}:${teamId}:${ticketId}`;
-}
 
 function subagentTaskSourceId(subagentId: string) {
   return `subagent:${subagentId}`;
@@ -97,228 +35,6 @@ function toAutonomousTaskSummary(task: AutonomousTaskRecord): AutonomousTaskSumm
     threadId: task.threadId,
     updatedAt: task.updatedAt,
     attention: task.status === 'failed' || task.status === 'blocked' || task.status === 'cancelled'
-  };
-}
-
-function unresolvedTicketDependencies(
-  ticket: VicodeBuildTicketSnapshot,
-  tickets: VicodeBuildTicketSnapshot[]
-) {
-  if ((ticket.blockedByTicketIds?.length ?? 0) > 0) {
-    return ticket.blockedByTicketIds;
-  }
-  return ticket.dependencies.filter((dependencyId) => {
-    const dependency = tickets.find((candidate) => candidate.id === dependencyId);
-    return !dependency || dependency.status !== 'done';
-  });
-}
-
-function unresolvedDependencyTitles(
-  ticket: VicodeBuildTicketSnapshot,
-  tickets: VicodeBuildTicketSnapshot[]
-) {
-  return unresolvedTicketDependencies(ticket, tickets).map(
-    (dependencyId) => tickets.find((candidate) => candidate.id === dependencyId)?.title ?? dependencyId
-  );
-}
-
-function dependentTicketIds(
-  ticket: VicodeBuildTicketSnapshot,
-  tickets: VicodeBuildTicketSnapshot[]
-) {
-  return tickets
-    .filter(
-      (candidate) =>
-        candidate.id !== ticket.id
-        && candidate.status !== 'done'
-        && unresolvedTicketDependencies(candidate, tickets).includes(ticket.id)
-    )
-    .map((candidate) => candidate.id);
-}
-
-function dependentTicketTitles(
-  ticket: VicodeBuildTicketSnapshot,
-  tickets: VicodeBuildTicketSnapshot[]
-) {
-  return dependentTicketIds(ticket, tickets).map(
-    (ticketId) => tickets.find((candidate) => candidate.id === ticketId)?.title ?? ticketId
-  );
-}
-
-function deriveBuildTicketTaskStatus(
-  ticket: VicodeBuildTicketSnapshot,
-  tickets: VicodeBuildTicketSnapshot[]
-): AutonomousTaskStatus {
-  switch (ticket.status) {
-    case 'in_progress':
-      return 'running';
-    case 'done':
-      return 'completed';
-    case 'blocked':
-      return 'blocked';
-    case 'todo':
-      return (ticket.readyToClaim ?? false) || unresolvedTicketDependencies(ticket, tickets).length === 0 ? 'queued' : 'waiting';
-  }
-}
-
-function summarizeBuildTicketChecklist(
-  ticket: VicodeBuildTicketSnapshot,
-  tickets: VicodeBuildTicketSnapshot[]
-) {
-  const dependencyCount = unresolvedTicketDependencies(ticket, tickets).length;
-  const checklistBits = [
-    ticket.summary?.trim() ?? null,
-    ticket.targetPaths.length > 0 ? `Targets ${ticket.targetPaths.slice(0, 2).join(', ')}.` : null,
-    ticket.acceptanceCriteria.length > 0 ? `${ticket.acceptanceCriteria.length} acceptance checks.` : null,
-    ticket.verificationSteps.length > 0 ? `${ticket.verificationSteps.length} verification steps.` : null,
-    dependencyCount > 0 ? `Waiting on ${dependencyCount} dependency${dependencyCount === 1 ? '' : 'ies'}.` : null,
-    ticket.stopWhen?.trim() ? `Stop when ${ticket.stopWhen.trim()}.` : null
-  ];
-  return checklistBits.find((entry) => Boolean(entry)) ?? 'Bounded build-control ticket.';
-}
-
-function deriveBuildTicketTaskSummary(
-  ticket: VicodeBuildTicketSnapshot,
-  teamLabel: string,
-  tickets: VicodeBuildTicketSnapshot[]
-): AutonomousTaskSummary {
-  const status = deriveBuildTicketTaskStatus(ticket, tickets);
-  return {
-    id: `build-ticket:${teamLabel}:${ticket.id}`,
-    kind: 'build_ticket',
-    title: ticket.title,
-    summary: summarizeBuildTicketChecklist(ticket, tickets),
-    ownerLabel: ticket.ownerLane,
-    provenanceLabel: 'build control ticket',
-    trustLabel: 'trusted worktree',
-    approvalLabel: ticket.stopWhen?.trim() ? 'bounded stop condition' : null,
-    status,
-    statusLabel:
-      ticket.status === 'todo' && unresolvedTicketDependencies(ticket, tickets).length > 0
-        ? 'waiting on dependency'
-        : ticket.status.replace(/_/gu, ' '),
-    threadId: ticket.ownerThreadId ?? null,
-    updatedAt: ticket.updatedAt,
-    attention: status === 'blocked'
-  };
-}
-
-function deriveBuildLaneTaskRecord(
-  projectId: string,
-  teamId: string,
-  teamLabel: string,
-  lane: VicodeBuildLaneSnapshot,
-  current: AutonomousTaskRecord | null
-): AutonomousTaskRecord {
-  const status = deriveBuildLaneTaskStatus(lane);
-  const summary =
-    lane.recommendedAction
-    ?? lane.blockedReason
-    ?? lane.lastPreview
-    ?? `Lane status: ${lane.status.replace(/_/gu, ' ')}.`;
-  const terminal = status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'blocked';
-  return {
-    id: current?.id ?? buildLaneTaskSourceId(projectId, teamId, lane.laneId),
-    kind: 'build_lane',
-    projectId,
-    threadId: lane.threadId,
-    runId: null,
-    sourceId: buildLaneTaskSourceId(projectId, teamId, lane.laneId),
-    title: lane.label,
-    summary,
-    ownerLabel: teamLabel,
-    provenanceLabel: 'build control',
-    trustLabel: 'trusted worktree',
-    approvalLabel: lane.paused ? 'manual wake required' : null,
-    status,
-    statusLabel: lane.paused ? 'paused' : lane.status.replace(/_/gu, ' '),
-    blockedBy: lane.blockedReason,
-    blocking: null,
-    lastError: status === 'failed' ? lane.blockedReason ?? lane.lastPreview : null,
-    metadata: {
-      teamId,
-      laneId: lane.laneId,
-      threadStatus: lane.threadStatus,
-      threadTitle: lane.threadTitle
-    },
-    createdAt: current?.createdAt ?? new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    startedAt:
-      status === 'running'
-        ? (current?.startedAt ?? lane.lastWakeAt ?? lane.lastRunAt ?? null)
-        : current?.startedAt ?? null,
-    completedAt:
-      terminal
-        ? (lane.lastRunAt ?? current?.completedAt ?? new Date().toISOString())
-        : null
-  };
-}
-
-function deriveBuildTicketTaskRecord(
-  projectId: string,
-  teamId: string,
-  laneThreadId: string | null,
-  ticket: VicodeBuildTicketSnapshot,
-  tickets: VicodeBuildTicketSnapshot[],
-  current: AutonomousTaskRecord | null
-): AutonomousTaskRecord {
-  const status = deriveBuildTicketTaskStatus(ticket, tickets);
-  const unresolvedDependencies = unresolvedTicketDependencies(ticket, tickets);
-  const unresolvedDependencyTitlesValue = unresolvedDependencyTitles(ticket, tickets);
-  const downstreamDependentIds = dependentTicketIds(ticket, tickets);
-  const downstreamDependentTitles = dependentTicketTitles(ticket, tickets);
-  return {
-    id: current?.id ?? buildTicketTaskSourceId(projectId, teamId, ticket.id),
-    kind: 'build_ticket',
-    projectId,
-    threadId: laneThreadId,
-    runId: null,
-    sourceId: buildTicketTaskSourceId(projectId, teamId, ticket.id),
-    title: ticket.title,
-    summary: summarizeBuildTicketChecklist(ticket, tickets),
-    ownerLabel: ticket.ownerLane,
-    provenanceLabel: 'build control ticket',
-    trustLabel: 'trusted worktree',
-    approvalLabel: ticket.stopWhen?.trim() ? 'bounded stop condition' : null,
-    status,
-    statusLabel:
-      ticket.status === 'todo' && unresolvedDependencies.length > 0
-        ? 'waiting on dependency'
-        : ticket.status.replace(/_/gu, ' '),
-    blockedBy:
-      ticket.status === 'blocked'
-        ? ticket.summary ?? 'ticket blocked'
-        : unresolvedDependencyTitlesValue.length > 0
-          ? unresolvedDependencyTitlesValue.join(', ')
-          : null,
-    blocking: downstreamDependentTitles.length > 0 ? downstreamDependentTitles.join(', ') : null,
-    lastError: ticket.status === 'blocked' ? ticket.summary ?? null : null,
-    metadata: {
-      teamId,
-      ticketId: ticket.id,
-      ownerLane: ticket.ownerLane,
-      ownerThreadId: ticket.ownerThreadId ?? null,
-      blockedByTicketIds: unresolvedDependencies,
-      blockedByTicketTitles: unresolvedDependencyTitlesValue,
-      blockingTicketIds: downstreamDependentIds,
-      blockingTicketTitles: downstreamDependentTitles,
-      dependencies: ticket.dependencies,
-      targetPaths: ticket.targetPaths,
-      acceptanceCriteria: ticket.acceptanceCriteria,
-      verificationSteps: ticket.verificationSteps,
-      refs: ticket.refs,
-      stopWhen: ticket.stopWhen
-    },
-    createdAt: current?.createdAt ?? ticket.updatedAt ?? new Date().toISOString(),
-    updatedAt: ticket.updatedAt ?? new Date().toISOString(),
-    startedAt:
-      status === 'running'
-        ? (current?.startedAt ?? ticket.updatedAt ?? new Date().toISOString())
-        : current?.startedAt ?? null,
-    completedAt:
-      status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'blocked'
-        ? (ticket.updatedAt ?? current?.completedAt ?? new Date().toISOString())
-        : null
   };
 }
 
@@ -543,18 +259,16 @@ export class AutonomousTaskService {
   private readonly emitter = new EventEmitter();
   private readonly unsubscribeJobs: () => void;
   private readonly unsubscribeSubagents: () => void;
-  private readonly unsubscribeBuildControl: () => void;
 
   constructor(
     private readonly db: DatabaseService,
     private readonly jobs: JobsService,
-    private readonly vicodeBuild: VicodeBuildControlService,
     private readonly subagents: SubagentOrchestratorService
   ) {
     this.unsubscribeJobs =
       typeof this.jobs.onEvent === 'function'
         ? this.jobs.onEvent((event) => {
-          if (event.type === 'job.updated' && event.job.threadId) {
+            if (event.type === 'job.updated' && event.job.threadId) {
               this.syncJobTask(event.job);
               this.emitThreadUpdate(event.job.threadId);
             }
@@ -575,19 +289,11 @@ export class AutonomousTaskService {
             }
           })
         : () => undefined;
-    this.unsubscribeBuildControl =
-      typeof this.vicodeBuild.onControllerUpdate === 'function'
-        ? this.vicodeBuild.onControllerUpdate((event) => {
-            this.syncBuildTeamTasks(event.projectId, event.teamId);
-            this.emitBuildTeamUpdates(event.projectId, event.teamId, event.threadId);
-          })
-        : () => undefined;
   }
 
   dispose() {
     this.unsubscribeJobs();
     this.unsubscribeSubagents();
-    this.unsubscribeBuildControl();
     this.emitter.removeAllListeners();
   }
 
@@ -598,29 +304,12 @@ export class AutonomousTaskService {
 
   listForThread(threadId: string) {
     const thread = this.db.getThread(threadId);
-    const buildSnapshot = this.vicodeBuild.getSnapshot(thread.projectId);
-    const relevantTeam = deriveRelevantBuildTeam(buildSnapshot, thread);
     const tasks: AutonomousTaskSummary[] = [];
     const persistedTasks = new Map(
       this.db
         .listAutonomousTasksForProject(thread.projectId)
         .map((task) => [task.sourceId, task] as const)
     );
-
-    if (relevantTeam) {
-      for (const lane of relevantTeam.lanes) {
-        const persisted = persistedTasks.get(buildLaneTaskSourceId(thread.projectId, relevantTeam.teamId, lane.laneId));
-        tasks.push(persisted ? toAutonomousTaskSummary(persisted) : deriveBuildLaneTaskSummary(lane, relevantTeam.label));
-      }
-      for (const ticket of relevantTeam.tickets) {
-        const persisted = persistedTasks.get(buildTicketTaskSourceId(thread.projectId, relevantTeam.teamId, ticket.id));
-        tasks.push(
-          persisted
-            ? toAutonomousTaskSummary(persisted)
-            : deriveBuildTicketTaskSummary(ticket, relevantTeam.label, relevantTeam.tickets)
-        );
-      }
-    }
 
     for (const subagent of this.subagents.listForThread(threadId)) {
       const persisted = persistedTasks.get(subagentTaskSourceId(subagent.id));
@@ -633,67 +322,6 @@ export class AutonomousTaskService {
     }
 
     return sortAutonomousTasks(tasks);
-  }
-
-  private syncBuildTeamTasks(projectId: string, teamId: string) {
-    const snapshot = this.vicodeBuild.getSnapshot(projectId);
-    if (!snapshot.available) {
-      return;
-    }
-
-    const team = snapshot.teams.find((entry) => entry.teamId === teamId);
-    if (!team) {
-      return;
-    }
-
-    const existingLaneBySource = new Map(
-      this.db
-        .listAutonomousTasksForProject(projectId, 'build_lane')
-        .map((task) => [task.sourceId, task] as const)
-    );
-    const existingTicketBySource = new Map(
-      this.db
-        .listAutonomousTasksForProject(projectId, 'build_ticket')
-        .map((task) => [task.sourceId, task] as const)
-    );
-    const nextLaneSources = new Set<string>();
-    const nextTicketSources = new Set<string>();
-
-    for (const lane of team.lanes) {
-      const sourceId = buildLaneTaskSourceId(projectId, team.teamId, lane.laneId);
-      nextLaneSources.add(sourceId);
-      this.db.upsertAutonomousTask(
-        deriveBuildLaneTaskRecord(projectId, team.teamId, team.label, lane, existingLaneBySource.get(sourceId) ?? null)
-      );
-    }
-
-    const laneThreadIds = new Map(team.lanes.map((lane) => [lane.laneId, lane.threadId] as const));
-    for (const ticket of team.tickets) {
-      const sourceId = buildTicketTaskSourceId(projectId, team.teamId, ticket.id);
-      nextTicketSources.add(sourceId);
-      this.db.upsertAutonomousTask(
-        deriveBuildTicketTaskRecord(
-          projectId,
-          team.teamId,
-          laneThreadIds.get(ticket.ownerLane) ?? null,
-          ticket,
-          team.tickets,
-          existingTicketBySource.get(sourceId) ?? null
-        )
-      );
-    }
-
-    for (const sourceId of existingLaneBySource.keys()) {
-      if (sourceId.startsWith(`build-lane:${projectId}:${team.teamId}:`) && !nextLaneSources.has(sourceId)) {
-        this.db.deleteAutonomousTaskByKindAndSource('build_lane', sourceId);
-      }
-    }
-
-    for (const sourceId of existingTicketBySource.keys()) {
-      if (sourceId.startsWith(`build-ticket:${projectId}:${team.teamId}:`) && !nextTicketSources.has(sourceId)) {
-        this.db.deleteAutonomousTaskByKindAndSource('build_ticket', sourceId);
-      }
-    }
   }
 
   private syncJobTask(job: JobDefinition) {
@@ -724,37 +352,5 @@ export class AutonomousTaskService {
       threadId,
       tasks: this.listForThread(threadId)
     } satisfies AppEvent);
-  }
-
-  private emitBuildTeamUpdates(projectId: string, teamId: string, fallbackThreadId: string | null) {
-    const snapshot = this.vicodeBuild.getSnapshot(projectId);
-    if (!snapshot.available) {
-      if (fallbackThreadId) {
-        this.emitThreadUpdate(fallbackThreadId);
-      }
-      return;
-    }
-
-    const team = snapshot.teams.find((entry) => entry.teamId === teamId);
-    if (!team) {
-      if (fallbackThreadId) {
-        this.emitThreadUpdate(fallbackThreadId);
-      }
-      return;
-    }
-
-    const threadIds = new Set<string>();
-    if (fallbackThreadId) {
-      threadIds.add(fallbackThreadId);
-    }
-    for (const lane of team.lanes) {
-      if (lane.threadId) {
-        threadIds.add(lane.threadId);
-      }
-    }
-
-    for (const threadId of threadIds) {
-      this.emitThreadUpdate(threadId);
-    }
   }
 }

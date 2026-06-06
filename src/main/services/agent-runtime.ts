@@ -26,18 +26,23 @@ import type {
   AgentToolExecutionResult
 } from '../../providers/agent-runtime';
 import { buildAgentRuntimeToolCatalog } from '../../providers/agent-tool-catalog';
-import { isNativeWebResearchToolName } from '../../providers/agent-runtime-native-tools';
+import {
+  findNativeAgentRuntimeToolDefinition,
+  isNativeWebResearchToolName
+} from '../../providers/agent-runtime-native-tools';
 import {
   readBoundedIntegerArgument,
   readOptionalStringArgument,
   readStringArgument
 } from './agent-runtime-arguments';
+import type {
+  BrowserPreviewService
+} from './browser-preview';
 import {
-  assertBuildPlannerCommandAllowed,
-  assertBuildPlannerWorkspaceMutationAllowed,
-  requiresBuildControllerQueueHelper,
-  rewriteBuildPlannerHelperCommand
-} from './agent-runtime-build-planner-policy';
+  formatBrowserPreviewResult,
+  isBrowserPreviewHealthy,
+  readBrowserPreviewExpectedSelectors
+} from './agent-runtime-browser-preview';
 import {
   assertRunCommandToolPolicy,
   requestRunCommandApprovalIfNeeded,
@@ -45,10 +50,14 @@ import {
 } from './agent-runtime-command-policy';
 import { normalizeWorkspacePath } from './agent-runtime-workspace-paths';
 import {
-  applyWorkspacePatch,
+  applyStagedWorkspaceChangeSet,
   createWorkspaceDirectory,
+  stageWorkspaceDirectory,
+  stageWorkspacePatch,
+  stageWorkspaceTextFile,
   writeWorkspaceTextFile
 } from './agent-runtime-workspace-writes';
+import { createStagedWorkspacePreviewArtifact } from './staged-workspace-review';
 import type {
   AgentRuntimeVicodeCreatorBridge
 } from './agent-runtime-vicode-creators';
@@ -85,6 +94,24 @@ const SEARCH_IGNORED_DIRECTORIES = new Set([
   'build',
   '.next'
 ]);
+function containsGlobSyntax(pathValue: string) {
+  return /[*?[\]{}]/u.test(pathValue);
+}
+
+function getGlobSearchBasePath(pathValue: string) {
+  const normalized = pathValue.replace(/\\/g, '/').trim();
+  const firstGlobIndex = normalized.search(/[*?[\]{}]/u);
+  if (firstGlobIndex < 0) {
+    return normalized || '.';
+  }
+
+  const slashIndex = normalized.lastIndexOf('/', firstGlobIndex);
+  if (slashIndex < 0) {
+    return '.';
+  }
+  const base = normalized.slice(0, slashIndex);
+  return base || '.';
+}
 const SUBAGENT_PROFILES = new Set<AutonomyDelegationProfile>([
   'heartbeat',
   'research',
@@ -100,10 +127,42 @@ const PROVIDER_REASONING_EFFORTS = new Set<ProviderReasoningEffort>([
   'xhigh'
 ]);
 const ACTIVE_SUBAGENT_STATUSES = new Set<SubagentSummary['status']>(['queued', 'running']);
+const NON_EMPTY_STRING_ARGUMENT_NAMES = new Set([
+  'command',
+  'folder_name',
+  'patch',
+  'path',
+  'prompt',
+  'query',
+  'title',
+  'url'
+]);
 
 interface AgentRuntimeSubagentBridge {
   listForThread(threadId: string): SubagentSummary[];
   spawn(input: SubagentSpawnInput): Promise<SubagentSummary>;
+}
+
+export interface AgentRuntimeProjectKnowledgeBridge {
+  isConfigured(): boolean;
+  search(query: string, maxResults?: number): Array<{
+    title: string;
+    relativePath: string;
+    heading: string | null;
+    content: string;
+    retrievalReason: { reason: string };
+  }>;
+  read(path: string, heading?: string | null): {
+    title: string;
+    relativePath: string;
+    heading: string | null;
+    content: string;
+  } | null;
+  list(maxResults?: number): Array<{
+    title: string;
+    relativePath: string;
+    heading: string | null;
+  }>;
 }
 
 interface ParsedSubagentTaskInput {
@@ -148,6 +207,80 @@ function truncateToolActivityText(value: string) {
   return `${value.slice(0, MAX_TOOL_ACTIVITY_TEXT_CHARS)}...`;
 }
 
+function formatValidationPath(path: Array<string | number>) {
+  return path.length > 0 ? path.map(String).join('.') : 'arguments';
+}
+
+function formatNativeToolValidationIssue(issue: {
+  code?: string;
+  expected?: string;
+  message?: string;
+  maximum?: number;
+  origin?: string;
+  path?: Array<string | number>;
+  values?: unknown[];
+}) {
+  const path = formatValidationPath(issue.path ?? []);
+  const fieldName = path.split('.').at(-1) ?? path;
+  if (issue.code === 'invalid_type') {
+    if (issue.expected === 'string') {
+      return NON_EMPTY_STRING_ARGUMENT_NAMES.has(fieldName)
+        ? `${path} must be a non-empty string.`
+        : `${path} must be a string.`;
+    }
+    if (issue.expected === 'number') {
+      return `${path} must be a number.`;
+    }
+    if (issue.expected === 'boolean') {
+      return `${path} must be a boolean.`;
+    }
+    if (issue.expected === 'array') {
+      return `${path} must be an array.`;
+    }
+    if (issue.expected === 'object') {
+      return `${path} must be an object.`;
+    }
+  }
+
+  if (issue.code === 'too_small' && issue.origin === 'string') {
+    return `${path} must be a non-empty string.`;
+  }
+
+  if (issue.code === 'too_big' && issue.origin === 'array' && Number.isFinite(issue.maximum)) {
+    return `${path} must contain at most ${issue.maximum} items.`;
+  }
+
+  if (issue.code === 'invalid_value' && Array.isArray(issue.values) && issue.values.length > 0) {
+    return `${path} must be one of: ${issue.values.join(', ')}.`;
+  }
+
+  return issue.message?.trim() || `${path} is invalid.`;
+}
+
+function validateNativeToolArguments(call: AgentToolCall): AgentToolExecutionResult | Record<string, unknown> {
+  const definition = findNativeAgentRuntimeToolDefinition(call.name);
+  if (!definition) {
+    return call.arguments;
+  }
+
+  const result = definition.inputSchema.safeParse(call.arguments);
+  if (result.success) {
+    return result.data && typeof result.data === 'object' && !Array.isArray(result.data)
+      ? result.data as Record<string, unknown>
+      : {};
+  }
+
+  return {
+    toolName: call.name,
+    content: `Invalid arguments for ${call.name}: ${formatNativeToolValidationIssue(result.error.issues[0] ?? {})}`,
+    isError: true
+  };
+}
+
+function isToolExecutionResult(value: AgentToolExecutionResult | Record<string, unknown>): value is AgentToolExecutionResult {
+  return 'toolName' in value && typeof value.toolName === 'string' && 'content' in value;
+}
+
 function toPatchTargetPath(fileName: string) {
   return fileName === '/dev/null' ? fileName : fileName.replace(/^[ab]\//u, '');
 }
@@ -165,7 +298,9 @@ export class AgentRuntimeService implements AgentRuntime {
       listCatalog(): Promise<McpCatalogSnapshot>;
       callTool(serverId: string, toolName: string, args: Record<string, unknown>): Promise<{ content: Array<Record<string, unknown>> }>;
     },
-    private readonly webResearch?: WebResearchService
+    private readonly webResearch?: WebResearchService,
+    private readonly browserPreview?: BrowserPreviewService,
+    private readonly projectKnowledge?: AgentRuntimeProjectKnowledgeBridge
   ) {}
 
   setSubagents(subagents: AgentRuntimeSubagentBridge | null) {
@@ -192,8 +327,9 @@ export class AgentRuntimeService implements AgentRuntime {
     const nativeWebResearchEnabled = await this.hasNativeWebResearch();
     return buildAgentRuntimeToolCatalog({
       ...context,
-      delegationEnabled: this.subagents !== null,
-      creatorToolsEnabled: this.creators !== null,
+      delegationEnabled: this.subagents !== null && context.enableDelegationTools === true,
+      creatorToolsEnabled: this.creators !== null && context.enableCreatorTools === true,
+      projectKnowledgeEnabled: this.projectKnowledge?.isConfigured() === true,
       nativeWebResearchEnabled,
       mcpTools
     });
@@ -218,38 +354,54 @@ export class AgentRuntimeService implements AgentRuntime {
 
     try {
       await this.assertToolPolicy(call.name, context);
+      const validatedArguments = validateNativeToolArguments(call);
+      if (isToolExecutionResult(validatedArguments)) {
+        context.onInfo?.({
+          message: `Failed ${call.name}`,
+          activity: buildToolResultActivity(call, validatedArguments, truncateToolActivityText)
+        });
+        return validatedArguments;
+      }
       const result = await (async () => {
         switch (call.name) {
           case 'list_directory':
-            return await this.listDirectory(call.arguments, context);
+            return await this.listDirectory(validatedArguments, context);
           case 'read_file':
-            return await this.readFile(call.arguments, context);
+            return await this.readFile(validatedArguments, context);
           case 'search_text':
-            return await this.searchText(call.arguments, context);
+            return await this.searchText(validatedArguments, context);
           case 'web_search':
-            return await this.webSearch(call.arguments, context);
+            return await this.webSearch(validatedArguments, context);
           case 'extract_web_page':
-            return await this.extractWebPage(call.arguments, context);
+            return await this.extractWebPage(validatedArguments, context);
           case 'map_site':
-            return await this.mapSite(call.arguments, context);
+            return await this.mapSite(validatedArguments, context);
           case 'crawl_site':
-            return await this.crawlSite(call.arguments, context);
+            return await this.crawlSite(validatedArguments, context);
           case 'research_topic':
-            return await this.researchTopic(call.arguments, context);
+            return await this.researchTopic(validatedArguments, context);
+          case 'browser_preview_check':
+            return await this.browserPreviewCheck(validatedArguments, context);
           case 'mkdir':
-            return await this.makeDirectory(call.arguments, context);
+            return await this.makeDirectory(validatedArguments, context);
           case 'create_skill_bundle':
-            return await this.createSkillBundle(call.arguments, context);
+            return await this.createSkillBundle(validatedArguments, context);
           case 'create_plugin_bundle':
-            return await this.createPluginBundle(call.arguments, context);
+            return await this.createPluginBundle(validatedArguments, context);
           case 'write_file':
-            return await this.writeFile(call.arguments, context);
+            return await this.writeFile(validatedArguments, context);
           case 'apply_patch':
-            return await this.applyPatch(call.arguments, context);
+            return await this.applyPatch(validatedArguments, context);
           case 'run_command':
-            return await this.runCommand(call.arguments, context);
+            return await this.runCommand(validatedArguments, context);
           case 'spawn_subagents':
-            return await this.spawnSubagents(call.arguments, context);
+            return await this.spawnSubagents(validatedArguments, context);
+          case 'project_knowledge_search':
+            return this.projectKnowledgeSearch(validatedArguments);
+          case 'project_knowledge_read':
+            return this.projectKnowledgeRead(validatedArguments);
+          case 'project_knowledge_list':
+            return this.projectKnowledgeList(validatedArguments);
           case 'use_mcp_tool':
             return await this.useMcpTool(call.arguments, context);
           default:
@@ -363,6 +515,83 @@ export class AgentRuntimeService implements AgentRuntime {
     return {
       toolName: 'use_mcp_tool',
       content: flattened
+    };
+  }
+
+  private projectKnowledgeSearch(args: Record<string, unknown>): AgentToolExecutionResult {
+    if (!this.projectKnowledge?.isConfigured()) {
+      return {
+        toolName: 'project_knowledge_search',
+        content: 'Project Knowledge is not configured.',
+        isError: true
+      };
+    }
+
+    const query = readStringArgument(args, 'query');
+    const maxResults = readBoundedIntegerArgument(args, 'max_results', 3, 5);
+    const results = this.projectKnowledge.search(query, maxResults);
+
+    return {
+      toolName: 'project_knowledge_search',
+      content: results.length > 0
+        ? results.map((block) => [
+            `Title: ${block.title}`,
+            `Source: ${block.relativePath}${block.heading ? ` > ${block.heading}` : ''}`,
+            `Matched: ${block.retrievalReason.reason}`,
+            block.content
+          ].join('\n')).join('\n\n---\n\n')
+        : 'No Project Knowledge results matched the query.'
+    };
+  }
+
+  private projectKnowledgeRead(args: Record<string, unknown>): AgentToolExecutionResult {
+    if (!this.projectKnowledge?.isConfigured()) {
+      return {
+        toolName: 'project_knowledge_read',
+        content: 'Project Knowledge is not configured.',
+        isError: true
+      };
+    }
+
+    const path = readStringArgument(args, 'path');
+    const heading = readOptionalStringArgument(args, 'heading');
+    const result = this.projectKnowledge.read(path, heading);
+
+    return result
+      ? {
+          toolName: 'project_knowledge_read',
+          content: [
+            `Title: ${result.title}`,
+            `Source: ${result.relativePath}${result.heading ? ` > ${result.heading}` : ''}`,
+            result.content
+          ].join('\n')
+        }
+      : {
+          toolName: 'project_knowledge_read',
+          content: `Project Knowledge source not found: ${path}${heading ? ` > ${heading}` : ''}.`,
+          isError: true
+        };
+  }
+
+  private projectKnowledgeList(args: Record<string, unknown>): AgentToolExecutionResult {
+    if (!this.projectKnowledge?.isConfigured()) {
+      return {
+        toolName: 'project_knowledge_list',
+        content: 'Project Knowledge is not configured.',
+        isError: true
+      };
+    }
+
+    const maxResults = readBoundedIntegerArgument(args, 'max_results', 20, 50);
+    const sources = this.projectKnowledge.list(maxResults);
+
+    return {
+      toolName: 'project_knowledge_list',
+      content: sources.length > 0
+        ? sources
+            .map((source) => `- ${source.title}: ${source.relativePath}${source.heading ? ` > ${source.heading}` : ''}`)
+            .join('\n')
+        : 'No Project Knowledge markdown sources are available.'
     };
   }
 
@@ -483,6 +712,39 @@ export class AgentRuntimeService implements AgentRuntime {
     };
   }
 
+  private async browserPreviewCheck(
+    args: Record<string, unknown>,
+    context: AgentToolExecutionContext
+  ): Promise<AgentToolExecutionResult> {
+    if (!this.browserPreview) {
+      throw new Error('browser_preview_check is not available because no browser preview backend is configured.');
+    }
+
+    const url = readStringArgument(args, 'url');
+    const expectedText = readOptionalStringArgument(args, 'expected_text');
+    const expectedSelectors = readBrowserPreviewExpectedSelectors(args);
+    const captureScreenshot = args.capture_screenshot === true;
+    const timeoutMs = Math.max(
+      1_000,
+      readBoundedIntegerArgument(args, 'timeout_ms', 10_000, 30_000)
+    );
+    const result = await this.browserPreview.checkPreview({
+      url,
+      expectedText,
+      expectedSelectors,
+      captureScreenshot,
+      timeoutMs,
+      signal: context.signal
+    });
+
+    const healthy = isBrowserPreviewHealthy(result);
+    return {
+      toolName: 'browser_preview_check',
+      content: formatBrowserPreviewResult(result),
+      isError: healthy ? undefined : true
+    };
+  }
+
   private async listDirectory(
     args: Record<string, unknown>,
     context: AgentToolExecutionContext
@@ -575,6 +837,9 @@ export class AgentRuntimeService implements AgentRuntime {
   ): Promise<AgentToolExecutionResult> {
     const query = readStringArgument(args, 'query');
     const requestedPath = readOptionalStringArgument(args, 'path') ?? '.';
+    const searchPath = containsGlobSyntax(requestedPath)
+      ? getGlobSearchBasePath(requestedPath)
+      : requestedPath;
     const maxResults = readBoundedIntegerArgument(
       args,
       'max_results',
@@ -583,7 +848,7 @@ export class AgentRuntimeService implements AgentRuntime {
     );
     const resolved = normalizeWorkspacePath(
       context.workspaceRoot,
-      requestedPath
+      searchPath
     );
     const results: string[] = [];
     const lowerQuery = query.toLowerCase();
@@ -685,6 +950,17 @@ export class AgentRuntimeService implements AgentRuntime {
     context: AgentToolExecutionContext
   ): Promise<AgentToolExecutionResult> {
     const requestedPath = readStringArgument(args, 'path');
+    if (context.isolationMode === 'patch_buffer') {
+      const stagedWorkspaceChangeSet = stageWorkspaceDirectory(requestedPath, context);
+      const summary = `Staged mkdir ${stagedWorkspaceChangeSet.changedPaths[0]}`;
+
+      return {
+        toolName: 'mkdir',
+        content: summary,
+        stagedWorkspaceChangeSet
+      };
+    }
+
     const resolved = await createWorkspaceDirectory(requestedPath, context);
 
     const summary = 'Created folder';
@@ -783,6 +1059,21 @@ export class AgentRuntimeService implements AgentRuntime {
     if (content === null) {
       throw new Error('Tool argument "content" must be a string.');
     }
+    if (context.isolationMode === 'patch_buffer') {
+      const stagedWorkspaceChangeSet = await stageWorkspaceTextFile(
+        requestedPath,
+        content,
+        context
+      );
+      const summary = `Staged write_file ${stagedWorkspaceChangeSet.changedPaths[0]}`;
+
+      return {
+        toolName: 'write_file',
+        content: summary,
+        stagedWorkspaceChangeSet
+      };
+    }
+
     const resolved = await writeWorkspaceTextFile(
       requestedPath,
       content,
@@ -810,7 +1101,64 @@ export class AgentRuntimeService implements AgentRuntime {
     context: AgentToolExecutionContext
   ): Promise<AgentToolExecutionResult> {
     const patch = readStringArgument(args, 'patch');
-    const changedPaths = await applyWorkspacePatch(patch, context);
+    if (context.isolationMode === 'patch_buffer') {
+      const stagedWorkspaceChangeSet = await stageWorkspacePatch(patch, context);
+      const summary =
+        stagedWorkspaceChangeSet.changedPaths.length === 1
+          ? `Staged apply_patch ${stagedWorkspaceChangeSet.changedPaths[0]}`
+          : `Staged apply_patch ${stagedWorkspaceChangeSet.changedPaths.length} files`;
+
+      return {
+        toolName: 'apply_patch',
+        content: summary,
+        stagedWorkspaceChangeSet
+      };
+    }
+
+    const stagedWorkspaceChangeSet = await stageWorkspacePatch(patch, context);
+    const preview = createStagedWorkspacePreviewArtifact(stagedWorkspaceChangeSet);
+    if (!context.requestApproval) {
+      return {
+        toolName: 'apply_patch',
+        content: 'apply_patch requires diff approval before workspace files can be changed.',
+        isError: true
+      };
+    }
+
+    const operationKinds = Array.from(new Set(stagedWorkspaceChangeSet.operations.map((operation) => operation.operation)));
+    const approvalDecision = await context.requestApproval({
+      toolName: 'apply_patch',
+      command:
+        stagedWorkspaceChangeSet.changedPaths.length === 1
+          ? `apply_patch ${stagedWorkspaceChangeSet.changedPaths[0]}`
+          : `apply_patch ${stagedWorkspaceChangeSet.changedPaths.length} files`,
+      cwd: null,
+      workspaceRoot: context.workspaceRoot,
+      approvalKind: 'workspace_change',
+      workspaceChange: {
+        sourceToolName: 'apply_patch',
+        changedPaths: stagedWorkspaceChangeSet.changedPaths,
+        operationKinds,
+        summary: preview.summary,
+        preview
+      }
+    });
+
+    if (approvalDecision === 'rejected') {
+      return {
+        toolName: 'apply_patch',
+        content: 'apply_patch was not approved by the user.',
+        isError: true
+      };
+    }
+
+    if (approvalDecision === 'cancelled') {
+      const error = new Error('Agent runtime was aborted.');
+      error.name = 'AbortError';
+      throw error;
+    }
+
+    const changedPaths = await applyStagedWorkspaceChangeSet(stagedWorkspaceChangeSet, context);
 
     const summary =
       changedPaths.length === 1
@@ -838,11 +1186,7 @@ export class AgentRuntimeService implements AgentRuntime {
   ): Promise<AgentToolExecutionResult> {
     const requestedCwd =
       typeof args.cwd === 'string' && args.cwd.trim() ? args.cwd.trim() : '.';
-    const command = rewriteBuildPlannerHelperCommand(
-      readStringArgument(args, 'command'),
-      context.workspaceRoot
-    );
-    assertBuildPlannerCommandAllowed(command, context);
+    const command = readStringArgument(args, 'command');
     const executionResolution = resolveRunCommandExecution(
       command,
       requestedCwd,

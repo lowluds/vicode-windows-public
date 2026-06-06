@@ -1,9 +1,6 @@
 import type {
   AutonomousTaskStatus,
-  AutonomousTaskSummary,
-  ThreadDetail,
-  VicodeBuildSnapshot,
-  VicodeBuildTeamSnapshot
+  AutonomousTaskSummary
 } from './domain';
 
 function taskStatusRank(status: AutonomousTaskStatus) {
@@ -24,29 +21,6 @@ function taskStatusRank(status: AutonomousTaskStatus) {
     case 'cancelled':
       return 6;
   }
-}
-
-export function deriveRelevantBuildTeam(
-  snapshot: VicodeBuildSnapshot | null,
-  activeThread: ThreadDetail | null
-) {
-  if (!snapshot?.teams.length) {
-    return null;
-  }
-
-  if (activeThread) {
-    const threadTeam =
-      snapshot.teams.find((team) => team.lanes.some((lane) => lane.threadId === activeThread.id)) ?? null;
-    if (threadTeam) {
-      return threadTeam;
-    }
-  }
-
-  return (
-    snapshot.teams.find((team) => team.status === 'active' || team.status === 'waiting' || team.status === 'attention')
-    ?? snapshot.teams[0]
-    ?? null
-  );
 }
 
 export function sortAutonomousTasks(tasks: AutonomousTaskSummary[]) {
@@ -75,5 +49,3 @@ export function summarizeAutonomousTasks(tasks: AutonomousTaskSummary[]) {
     .map((status) => `${counts.get(status)} ${status}`)
     .join(' · ');
 }
-
-export type { VicodeBuildTeamSnapshot };

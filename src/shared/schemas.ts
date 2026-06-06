@@ -7,6 +7,7 @@ export const skillScopeSchema = z.enum(['global', 'project']);
 export const automationScheduleSchema = z.enum(['manual', 'interval_while_app_open']);
 export const composerModeSchema = z.enum(['default', 'plan']);
 export const executionPermissionSchema = z.enum(['default', 'full_access']);
+export const harnessIsolationModeSchema = z.enum(['direct_workspace', 'patch_buffer', 'git_worktree']);
 export const projectRuntimeCommandPolicySchema = z.enum([
   'approval_required',
   'auto_approve',
@@ -18,7 +19,8 @@ export const followUpBehaviorSchema = z.enum(['queue', 'steer']);
 export const appearanceModeSchema = z.enum(['system', 'dark', 'light']);
 export const accentModeSchema = z.enum(['system', 'custom']);
 export const ollamaTransportModeSchema = z.enum(['chat', 'responses']);
-export const mcpServerTransportTypeSchema = z.enum(['stdio']);
+export const customProviderTransportKindSchema = z.literal('openai_compatible_chat');
+export const mcpServerTransportTypeSchema = z.enum(['stdio', 'streamable_http', 'sse']);
 export const mcpPermissionModeSchema = z.enum(['ask', 'allow', 'deny']);
 export const collabRoomTypeSchema = z.enum(['project', 'dm']);
 export const collabPresenceStatusSchema = z.enum(['online', 'away', 'busy', 'offline']);
@@ -33,61 +35,9 @@ export const projectCreateSchema = z.object({
   runtimeNetworkPolicy: projectRuntimeNetworkPolicySchema.optional()
 });
 
+export const projectIdValueSchema = z.string().min(1);
 export const projectIdSchema = z.object({
-  projectId: z.string().min(1)
-});
-
-const workspaceBootstrapAnswersSchema = z.object({
-  projectIntent: z.string().trim().max(4000).optional(),
-  optimizationPriority: z.string().trim().max(400).optional(),
-  communicationStyle: z.string().trim().max(400).optional(),
-  approvalBoundary: z.string().trim().max(800).optional(),
-  repoConstraints: z.string().trim().max(2000).optional(),
-  wantsSoul: z.boolean().optional(),
-  detailLevel: z.string().trim().max(400).optional(),
-  planningStyle: z.string().trim().max(400).optional(),
-  deliveryStyle: z.string().trim().max(400).optional(),
-  riskPosture: z.string().trim().max(400).optional(),
-  testingExpectation: z.string().trim().max(400).optional(),
-  dependencyPolicy: z.string().trim().max(400).optional(),
-  refactorPosture: z.string().trim().max(400).optional(),
-  summaryStyle: z.string().trim().max(400).optional(),
-  changeStyle: z.string().trim().max(400).optional(),
-  agentAssertiveness: z.string().trim().max(400).optional(),
-  agentFormality: z.string().trim().max(400).optional(),
-  durablePreferences: z.array(z.string().trim().min(1).max(1000)).max(8).optional(),
-  durableDecisions: z.array(z.string().trim().min(1).max(1000)).max(8).optional(),
-  todayFocus: z.string().trim().max(2000).optional(),
-  recentDecisions: z.array(z.string().trim().min(1).max(1000)).max(8).optional(),
-  openQuestions: z.array(z.string().trim().min(1).max(1000)).max(8).optional(),
-  followUps: z.array(z.string().trim().min(1).max(1000)).max(8).optional()
-});
-
-const workspaceTemplateDraftSchema = z.object({
-  kind: z.enum(['agents', 'user', 'soul', 'memory', 'daily_note']),
-  fileName: z.string().trim().min(1).max(260),
-  relativePath: z.string().trim().min(1).max(4096),
-  content: z.string().trim().min(1).max(40000)
-});
-
-export const workspaceBootstrapStatusSchema = projectIdSchema;
-
-export const workspaceBootstrapCreateDraftsSchema = z.object({
-  projectId: z.string().min(1),
-  answers: workspaceBootstrapAnswersSchema,
-  includeSoul: z.boolean().optional(),
-  includeDailyNote: z.boolean().optional(),
-  overwriteExisting: z.boolean().optional()
-});
-
-export const workspaceBootstrapWriteDraftsSchema = z.object({
-  projectId: z.string().min(1),
-  drafts: z.array(workspaceTemplateDraftSchema).min(1).max(5),
-  overwriteExisting: z.boolean().optional()
-});
-
-export const memoryWriteThreadSchema = z.object({
-  threadId: z.string().min(1)
+  projectId: projectIdValueSchema
 });
 
 export const filePathSchema = z.object({
@@ -179,6 +129,29 @@ const textAttachmentSchema = z.object({
   charCount: z.number().int().min(1).max(MAX_COMPOSER_TEXT_ATTACHMENT_CHARS)
 });
 
+const agentToolPresetSchema = z.enum(['default', 'planner', 'subagent']);
+
+const toolConstraintPolicySchema = z.object({
+  preset: agentToolPresetSchema,
+  allowedToolCallNames: z.array(z.string().trim().min(1).max(120)).default([]),
+  disallowedToolCallNames: z.array(z.string().trim().min(1).max(120)).default([])
+});
+
+const nullableNonNegativeNumberSchema = z.number().min(0).nullable();
+
+const agentExecutionConstraintsSchema = z.object({
+  permissionMode: z.enum(['default', 'plan', 'bypassPermissions']),
+  toolPolicy: toolConstraintPolicySchema,
+  maxTurns: nullableNonNegativeNumberSchema,
+  maxReasoningTokens: nullableNonNegativeNumberSchema,
+  taskBudgetTokens: nullableNonNegativeNumberSchema,
+  costBudgetUsd: nullableNonNegativeNumberSchema,
+  maxDelegationDepth: nullableNonNegativeNumberSchema,
+  maxAutomaticRetries: nullableNonNegativeNumberSchema,
+  maxUnchangedHandoffs: nullableNonNegativeNumberSchema,
+  maxSiblingDelegates: nullableNonNegativeNumberSchema
+});
+
 export const composerSubmitSchema = z.object({
   projectId: z.string().min(1),
   threadId: z.string().min(1).nullable().optional(),
@@ -188,6 +161,8 @@ export const composerSubmitSchema = z.object({
   reasoningEffort: providerReasoningEffortSchema.nullable().optional(),
   thinkingEnabled: z.boolean().optional(),
   executionPermission: executionPermissionSchema.default('default'),
+  isolationMode: harnessIsolationModeSchema.default('direct_workspace'),
+  executionConstraints: agentExecutionConstraintsSchema.nullable().optional(),
   skillIds: z.array(z.string().min(1)).default([]),
   imageAttachments: z.array(imageAttachmentSchema).max(4).default([]),
   textAttachments: z.array(textAttachmentSchema).max(8).default([])
@@ -263,6 +238,20 @@ export const providerApiKeySchema = z.object({
   apiKey: z.string().trim().min(1).max(4096)
 });
 
+export const customProviderSettingsSaveSchema = z.object({
+  id: z.string().min(1).optional(),
+  name: z.string().trim().min(1).max(80),
+  transportKind: customProviderTransportKindSchema,
+  baseUrl: z.string().trim().url().max(2048),
+  apiKey: z.string().trim().min(1).max(8192),
+  defaultModelId: z.string().trim().min(1).max(240),
+  enabled: z.boolean()
+});
+
+export const customProviderIdSchema = z.object({
+  providerId: z.string().min(1).max(160)
+});
+
 export const ollamaModelMutationSchema = z.object({
   model: z.string().trim().min(1).max(200)
 });
@@ -274,7 +263,6 @@ export const skillSaveSchema = z.object({
   instructions: z.string().trim().min(1).max(10000),
   scope: skillScopeSchema,
   providerTargets: z.array(providerIdSchema).min(1),
-  syncTargets: z.array(providerIdSchema).optional(),
   enabled: z.boolean(),
   projectId: z.string().min(1).nullable().optional()
 });
@@ -288,18 +276,10 @@ export const skillIdSchema = z.object({
   skillId: z.string().min(1)
 });
 
-export const skillSyncSchema = z.object({
-  skillId: z.string().min(1),
-  providerId: providerIdSchema,
-  enabled: z.boolean()
-});
-
 export const skillSuggestedInstallSchema = z.object({
-  installKind: z.enum(['provider_native', 'github_folder']),
-  providerId: providerIdSchema.nullable().optional(),
+  installKind: z.literal('github_folder'),
   providerTargets: z.array(providerIdSchema).min(1).max(2).optional(),
   token: z.string().trim().min(1).max(160),
-  installTarget: z.string().trim().min(1).max(2048).nullable().optional(),
   owner: z.string().trim().min(1).max(120).nullable().optional(),
   repo: z.string().trim().min(1).max(120).nullable().optional(),
   path: z.string().trim().min(1).max(512).nullable().optional(),
@@ -329,38 +309,6 @@ export const automationIdSchema = z.object({
   automationId: z.string().min(1)
 });
 
-export const vicodeBuildTeamIdSchema = z.string().trim().min(1).max(80);
-export const vicodeBuildLaneIdSchema = z.enum(['planner', 'builder', 'finisher']);
-export const vicodeBuildProjectSchema = z.object({
-  projectId: z.string().min(1).nullable()
-});
-export const vicodeBuildPlanCreateSchema = z.object({
-  projectId: z.string().min(1),
-  goal: z.string().trim().min(1).max(4000),
-  name: z.string().trim().max(120).optional(),
-  worktreePath: z.string().trim().max(400).optional()
-});
-export const vicodeBuildPlanDraftSchema = z.object({
-  projectId: z.string().min(1),
-  goal: z.string().trim().min(1).max(4000)
-});
-export const vicodeBuildPlanFromThreadSchema = z.object({
-  threadId: z.string().min(1)
-});
-export const vicodeBuildTeamPauseSchema = z.object({
-  projectId: z.string().min(1),
-  teamId: vicodeBuildTeamIdSchema,
-  paused: z.boolean()
-});
-export const vicodeBuildLaneActionSchema = z.object({
-  projectId: z.string().min(1),
-  teamId: vicodeBuildTeamIdSchema,
-  laneId: vicodeBuildLaneIdSchema
-});
-export const vicodeBuildClearPlansSchema = z.object({
-  projectId: z.string().min(1)
-});
-
 export const automationToggleSchema = z.object({
   automationId: z.string().min(1),
   enabled: z.boolean()
@@ -372,6 +320,67 @@ export const reviewItemIdSchema = z.object({
 
 export const runToolApprovalIdSchema = z.object({
   approvalId: z.string().min(1)
+});
+
+const stagedWorkspaceReviewFields = {
+  threadId: z.string().min(1),
+  runId: z.string().min(1),
+  stagedEventId: z.string().min(1).nullable().optional(),
+  stagedEventIndex: z.number().int().min(0).nullable().optional()
+};
+
+function requireStagedWorkspaceSelector(
+  value: {
+    stagedEventId?: string | null;
+    stagedEventIndex?: number | null;
+  },
+  context: z.RefinementCtx
+) {
+    if (value.stagedEventId || typeof value.stagedEventIndex === 'number') {
+      return;
+    }
+
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'stagedEventId or stagedEventIndex is required.',
+      path: ['stagedEventId']
+    });
+}
+
+const hunkIdSchema = z.string().trim().min(1);
+const hunkIdListSchema = z.array(hunkIdSchema).min(1);
+
+export const stagedWorkspaceReviewSchema = z
+  .object(stagedWorkspaceReviewFields)
+  .superRefine(requireStagedWorkspaceSelector);
+
+export const stagedWorkspaceHunkApplySchema = z
+  .object({
+    ...stagedWorkspaceReviewFields,
+    acceptedHunkIds: hunkIdListSchema,
+    rejectedHunkIds: z.array(hunkIdSchema).optional().default([])
+  })
+  .superRefine(requireStagedWorkspaceSelector);
+
+export const stagedWorkspaceHunkRejectSchema = z
+  .object({
+    ...stagedWorkspaceReviewFields,
+    hunkIds: hunkIdListSchema
+  })
+  .superRefine(requireStagedWorkspaceSelector);
+
+export const worktreeReviewSchema = z.object({
+  threadId: z.string().min(1),
+  runId: z.string().min(1)
+});
+
+export const worktreeHunkApplySchema = worktreeReviewSchema.extend({
+  acceptedHunkIds: hunkIdListSchema,
+  rejectedHunkIds: z.array(hunkIdSchema).optional().default([])
+});
+
+export const worktreeHunkRejectSchema = worktreeReviewSchema.extend({
+  hunkIds: hunkIdListSchema
 });
 
 export const reviewDraftUpdateSchema = z.object({
@@ -399,13 +408,30 @@ export const mcpServerSaveSchema = z.object({
   scope: z.enum(['global', 'project']).default('global'),
   projectId: z.string().trim().min(1).max(120).nullable().optional(),
   transportType: mcpServerTransportTypeSchema.default('stdio'),
-  command: z.string().trim().min(1).max(4096),
+  command: z.string().trim().max(4096).default(''),
   args: z.array(z.string().max(4096)).default([]),
   cwd: z.string().trim().min(1).max(4096).nullable().optional(),
   env: z.record(z.string().min(1).max(256), z.string().max(8192)).default({}),
+  url: z.string().trim().url().max(4096).nullable().optional(),
+  headers: z.record(z.string().min(1).max(256), z.string().max(8192)).default({}),
   enabled: z.boolean(),
   toolInvocationMode: mcpPermissionModeSchema.default('ask'),
   launchApproved: z.boolean().optional()
+}).superRefine((input, context) => {
+  if (input.transportType === 'stdio' && !input.command.trim()) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['command'],
+      message: 'Command is required for stdio MCP servers.'
+    });
+  }
+  if (input.transportType !== 'stdio' && !input.url?.trim()) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['url'],
+      message: 'URL is required for remote MCP servers.'
+    });
+  }
 });
 
 export const mcpServerEnabledSchema = z.object({
@@ -479,21 +505,10 @@ export const preferenceSaveSchema = z.object({
     .optional(),
   onboardingComplete: z.boolean().optional(),
   lastOpenedThreadId: z.string().min(1).nullable().optional(),
-  microphoneAllowed: z.boolean().optional()
-});
-
-export const personalizationSaveSchema = z.object({
-  globalInstructions: z.string().max(40000).optional(),
-  providerInstructions: z
-    .object({
-      openai: z.string().max(40000).optional(),
-      gemini: z.string().max(40000).optional(),
-      qwen: z.string().max(40000).optional(),
-      ollama: z.string().max(40000).optional(),
-      kimi: z.string().max(40000).optional()
-    })
-    .optional(),
-  useWorkspaceInstructions: z.boolean().optional()
+  microphoneAllowed: z.boolean().optional(),
+  userLibraryPath: z.string().trim().min(1).max(4096).nullable().optional(),
+  skillsLibraryPath: z.string().trim().min(1).max(4096).nullable().optional(),
+  llmWikiLibraryPath: z.string().trim().min(1).max(4096).nullable().optional()
 });
 
 export const archivedThreadsListSchema = z.object({

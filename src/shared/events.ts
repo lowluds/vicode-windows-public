@@ -15,6 +15,7 @@ import type {
   McpServerView,
   PlannerPlan,
   PlannerQuestionSet,
+  ProjectKnowledgeIndexStatus,
   AppUpdateState,
   ProviderDescriptor,
   ReviewItem,
@@ -61,6 +62,8 @@ export type AppEvent =
   | { type: 'job.updated'; job: JobDefinition }
   | { type: 'review.updated'; reviewItem: ReviewItem }
   | { type: 'automation.updated'; automation: AutomationDefinition }
+  | { type: 'library.skillsChanged'; refreshedAt: string }
+  | { type: 'library.projectKnowledgeChanged'; refreshedAt: string; status: ProjectKnowledgeIndexStatus | null }
   | { type: 'collab.profileUpdated'; profile: CollabProfile | null }
   | { type: 'collab.roomsUpdated'; rooms: CollabRoom[] }
   | { type: 'collab.roomUpdated'; room: CollabRoom; members: CollabRoomMember[] }

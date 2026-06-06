@@ -17,6 +17,7 @@ describe('agent tool policy', () => {
       'map_site',
       'crawl_site',
       'research_topic',
+      'browser_preview_check',
       'mkdir',
       'write_file',
       'apply_patch',
@@ -28,7 +29,7 @@ describe('agent tool policy', () => {
     expect(isAgentToolAllowed('run_command', 'default')).toBe(false);
     expect(isAgentToolAllowed('run_command', 'full_access')).toBe(true);
     expect(getAgentToolDeniedMessage('run_command', 'default')).toBe(
-      'run_command requires Full access. Approved commands start in the workspace, run on the local host, and use isolated temp home/appdata directories by default, but they are not sandboxed to it.'
+      'run_command requires Full access. Full access enables host-local commands according to the workspace runtime policy; commands are not contained sandbox execution.'
     );
   });
 
@@ -37,6 +38,7 @@ describe('agent tool policy', () => {
     expect(isAgentToolAllowed('apply_patch', 'default')).toBe(true);
     expect(isAgentToolAllowed('web_search', 'default')).toBe(true);
     expect(isAgentToolAllowed('research_topic', 'default')).toBe(true);
+    expect(isAgentToolAllowed('browser_preview_check', 'default')).toBe(true);
     expect(getAgentToolPolicy('apply_patch')).toEqual(
       expect.objectContaining({
         category: 'write',
@@ -50,6 +52,12 @@ describe('agent tool policy', () => {
       })
     );
     expect(getAgentToolPolicy('crawl_site')).toEqual(
+      expect.objectContaining({
+        category: 'network',
+        workspaceBounded: false
+      })
+    );
+    expect(getAgentToolPolicy('browser_preview_check')).toEqual(
       expect.objectContaining({
         category: 'network',
         workspaceBounded: false

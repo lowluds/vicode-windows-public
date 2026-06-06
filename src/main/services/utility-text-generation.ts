@@ -8,7 +8,12 @@ import type {
   ProviderDescriptor,
   ProviderId
 } from '../../shared/domain';
-import { providerCapabilities, selectPreferredSubagentModel } from '../../shared/providers';
+import {
+  decodeOllamaModelId,
+  providerCapabilities,
+  resolveOllamaApiKeyForModel,
+  selectPreferredSubagentModel
+} from '../../shared/providers';
 
 export interface UtilityTextGenerationInput {
   providerId: ProviderId;
@@ -74,8 +79,13 @@ export async function runUtilityTextGeneration(
   const adapter = dependencies.adapters[input.providerId];
   const account = dependencies.getProviderAccount(input.providerId);
   const auth = await adapter.getAuthState(account);
-  const apiKey = resolveApiKey(account, auth, dependencies.decryptApiKey);
-  const modelId = await resolveUtilityModelId(input.providerId, input.modelId, dependencies);
+  const providerApiKey = resolveApiKey(account, auth, dependencies.decryptApiKey);
+  const resolvedModelId = await resolveUtilityModelId(input.providerId, input.modelId, dependencies);
+  const modelId = input.providerId === 'ollama' ? decodeOllamaModelId(resolvedModelId) : resolvedModelId;
+  const apiKey =
+    input.providerId === 'ollama'
+      ? resolveOllamaApiKeyForModel(resolvedModelId, providerApiKey)
+      : providerApiKey;
   const runId = randomUUID();
 
   return new Promise<string | null>((resolve) => {

@@ -4,6 +4,77 @@ All notable user-facing changes to Vicode are recorded here.
 
 ## Unreleased
 
+### Fixed
+- Fixed Ollama `/v1/responses` tool definition serialization so the local
+  Ollama API receives Responses-style function tools with schema parameters
+  during normalized provider validation.
+
+### Improved
+- Simplified the composer provider menu by removing the low-level Thinking
+  toggle while keeping provider-owned thinking defaults in the runtime.
+
+### Documentation
+- Added the `0.2.8` public-beta verification goal with the 12 manual checks,
+  automation-backed walkthrough coverage, and the remaining final
+  human/outside-tester judgement gate.
+- Refreshed the current `0.2.8` release-readiness docs after the final
+  post-retirement packaged/install/live-provider candidate pass.
+- Merged the latest beta-readiness fixes from `main` into the public-beta
+  candidate, rebuilt the installer, and refreshed package/install/draft-release
+  evidence for the merged source.
+- Rebuilt and re-recorded current-commit `0.2.8` package, upgrade, fresh
+  install, installed smoke, and uninstall evidence after wiring the beta
+  walkthrough into `npm run simulate:real-user`.
+- Removed the stale `codex:upstream-check` release-hardening hook and refreshed
+  the `0.2.8` package, install, and draft release asset evidence for the new
+  candidate commit.
+- Added limited-public-beta handoff copy for Reddit-style tester invites,
+  including provider scope, unsigned-installer caveats, feedback prompts, and
+  release-link placeholders.
+- Recorded the draft `v0.2.8` release asset state in the release-only repo
+  without treating draft asset URLs as public tester links.
+- Updated beta provider scope to the local Ollama API plus Custom API
+  OpenAI-compatible keys, retiring first-class OpenAI and other provider CLI
+  setup from public-beta gates and tester-facing docs.
+- Marked the old manual packaged certification packet as historical `0.2.7`
+  evidence so it is not mistaken for current `0.2.8` proof.
+- Added the public-beta verification goal to the public-repo safety audit.
+
+### Changed
+- Surfaced provider setup now centers local Ollama and Custom API; retired
+  provider CLI lanes fail closed instead of launching OpenAI, Gemini, Qwen, or
+  Kimi CLIs.
+
+## 0.2.8 - 2026-06-04
+
+### Improved
+- Composer edit-mode controls now use clearer release-facing language for direct edits, proposed changes, isolated worktrees, and full-access warning copy.
+- Direct edits, proposed changes, and isolated worktree modes now have focused front-facing Playwright coverage so the composer/thread evidence matches the selected edit mode.
+- Ollama beta positioning now centers the local Ollama API, with OpenAI keys
+  supported through the OpenAI-compatible Custom API lane.
+
+### Documentation
+- Ollama listing readiness docs now keep upstream `ollama launch vicode`, local write-capable model execution, and candidate-specific proof as separate release claims.
+- Release-facing docs now point testers and reviewers at the `0.2.8` beta line.
+
+### Packaging
+- App version updated to `0.2.8`.
+- The Windows installer artifact for this line is `Vicode-Setup-0.2.8.exe`.
+- Previous `0.2.7` packaged and installed proof is historical evidence only;
+  the post-merge `0.2.8` candidate has refreshed packaged, installed,
+  public-audit, automation-backed 12-check, upgrade, uninstall, local Ollama,
+  and focused Custom API evidence.
+
+## 0.2.7 - 2026-04-26
+
+### Fixed
+- Packaged Windows builds now ship the Vicode icon as an external runtime resource so the installed app, window metadata, and Windows shell surfaces do not fall back to a blank icon.
+
+### Packaging
+- App version updated to `0.2.7`.
+- `0.2.7` supersedes `0.2.6` for public-beta downloads because `0.2.6` could show a blank desktop/taskbar icon even though the executable still contained an embedded icon.
+- Release artifact audit now fails if the packaged runtime icon resources are missing.
+
 ## 0.2.6 - 2026-04-26
 
 ### Fixed

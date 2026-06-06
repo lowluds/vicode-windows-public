@@ -1,0 +1,62 @@
+[
+  {
+    "name": "duplicate titles use alias disambiguation",
+    "files": {
+      "runtime/desktop.md": "---\ntitle: Runtime Patterns\naliases: [desktop runtime]\n---\n# Runtime Patterns\nDesktop runtime covers Electron startup and local app state.",
+      "runtime/browser.md": "---\ntitle: Runtime Patterns\naliases: [browser runtime]\n---\n# Runtime Patterns\nBrowser runtime covers Playwright preview behavior and route checks."
+    },
+    "prompt": "Use the browser runtime route for Playwright preview behavior.",
+    "task": null,
+    "expectedFirstTitle": "Runtime Patterns",
+    "expectedFirstRelativePath": "runtime/browser.md"
+  },
+  {
+    "name": "missing heading can still retrieve by body and path",
+    "files": {
+      "notes/retrieval-diagnostics.md": "Retrieval diagnostics should mention weak metadata, duplicate titles, missing headings, and skipped files.",
+      "notes/random.md": "# Random Notes\nA scratch page with unrelated release notes."
+    },
+    "prompt": "Where do we track weak metadata and missing heading diagnostics?",
+    "task": null,
+    "expectedFirstTitle": "retrieval-diagnostics",
+    "expectedFirstRelativePath": "notes/retrieval-diagnostics.md",
+    "expectedFirstHeading": null,
+    "expectedContentContains": ["weak metadata"]
+  },
+  {
+    "name": "budget clipping marks long selected context",
+    "files": {
+      "budgets/context-budget.md": {
+        "prefixLines": [
+          "# Context Budget",
+          "Project Knowledge context budget guidance keeps retrieved packets compact."
+        ],
+        "repeatText": " context budget retrieval packet should stay compact and source-backed.",
+        "repeatCount": 90
+      },
+      "budgets/short.md": "# Short Budget Note\nSmall packets are useful."
+    },
+    "prompt": "Explain the context budget retrieval packet guidance.",
+    "task": null,
+    "maxResults": 1,
+    "expectedFirstTitle": "Context Budget",
+    "expectedFirstRelativePath": "budgets/context-budget.md",
+    "expectedBlockCount": 1,
+    "expectedContentContains": ["[Truncated for Project Knowledge budget]"]
+  },
+  {
+    "name": "large folder keeps max results compact",
+    "files": {
+      "routing/one.md": "# Routing One\nRetrieval routing compact evidence for frontend tasks.",
+      "routing/two.md": "# Routing Two\nRetrieval routing compact evidence for backend tasks.",
+      "routing/three.md": "# Routing Three\nRetrieval routing compact evidence for database tasks.",
+      "routing/four.md": "# Routing Four\nRetrieval routing compact evidence for release tasks.",
+      "routing/five.md": "# Routing Five\nRetrieval routing compact evidence for testing tasks."
+    },
+    "prompt": "Find retrieval routing compact evidence for implementation tasks.",
+    "task": null,
+    "maxResults": 2,
+    "expectedBlockCount": 2,
+    "expectedContentExcludes": ["Routing Three", "Routing Four", "Routing Five"]
+  }
+]

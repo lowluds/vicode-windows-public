@@ -1,14 +1,13 @@
 import type { ReactNode } from 'react';
-import { ActionButton, IconButton, Menu, MenuContent, MenuItem, MenuItemLabel, MenuLabel, MenuSeparator, MenuTrigger, Tooltip, TooltipContent, TooltipTrigger } from './ui';
+import { ActionButton, IconButton, Menu, MenuContent, MenuLabel, MenuTrigger, Tooltip, TooltipContent, TooltipTrigger } from './ui';
 import type { AppUpdateState, CollabBootstrap, SettingsSection } from '../../shared/domain';
 import { normalizeDisplayText } from '../../shared/display-text';
-import { AccountIcon, AutomationIcon, SettingsIcon, SkillsIcon } from './icons';
+import { PanelLeftCloseIcon, PanelLeftOpenIcon, SettingsIcon, SkillsIcon } from './icons';
 import { TitleBarUpdateAction } from './TitleBarUpdateAction';
+import { ThemedWolfLogo } from './ThemedWolfLogo';
 import { cx } from './ui/utils';
-import appIcon from '../assets/app-icon.png';
-import wolfRun from '../assets/wolf-run.svg';
 
-type Route = 'thread' | 'collab' | 'skills' | 'build-control' | 'automations' | 'settings' | 'ui-dev';
+type Route = 'thread' | 'collab' | 'skills' | 'automations' | 'settings' | 'ui-dev';
 
 interface WindowsTitleBarProps {
   route: Route;
@@ -25,6 +24,8 @@ interface WindowsTitleBarProps {
   isAgentWorking: boolean;
   collaboration: CollabBootstrap;
   appUpdateState: AppUpdateState | null;
+  sidebarCollapsed: boolean;
+  toggleSidebar: () => void;
   openSettings: (section?: SettingsSection) => void;
   openAutomations: () => void;
   openSkills: () => void;
@@ -58,6 +59,8 @@ function avatarTone(seed: string) {
 export function WindowsTitleBar(props: WindowsTitleBarProps) {
   const profileName = props.collaboration.profile?.displayName ?? props.collaboration.account.userId ?? 'Vicode';
   const settingsActive = props.route === 'settings';
+  const skillsActive = props.route === 'skills';
+  const sidebarToggleLabel = props.sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar';
 
   return (
     <header
@@ -66,16 +69,28 @@ export function WindowsTitleBar(props: WindowsTitleBarProps) {
         WebkitAppRegion: 'drag'
       }}
     >
-      <div className="windows-titlebar-brand">
-        <div className={cx('windows-titlebar-mark', props.isAgentWorking && 'is-working')} aria-hidden="true">
-          <img
-            src={props.isAgentWorking ? wolfRun : appIcon}
-            alt=""
-            className={cx('windows-titlebar-mark-image', props.isAgentWorking && 'is-working')}
-          />
-        </div>
+      <div className={cx('windows-titlebar-brand', props.sidebarCollapsed && 'is-sidebar-collapsed')}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <IconButton
+              data-testid="nav-sidebar-toggle"
+              className="windows-titlebar-sidebar-toggle"
+              label={sidebarToggleLabel}
+              onClick={props.toggleSidebar}
+            >
+              <span className="windows-titlebar-sidebar-icon" aria-hidden="true">
+                {props.sidebarCollapsed ? <PanelLeftOpenIcon /> : <PanelLeftCloseIcon />}
+              </span>
+            </IconButton>
+          </TooltipTrigger>
+          <TooltipContent className="windows-titlebar-tooltip">
+            {sidebarToggleLabel}
+          </TooltipContent>
+        </Tooltip>
         <div className="windows-titlebar-copy">
-          <strong>Vicode</strong>
+          <span className="windows-titlebar-mark" aria-label="Vicode">
+            <ThemedWolfLogo className="windows-titlebar-mark-image" alt="" />
+          </span>
         </div>
       </div>
 
@@ -116,29 +131,15 @@ export function WindowsTitleBar(props: WindowsTitleBarProps) {
         <Tooltip>
           <TooltipTrigger asChild>
             <IconButton
-              data-testid="nav-automations"
-              className={cx('windows-titlebar-action', props.route === 'automations' && 'is-active')}
-              label="Automations"
-              onClick={props.openAutomations}
-            >
-              <AutomationIcon />
-            </IconButton>
-          </TooltipTrigger>
-          <TooltipContent className="windows-titlebar-tooltip">Automations</TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <IconButton
-              data-testid="nav-plugins"
-              className={cx('windows-titlebar-action', props.route === 'skills' && 'is-active')}
-              label="Plugins"
+              data-testid="nav-skills"
+              className={cx('windows-titlebar-action', skillsActive && 'is-active')}
+              label="Catalog"
               onClick={props.openSkills}
             >
               <SkillsIcon />
             </IconButton>
           </TooltipTrigger>
-          <TooltipContent className="windows-titlebar-tooltip">Plugins</TooltipContent>
+          <TooltipContent className="windows-titlebar-tooltip">Catalog</TooltipContent>
         </Tooltip>
 
         <Tooltip>
@@ -172,19 +173,6 @@ export function WindowsTitleBar(props: WindowsTitleBarProps) {
                 <span>{props.collaboration.profile?.handle ?? 'Guest collaboration profile'}</span>
               </div>
             </div>
-            <MenuSeparator />
-            <MenuItem onSelect={() => props.openSettings('personalization')}>
-              <MenuItemLabel>Instructions</MenuItemLabel>
-              <AccountIcon />
-            </MenuItem>
-            <MenuItem onSelect={props.openSkills}>
-              <MenuItemLabel>Plugins</MenuItemLabel>
-              <SkillsIcon />
-            </MenuItem>
-            <MenuItem onSelect={props.openAutomations}>
-              <MenuItemLabel>Automations</MenuItemLabel>
-              <AutomationIcon />
-            </MenuItem>
           </MenuContent>
         </Menu>
       </div>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ImageAttachment, ThreadDetail } from '../../shared/domain';
-import { applyOptimisticComposerTurn } from './composer-submit';
+import { applyOptimisticComposerTurn, buildComposerSubmitInput } from './composer-submit';
 
 function createThread(overrides: Partial<ThreadDetail> = {}): ThreadDetail {
   return {
@@ -138,5 +138,55 @@ describe('applyOptimisticComposerTurn', () => {
         pendingQuestionSet: null
       })
     );
+  });
+
+  it('builds composer submit input with the selected isolation mode', () => {
+    const input = buildComposerSubmitInput({
+      projectId: 'project-1',
+      threadId: 'thread-1',
+      prompt: '  Update the helper.  ',
+      providerId: 'openai',
+      modelId: 'gpt-5',
+      reasoningEffort: 'high',
+      thinkingEnabled: true,
+      executionPermission: 'default',
+      isolationMode: 'patch_buffer',
+      skillIds: ['skill-1'],
+      imageAttachments: [],
+      textAttachments: []
+    });
+
+    expect(input).toMatchObject({
+      projectId: 'project-1',
+      threadId: 'thread-1',
+      prompt: 'Update the helper.',
+      providerId: 'openai',
+      modelId: 'gpt-5',
+      reasoningEffort: 'high',
+      thinkingEnabled: true,
+      executionPermission: 'default',
+      isolationMode: 'patch_buffer',
+      skillIds: ['skill-1']
+    });
+  });
+
+  it('preserves explicit git worktree isolation when building composer submit input', () => {
+    const input = buildComposerSubmitInput({
+      projectId: 'project-1',
+      threadId: 'thread-1',
+      prompt: '  Update the helper in isolation.  ',
+      providerId: 'openai',
+      modelId: 'gpt-5',
+      reasoningEffort: null,
+      thinkingEnabled: false,
+      executionPermission: 'full_access',
+      isolationMode: 'git_worktree',
+      skillIds: [],
+      imageAttachments: [],
+      textAttachments: []
+    });
+
+    expect(input.prompt).toBe('Update the helper in isolation.');
+    expect(input.isolationMode).toBe('git_worktree');
   });
 });

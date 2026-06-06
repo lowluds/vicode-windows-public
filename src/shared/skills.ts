@@ -11,7 +11,6 @@ export interface SkillMetadataShape {
   manifestVersion: number;
   slug: string;
   folderName: string | null;
-  syncTargets: ProviderId[];
   syncState: Partial<Record<ProviderId, SkillSyncState>>;
   providerOrigin: ProviderId | null;
   kind: SkillKind;
@@ -57,9 +56,6 @@ export function normalizeSkillMetadata(
   fallbackName: string,
   fallbackFolderName: string | null = null
 ): SkillMetadataShape {
-  const syncTargets = Array.isArray(metadata?.syncTargets)
-    ? metadata.syncTargets.filter(isProviderId)
-    : [];
   const rawSyncState = metadata?.syncState;
   const syncState: Partial<Record<ProviderId, SkillSyncState>> = {};
 
@@ -89,7 +85,6 @@ export function normalizeSkillMetadata(
       typeof metadata?.folderName === 'string' && metadata.folderName.trim()
         ? metadata.folderName
         : fallbackFolderName,
-    syncTargets,
     syncState,
     providerOrigin: isProviderId(metadata?.providerOrigin) ? metadata.providerOrigin : null,
     kind: metadata?.kind === 'extension' ? 'extension' : 'skill',
@@ -104,16 +99,20 @@ export function normalizeSkillMetadata(
   };
 }
 
-export function getSkillSyncTargets(skill: SkillDefinition) {
-  return normalizeSkillMetadata(skill.metadata, skill.name).syncTargets;
-}
-
-export function getSkillSyncState(skill: SkillDefinition, providerId: ProviderId) {
-  return normalizeSkillMetadata(skill.metadata, skill.name).syncState[providerId] ?? null;
-}
-
 export function buildSkillDocument(skill: Pick<SkillDefinition, 'name' | 'description' | 'instructions'>) {
   return `# ${skill.name}\n\n${skill.description.trim()}\n\n## Instructions\n${skill.instructions.trim()}\n`;
+}
+
+export function isUnreadableSkillText(value: string | null | undefined) {
+  const compact = (value ?? '').replace(/\s/gu, '');
+  if (!compact) {
+    return true;
+  }
+
+  const chars = [...compact];
+  const unreadableCount = chars.filter((char) => char === '\u0000' || char === '\uFFFD').length;
+  const hasLetters = /\p{L}/u.test(compact);
+  return unreadableCount >= 12 || unreadableCount / chars.length > 0.2 || !hasLetters;
 }
 
 export function getSkillCommandToken(skill: SkillDefinition) {
@@ -150,6 +149,10 @@ export function getSkillDetailMarkdown(skill: SkillDefinition) {
 
 export function getSkillCategory(skill: SkillDefinition) {
   return normalizeSkillMetadata(skill.metadata, skill.name).category;
+}
+
+export function isSkillHiddenFromCatalog(skill: SkillDefinition) {
+  return skill.metadata?.hiddenFromCatalog === true;
 }
 
 export interface PromptSkillMention {

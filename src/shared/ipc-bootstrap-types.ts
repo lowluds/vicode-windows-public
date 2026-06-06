@@ -1,90 +1,4 @@
-import type {
-  AppMeta,
-  CollabBootstrap,
-  ProviderId
-} from './domain';
-
-export interface WorkspaceBootstrapQuestion {
-  id: string;
-  prompt: string;
-  targetFiles: string[];
-  optional?: boolean;
-}
-
-export type WorkspaceBootstrapFileKind = 'agents' | 'user' | 'soul' | 'memory' | 'daily_note';
-
-export interface WorkspaceContractFileStatus {
-  kind: WorkspaceBootstrapFileKind;
-  label: string;
-  fileName: string;
-  relativePath: string;
-  purpose: string;
-  exists: boolean;
-  required: boolean;
-  loadMode: 'direct_prompt' | 'memory_retrieval' | 'draft_only';
-}
-
-export interface WorkspaceBootstrapStatus {
-  eligible: boolean;
-  reason: string | null;
-  folderPath: string | null;
-  existingFiles: string[];
-  missingFiles: string[];
-  contractFiles?: WorkspaceContractFileStatus[];
-  needsBootstrap: boolean;
-  dismissed: boolean;
-  suggestionEligible: boolean;
-}
-
-export interface WorkspaceBootstrapAnswers {
-  projectIntent?: string;
-  optimizationPriority?: string;
-  communicationStyle?: string;
-  approvalBoundary?: string;
-  repoConstraints?: string;
-  wantsSoul?: boolean;
-  detailLevel?: string;
-  planningStyle?: string;
-  deliveryStyle?: string;
-  riskPosture?: string;
-  testingExpectation?: string;
-  dependencyPolicy?: string;
-  refactorPosture?: string;
-  summaryStyle?: string;
-  changeStyle?: string;
-  agentAssertiveness?: string;
-  agentFormality?: string;
-  durablePreferences?: string[];
-  durableDecisions?: string[];
-  todayFocus?: string;
-  recentDecisions?: string[];
-  openQuestions?: string[];
-  followUps?: string[];
-}
-
-export interface WorkspaceTemplateDraft {
-  kind: WorkspaceBootstrapFileKind;
-  fileName: string;
-  relativePath: string;
-  content: string;
-}
-
-export interface WorkspaceRepoInspection {
-  folderPath: string;
-  repoName: string;
-  repoPurpose: string;
-  repoStack: string;
-  packageManager: string;
-  installCommand: string;
-  buildCommand: string | null;
-  testCommand: string | null;
-  lintCommand: string | null;
-  platformFocus: string;
-  architectureFacts: string[];
-  constraints: string[];
-  frameworks: string[];
-  languages: string[];
-}
+import type { CollabBootstrap } from './domain';
 
 export interface StorageDiagnostics {
   databasePath: string;
@@ -141,12 +55,6 @@ export interface OllamaRuntimeSnapshot {
 export interface OllamaModelMutationResult {
   model: string;
   models: string[];
-}
-
-export interface WorkspaceBootstrapDraftBundle {
-  status: WorkspaceBootstrapStatus;
-  inspection: WorkspaceRepoInspection;
-  drafts: WorkspaceTemplateDraft[];
 }
 
 export interface ThreadCollaborationSummary {

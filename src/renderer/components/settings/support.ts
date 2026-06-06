@@ -3,13 +3,13 @@ import type {
   AppearanceMode,
   FollowUpBehavior,
   OllamaPullProgress,
-  OllamaTransportMode,
   ProviderDescriptor,
   SettingsSection
 } from '../../../shared/domain';
 import type { OllamaRuntimeSnapshot } from '../../../shared/ipc';
 import {
   providerDisplayName,
+  isRetiredProviderId,
   providerModelRecommendationLabel,
   providerRecommendedRouteSummary,
   providerSettingsAuthDescription,
@@ -18,12 +18,8 @@ import {
   providerSettingsInstallActionLabel,
   providerSettingsInstallLabel,
   providerSettingsPillLabel,
-  providerSettingsStatusSummary,
-  providerUsesHostedApi
+  providerSettingsStatusSummary
 } from '../../../shared/providers';
-
-export const OLLAMA_API_KEY_DOCS_URL = 'https://docs.ollama.com/api/authentication';
-export const OLLAMA_ACCOUNT_URL = 'https://ollama.com/';
 
 export const followUpBehaviorOptions: Array<{ value: FollowUpBehavior; label: string }> = [
   { value: 'queue', label: 'Queue by default' },
@@ -41,29 +37,10 @@ export const accentModeOptions: Array<{ value: AccentMode; label: string }> = [
   { value: 'custom', label: 'Use custom accent' }
 ];
 
-export const ollamaTransportModeOptions: Array<{
-  value: OllamaTransportMode;
-  label: string;
-  description: string;
-}> = [
-  {
-    value: 'chat',
-    label: '/api/chat',
-    description:
-      'Stable default. Uses the native Ollama chat surface for plain replies and the existing Vicode-owned tool loop.'
-  },
-  {
-    value: 'responses',
-    label: '/v1/responses',
-    description:
-      'Experimental OpenAI-compatible surface. Keeps Vicode in charge of the tool loop, but swaps the transport.'
-  }
-];
-
 export const settingsSections: Array<{ value: SettingsSection; label: string }> = [
   { value: 'general', label: 'App' },
   { value: 'providers', label: 'Providers' },
-  { value: 'personalization', label: 'Instructions' },
+  { value: 'library', label: 'Library' },
   { value: 'diagnostics', label: 'Advanced' },
   { value: 'archived_threads', label: 'Archived threads' }
 ];
@@ -83,10 +60,6 @@ export function recommendationTone(recommendation: string | null) {
     return 'detected' as const;
   }
   return 'detected' as const;
-}
-
-export function isOllamaCloudProvider(provider: ProviderDescriptor) {
-  return providerUsesHostedApi(provider);
 }
 
 export function providerAuthTitle(provider: ProviderDescriptor) {
@@ -111,7 +84,7 @@ export function providerInstallActionLabel(provider: ProviderDescriptor) {
 
 export function canDisconnectProvider(provider: ProviderDescriptor) {
   if (provider.id === 'ollama') {
-    return isOllamaCloudProvider(provider) && provider.authState === 'connected';
+    return false;
   }
   return provider.installed && provider.authState === 'connected';
 }
@@ -124,7 +97,7 @@ export function providerInstallLabel(
 }
 
 export function shouldShowInstallAction(provider: ProviderDescriptor) {
-  if (provider.id === 'ollama' && isOllamaCloudProvider(provider)) {
+  if (isRetiredProviderId(provider.id)) {
     return false;
   }
   return !provider.installed;
@@ -157,7 +130,7 @@ export function formatOllamaPullPercent(progress: OllamaPullProgress) {
 }
 
 export function shouldShowPrimaryProviderAction(provider: ProviderDescriptor) {
-  if (provider.id === 'ollama' && isOllamaCloudProvider(provider)) {
+  if (isRetiredProviderId(provider.id)) {
     return false;
   }
   if (!provider.installed || provider.authState === 'connected' || provider.authState === 'checking') {
@@ -167,7 +140,7 @@ export function shouldShowPrimaryProviderAction(provider: ProviderDescriptor) {
 }
 
 export function shouldAdoptDetectedProviderAuth(provider: ProviderDescriptor) {
-  if (provider.id === 'ollama') {
+  if (provider.id === 'ollama' || isRetiredProviderId(provider.id)) {
     return false;
   }
 
@@ -179,7 +152,7 @@ export function shouldAdoptDetectedProviderAuth(provider: ProviderDescriptor) {
 }
 
 export function shouldShowCliSignInAction(provider: ProviderDescriptor) {
-  if (provider.id === 'ollama' || !provider.installed || provider.authMode !== 'cli') {
+  if (provider.id === 'ollama' || isRetiredProviderId(provider.id) || !provider.installed || provider.authMode !== 'cli') {
     return false;
   }
 
@@ -211,26 +184,6 @@ export function formatTime(value: string | null) {
   return new Date(value).toLocaleString();
 }
 
-export function formatQuotaPercent(value: number | null) {
-  if (value === null || !Number.isFinite(value)) {
-    return null;
-  }
-
-  return `${Math.max(0, Math.min(100, value * 100)).toFixed(value * 100 >= 10 ? 0 : 1)}%`;
-}
-
-export function formatQuotaAmount(remaining: number | null, limit: number | null) {
-  if (remaining === null && limit === null) {
-    return null;
-  }
-
-  if (remaining !== null && limit !== null) {
-    return `${remaining.toLocaleString()} / ${limit.toLocaleString()}`;
-  }
-
-  return remaining !== null ? remaining.toLocaleString() : limit?.toLocaleString() ?? null;
-}
-
 export function formatStorageAmount(bytes: number | null | undefined) {
   if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) {
     return 'Unavailable';
@@ -245,19 +198,6 @@ export function formatStorageAmount(bytes: number | null | undefined) {
     return `${(bytes / (1024 * 1024)).toFixed(bytes >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
   }
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
-
-export function quotaTone(value: number | null) {
-  if (value === null) {
-    return 'detected' as const;
-  }
-  if (value <= 0.1) {
-    return 'failed' as const;
-  }
-  if (value <= 0.35) {
-    return 'checking' as const;
-  }
-  return 'connected' as const;
 }
 
 export {

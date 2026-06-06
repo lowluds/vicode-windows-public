@@ -6,20 +6,6 @@ export interface ExecutionContinuityPlan {
   includeInlineThreadHistory: boolean;
 }
 
-export function isBuildControllerLaneThread(thread: ThreadDetail) {
-  const latestMarkedTurn = [...thread.turns].reverse().find((turn) => {
-    if (!turn.metadata || typeof turn.metadata !== 'object') {
-      return false;
-    }
-    const marker = (turn.metadata as { laneControlMarker?: unknown }).laneControlMarker;
-    return typeof marker === 'string' && marker.startsWith('build-controller:');
-  });
-  const marker = latestMarkedTurn?.metadata && typeof latestMarkedTurn.metadata === 'object'
-    ? (latestMarkedTurn.metadata as { laneControlMarker?: unknown }).laneControlMarker
-    : null;
-  return typeof marker === 'string' && marker.startsWith('build-controller:');
-}
-
 export function providerSupportsNativeExecutionResume(providerId: ProviderId) {
   return providerId === 'gemini';
 }
@@ -98,14 +84,6 @@ export function resolveExecutionContinuity(
   thread: ThreadDetail | null
 ): ExecutionContinuityPlan {
   if (!thread) {
-    return {
-      strategy: 'none',
-      resumeSessionId: null,
-      includeInlineThreadHistory: false
-    };
-  }
-
-  if (isBuildControllerLaneThread(thread)) {
     return {
       strategy: 'none',
       resumeSessionId: null,

@@ -81,13 +81,12 @@ function createProviderDescriptor(id: ProviderId): ProviderDescriptor {
       supported: true,
       executionMode: 'workspace-write',
       enforcement: 'hard-enforced'
-    },
-    quota: null
+    }
   };
 }
 
 describe('thread-presentation helpers', () => {
-  it('surfaces the release-facing providers while keeping Qwen and Kimi out of primary chrome', () => {
+  it('surfaces the release-facing providers while keeping discontinued providers out of primary chrome', () => {
     expect(
       surfaceProviders([
         createProviderDescriptor('openai'),
@@ -96,7 +95,7 @@ describe('thread-presentation helpers', () => {
         createProviderDescriptor('ollama'),
         createProviderDescriptor('kimi')
       ]).map((provider) => provider.id)
-    ).toEqual(['openai', 'gemini', 'ollama']);
+    ).toEqual(['ollama']);
   });
 
   it('keeps recent threads sorted by latest activity across projects', () => {

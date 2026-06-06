@@ -15,7 +15,10 @@ async function seedAuditFixture(window: Page, workspaceDir: string) {
   return await window.evaluate(async ({ workspaceDir }) => {
     const bootstrap = await window.vicode.app.getBootstrap();
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-    const provider = bootstrap.providers.find((entry) => entry.id === 'openai') ?? bootstrap.providers[0];
+    const provider =
+      bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+      bootstrap.providers.find((entry) => entry.id === 'openai_compatible') ??
+      bootstrap.providers[0];
     if (!provider) {
       throw new Error('Expected at least one provider for UI audit.');
     }
@@ -23,7 +26,7 @@ async function seedAuditFixture(window: Page, workspaceDir: string) {
     const modelId =
       bootstrap.preferences.defaultModelByProvider[provider.id] ??
       provider.models[0]?.id ??
-      'gpt-5';
+      'qwen2.5-coder:14b-instruct-q6_K';
 
     const project = await window.vicode.projects.create({
       name: `UI audit ${suffix}`,
@@ -200,7 +203,33 @@ async function measureShellAlignment(window: Page) {
       titlebarBrand: measure('.windows-titlebar-brand'),
       titlebarContext: measure('.windows-titlebar-context'),
       titlebarActions: measure('.windows-titlebar-actions'),
-      sidebarFooter: measure('.workspace-sidebar-footer')
+      sidebarTools: measure('.workspace-sidebar-tools'),
+      sidebarToolCount: document.querySelectorAll('.workspace-sidebar-tools .workspace-sidebar-tool').length,
+      browserOptionCount: document.querySelectorAll('.work-library-column-menu-button').length
+    };
+  });
+}
+
+async function measureComposerLayout(window: Page) {
+  return await window.evaluate(() => {
+    const measure = (selector: string) => {
+      const element = document.querySelector(selector);
+      if (!(element instanceof HTMLElement)) {
+        return null;
+      }
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        width: rect.width
+      };
+    };
+
+    return {
+      main: measure('.main-surface'),
+      rail: measure('.thread-composer-rail'),
+      stack: measure('.thread-composer-rail > .composer-stack'),
+      shell: measure('.thread-composer-rail .composer-shell')
     };
   });
 }
@@ -213,20 +242,23 @@ function expectTitlebarControlsSeparated(shell: Awaited<ReturnType<typeof measur
 
 async function measureSettingsGeneralScrollState(window: Page) {
   return await window.evaluate(() => {
-    const shell = document.querySelector('.main-surface-settings');
+    const shell = document.querySelector('.main-surface-settings-overlay');
     const root = document.querySelector('.settings-root');
+    const main = document.querySelector('.settings-shell-main');
     const panels = Array.from(document.querySelectorAll('.settings-general-section > .settings-panel'));
     const lastPanel = panels[panels.length - 1];
-    if (!(shell instanceof HTMLElement) || !(root instanceof HTMLElement) || !(lastPanel instanceof HTMLElement)) {
+    if (!(shell instanceof HTMLElement) || !(root instanceof HTMLElement) || !(main instanceof HTMLElement) || !(lastPanel instanceof HTMLElement)) {
       return null;
     }
 
     root.scrollTop = root.scrollHeight;
     shell.scrollTop = shell.scrollHeight;
+    main.scrollTop = main.scrollHeight;
     const rootRect = root.getBoundingClientRect();
     const lastPanelRect = lastPanel.getBoundingClientRect();
     const shellStyle = window.getComputedStyle(shell);
     const rootStyle = window.getComputedStyle(root);
+    const mainStyle = window.getComputedStyle(main);
 
     return {
       bodyOverflowY: window.getComputedStyle(document.body).overflowY,
@@ -239,6 +271,10 @@ async function measureSettingsGeneralScrollState(window: Page) {
       rootScrollHeight: root.scrollHeight,
       rootClientHeight: root.clientHeight,
       rootScrollTop: root.scrollTop,
+      mainOverflowY: mainStyle.overflowY,
+      mainScrollHeight: main.scrollHeight,
+      mainClientHeight: main.clientHeight,
+      mainScrollTop: main.scrollTop,
       shellOverflowY: shellStyle.overflowY,
       shellScrollHeight: shell.scrollHeight,
       shellClientHeight: shell.clientHeight,
@@ -251,14 +287,47 @@ async function measureSettingsRailEdge(window: Page) {
   return await window.evaluate(() => {
     const workspace = document.querySelector('.app-workspace-shell');
     const rail = document.querySelector('.settings-shell-rail');
-    if (!(workspace instanceof HTMLElement) || !(rail instanceof HTMLElement)) {
+    const overlay = document.querySelector('.settings-route-overlay');
+    const settingsWindow = document.querySelector('.settings-floating-window');
+    const settingsLayout = document.querySelector('.settings-shell-layout');
+    const resizeHandle = document.querySelector('.settings-floating-resize-handle');
+    const threadSurface = document.querySelector('.thread-view');
+    if (
+      !(workspace instanceof HTMLElement) ||
+      !(rail instanceof HTMLElement) ||
+      !(overlay instanceof HTMLElement) ||
+      !(settingsWindow instanceof HTMLElement) ||
+      !(settingsLayout instanceof HTMLElement) ||
+      !(resizeHandle instanceof HTMLElement) ||
+      !(threadSurface instanceof HTMLElement)
+    ) {
       return null;
     }
 
     const workspaceRect = workspace.getBoundingClientRect();
+    const overlayRect = overlay.getBoundingClientRect();
+    const windowRect = settingsWindow.getBoundingClientRect();
+    const layoutRect = settingsLayout.getBoundingClientRect();
+    const resizeHandleRect = resizeHandle.getBoundingClientRect();
+    const threadRect = threadSurface.getBoundingClientRect();
     return {
       workspaceLeft: workspaceRect.left,
+      workspaceRight: workspaceRect.right,
+      workspaceWidth: workspaceRect.width,
+      overlayLeft: overlayRect.left,
+      overlayWidth: overlayRect.width,
+      windowLeft: windowRect.left,
+      windowTop: windowRect.top,
+      windowRight: windowRect.right,
+      windowBottom: windowRect.bottom,
+      windowWidth: windowRect.width,
+      windowHeight: windowRect.height,
+      layoutBottomGap: windowRect.bottom - layoutRect.bottom,
+      resizeHandleBottomInset: windowRect.bottom - resizeHandleRect.bottom,
+      resizeHandleRightInset: windowRect.right - resizeHandleRect.right,
+      threadWidth: threadRect.width,
       workspaceBackground: window.getComputedStyle(workspace).backgroundColor,
+      overlayBackground: window.getComputedStyle(overlay).backgroundColor,
       railBackground: window.getComputedStyle(rail).backgroundColor
     };
   });
@@ -302,17 +371,19 @@ test.describe.serial('ui layout audit', () => {
     expect(expandedShell.sidebar?.width ?? 0).toBeGreaterThan(240);
     expect(expandedShell.main?.left ?? 0).toBeGreaterThan(240);
     expectTitlebarControlsSeparated(expandedShell);
-    expect(expandedShell.sidebarFooter?.width ?? 0).toBeGreaterThan(120);
+    expect(expandedShell.browserOptionCount).toBeGreaterThanOrEqual(2);
 
     await page.getByTestId('nav-sidebar-toggle').click({ force: true });
     await expect
       .poll(async () => (await measureShellAlignment(page)).sidebar?.width ?? -1)
-      .toBeLessThanOrEqual(64);
+      .toBeLessThanOrEqual(0);
 
     const collapsedShell = await measureShellAlignment(page);
-    expect(collapsedShell.main?.left ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(64);
+    expect(collapsedShell.sidebar).toBeNull();
+    expect(collapsedShell.main?.left ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(4);
     expectTitlebarControlsSeparated(collapsedShell);
-    expect(collapsedShell.sidebarFooter?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(64);
+    expect(collapsedShell.sidebarTools).toBeNull();
+    await expect(page.locator('.workspace-sidebar.is-collapsed .work-library-category')).toHaveCount(0);
 
     await page.getByTestId('nav-sidebar-toggle').click({ force: true });
     await expect
@@ -323,7 +394,15 @@ test.describe.serial('ui layout audit', () => {
     expect(restoredShell.sidebar?.width ?? 0).toBeGreaterThan(240);
     expect(restoredShell.main?.left ?? 0).toBeGreaterThan(240);
     expectTitlebarControlsSeparated(restoredShell);
-    expect(restoredShell.sidebarFooter?.width ?? 0).toBeGreaterThan(120);
+    expect(restoredShell.browserOptionCount).toBeGreaterThanOrEqual(2);
+
+    const composerLayout = await measureComposerLayout(page);
+    expect(composerLayout.rail?.width ?? 0).toBeGreaterThan(0);
+    expect(composerLayout.stack?.width ?? 0).toBeGreaterThanOrEqual((composerLayout.rail?.width ?? 0) - 2);
+    expect(composerLayout.shell?.width ?? 0).toBeGreaterThanOrEqual((composerLayout.rail?.width ?? 0) - 2);
+    expect(composerLayout.shell?.width ?? 0).toBeGreaterThanOrEqual(
+      Math.min(700, Math.max(0, (composerLayout.main?.width ?? 0) - 96))
+    );
 
     await composer.fill('/pla');
     await expect(page.locator('.composer-skill-picker-item').first()).toBeVisible();
@@ -347,14 +426,54 @@ test.describe.serial('ui layout audit', () => {
     await page.keyboard.press('Escape');
     await page.getByTestId('nav-settings').click();
     await expect(page.getByRole('heading', { name: 'App' })).toBeVisible();
-    await expect(page.locator('.sidebar-shell')).toHaveCount(0);
+    await expect(page.locator('.sidebar-shell')).toHaveCount(1);
+    await expect(page.locator('.thread-composer-stack')).toBeVisible();
+    await expect(page.locator('.settings-route-overlay')).toBeVisible();
     await expect(page.locator('.settings-shell-rail')).toBeVisible();
+    await expect(page.locator('.settings-shell-rail-eyebrow')).toHaveCount(0);
+    await expect(page.locator('.settings-floating-resize-handle')).toBeVisible();
     const settingsRailEdge = await measureSettingsRailEdge(page);
     expect(settingsRailEdge).not.toBeNull();
-    expect(settingsRailEdge?.workspaceLeft ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(1);
-    expect(settingsRailEdge?.workspaceBackground).toBe(settingsRailEdge?.railBackground);
+    expect(settingsRailEdge?.overlayLeft ?? 0).toBeGreaterThanOrEqual(settingsRailEdge?.workspaceLeft ?? 0);
+    expect(settingsRailEdge?.overlayWidth ?? 0).toBeLessThanOrEqual(settingsRailEdge?.workspaceWidth ?? 0);
+    expect(settingsRailEdge?.windowLeft ?? 0).toBeGreaterThanOrEqual(settingsRailEdge?.workspaceLeft ?? 0);
+    expect(settingsRailEdge?.windowRight ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(settingsRailEdge?.workspaceRight ?? 0);
+    expect(settingsRailEdge?.layoutBottomGap ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(2);
+    expect(settingsRailEdge?.resizeHandleBottomInset ?? Number.POSITIVE_INFINITY).toBeGreaterThanOrEqual(6);
+    expect(settingsRailEdge?.resizeHandleBottomInset ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(12);
+    expect(settingsRailEdge?.resizeHandleRightInset ?? Number.POSITIVE_INFINITY).toBeGreaterThanOrEqual(6);
+    expect(settingsRailEdge?.resizeHandleRightInset ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(12);
+    expect(settingsRailEdge?.overlayBackground).toBe('rgba(0, 0, 0, 0)');
 
-    issues = await collectLayoutIssues(page, ['.main-surface-settings', '.settings-root', '.sidebar']);
+    const titlebar = page.locator('.settings-floating-titlebar');
+    const titlebarBox = await titlebar.boundingBox();
+    expect(titlebarBox).not.toBeNull();
+    if (titlebarBox) {
+      await page.mouse.move(titlebarBox.x + titlebarBox.width / 2, titlebarBox.y + titlebarBox.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(0, 0, { steps: 4 });
+      await page.mouse.up();
+    }
+    const draggedSettingsWindow = await measureSettingsRailEdge(page);
+    expect(draggedSettingsWindow?.windowLeft ?? -1).toBeGreaterThanOrEqual(draggedSettingsWindow?.workspaceLeft ?? 0);
+    expect(draggedSettingsWindow?.windowTop ?? -1).toBeGreaterThanOrEqual(40);
+
+    const resizeHandle = page.locator('.settings-floating-resize-handle');
+    const resizeBox = await resizeHandle.boundingBox();
+    const beforeResize = await measureSettingsRailEdge(page);
+    expect(resizeBox).not.toBeNull();
+    if (resizeBox) {
+      await page.mouse.move(resizeBox.x + resizeBox.width / 2, resizeBox.y + resizeBox.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(resizeBox.x + 120, resizeBox.y + 80, { steps: 4 });
+      await page.mouse.up();
+    }
+    const afterResize = await measureSettingsRailEdge(page);
+    expect(afterResize?.windowWidth ?? 0).toBeGreaterThanOrEqual(beforeResize?.windowWidth ?? 0);
+    expect(afterResize?.windowHeight ?? 0).toBeGreaterThanOrEqual(beforeResize?.windowHeight ?? 0);
+    expect(afterResize?.windowRight ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(afterResize?.workspaceRight ?? 0);
+
+    issues = await collectLayoutIssues(page, ['.main-surface-settings-overlay', '.settings-root', '.sidebar']);
     expect(issues).toEqual([]);
 
     const settingsScroll = await measureSettingsGeneralScrollState(page);
@@ -364,28 +483,25 @@ test.describe.serial('ui layout audit', () => {
     expect(settingsScroll?.documentOverflowY).toBe('hidden');
     expect(settingsScroll?.shellOverflowY).toBe('hidden');
     expect(settingsScroll?.shellScrollTop).toBe(0);
-    expect(settingsScroll?.rootOverflowY).toBe('scroll');
-    expect(settingsScroll?.rootScrollHeight ?? 0).toBeGreaterThanOrEqual(settingsScroll?.rootClientHeight ?? 0);
-    expect(settingsScroll?.gapAfterLastPanel ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(48);
+    expect(settingsScroll?.rootOverflowY).toBe('hidden');
+    expect(settingsScroll?.rootScrollTop).toBe(0);
+    expect(settingsScroll?.mainOverflowY).toBe('auto');
+    expect(settingsScroll?.mainScrollHeight ?? 0).toBeGreaterThanOrEqual(settingsScroll?.mainClientHeight ?? 0);
+    expect(settingsScroll?.mainScrollTop ?? 0).toBeGreaterThanOrEqual(0);
 
     await page.locator('.settings-nav-item').filter({ hasText: 'Archived threads' }).click();
     await expect(page.getByRole('heading', { name: 'Archived threads', exact: true })).toBeVisible();
 
-    issues = await collectLayoutIssues(page, ['.main-surface-settings', '.settings-root', '.sidebar']);
+    issues = await collectLayoutIssues(page, ['.main-surface-settings-overlay', '.settings-root', '.sidebar']);
     expect(issues).toEqual([]);
 
     await page.evaluate(() => window.vicode.collab.clearConfig());
     await expect(page.getByLabel('Rooms')).toHaveCount(0);
 
-    issues = await collectLayoutIssues(page, ['.main-surface-settings', '.settings-root', '.sidebar']);
+    issues = await collectLayoutIssues(page, ['.main-surface-settings-overlay', '.settings-root', '.sidebar']);
     expect(issues).toEqual([]);
 
-    await page.getByTestId('nav-plugins').click();
-    await expect(page.getByTestId('skills-tab-plugins')).toBeVisible();
-    await page.getByTestId('skills-tab-plugins').click();
-    await expect(page.getByRole('heading', { name: 'Make Vicode work your way' })).toBeVisible();
-
-    issues = await collectLayoutIssues(page, ['.skills-page-shell', '.sidebar']);
-    expect(issues).toEqual([]);
+    await expect(page.getByTestId('nav-plugins')).toHaveCount(0);
+    await expect(page.getByTestId('nav-automations')).toHaveCount(0);
   });
 });

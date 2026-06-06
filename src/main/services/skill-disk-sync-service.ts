@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { PROVIDER_IDS, type ProviderId, type SkillCategory, type SkillDefinition } from '../../shared/domain';
+import { SURFACED_PROVIDER_IDS } from '../../shared/providers';
 import { normalizeSkillMetadata, skillSlug, type SkillMetadataShape } from '../../shared/skills';
 import { parseSkillMarkdown } from './skill-markdown';
 
@@ -14,7 +15,6 @@ type FileBackedSkillConfig = {
   slug?: string;
   providerTargets?: ProviderId[];
   enabled?: boolean;
-  syncTargets?: ProviderId[];
   category?: SkillCategory | null;
 };
 
@@ -32,7 +32,6 @@ type BuildMetadataInput = {
   name: string;
   origin: SkillDefinition['origin'];
   scope: SkillDefinition['scope'];
-  syncTargets: ProviderId[];
 };
 
 type SkillDiskSyncDependencies = {
@@ -40,6 +39,7 @@ type SkillDiskSyncDependencies = {
   listSkills: () => SkillDefinition[];
   persistSkill: (skill: SkillDefinition) => SkillDefinition;
   buildMetadata: (input: BuildMetadataInput) => SkillMetadataShape;
+  getExternalSkillRoots?: () => string[];
 };
 
 function isProviderId(value: unknown): value is ProviderId {
@@ -81,9 +81,6 @@ function parseFileBackedSkillConfig(raw: string): FileBackedSkillConfig | null {
         ? candidate.providerTargets.filter((value): value is ProviderId => isProviderId(value))
         : undefined,
       enabled: typeof candidate.enabled === 'boolean' ? candidate.enabled : undefined,
-      syncTargets: Array.isArray(candidate.syncTargets)
-        ? candidate.syncTargets.filter((value): value is ProviderId => isProviderId(value))
-        : undefined,
       category: candidate.category === null ? null : isSkillCategory(candidate.category) ? candidate.category : undefined
     };
   } catch {
@@ -124,11 +121,7 @@ export class SkillDiskSyncService {
           ? [...new Set(config.providerTargets)]
           : existing?.providerTargets?.length
             ? [...new Set(existing.providerTargets)]
-            : [...PROVIDER_IDS];
-      const syncTargets =
-        bundle.scope === 'global'
-          ? [...new Set((config?.syncTargets ?? baseMetadata.syncTargets).filter((providerId) => providerTargets.includes(providerId)))]
-          : [];
+            : [...SURFACED_PROVIDER_IDS];
       const skillId =
         config?.id ??
         existing?.id ??
@@ -148,7 +141,6 @@ export class SkillDiskSyncService {
             ...baseMetadata,
             slug: config?.slug?.trim() || baseMetadata.slug || skillSlug(parsed.name),
             folderName: bundle.folderName,
-            syncTargets,
             detailMarkdown: markdown,
             category:
               config?.category === undefined
@@ -158,8 +150,7 @@ export class SkillDiskSyncService {
           skillId,
           name: parsed.name,
           origin: 'custom_local',
-          scope: bundle.scope,
-          syncTargets
+          scope: bundle.scope
         }),
         path: bundle.skillFilePath,
         createdAt: existing?.createdAt ?? now,
@@ -176,27 +167,9 @@ export class SkillDiskSyncService {
 
   private listFileBackedSkillBundles(): FileBackedSkillBundle[] {
     const bundles: FileBackedSkillBundle[] = [];
-    const userRoot = join(this.deps.root, 'user');
-    if (existsSync(userRoot)) {
-      for (const entry of readdirSync(userRoot, { withFileTypes: true })) {
-        if (!entry.isDirectory()) {
-          continue;
-        }
-
-        const skillFilePath = join(userRoot, entry.name, 'SKILL.md');
-        if (!existsSync(skillFilePath)) {
-          continue;
-        }
-
-        const configFilePath = join(userRoot, entry.name, FILE_BACKED_SKILL_CONFIG_NAME);
-        bundles.push({
-          folderName: entry.name,
-          scope: 'global',
-          projectId: null,
-          skillFilePath,
-          configFilePath: existsSync(configFilePath) ? configFilePath : null
-        });
-      }
+    this.collectUserSkillBundles(join(this.deps.root, 'user'), bundles);
+    for (const externalRoot of this.deps.getExternalSkillRoots?.() ?? []) {
+      this.collectUserSkillBundles(resolve(externalRoot), bundles);
     }
 
     const projectRoot = join(this.deps.root, 'project');
@@ -232,5 +205,31 @@ export class SkillDiskSyncService {
     }
 
     return bundles;
+  }
+
+  private collectUserSkillBundles(root: string, bundles: FileBackedSkillBundle[]) {
+    if (!existsSync(root)) {
+      return;
+    }
+
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      const skillFilePath = join(root, entry.name, 'SKILL.md');
+      if (!existsSync(skillFilePath)) {
+        continue;
+      }
+
+      const configFilePath = join(root, entry.name, FILE_BACKED_SKILL_CONFIG_NAME);
+      bundles.push({
+        folderName: entry.name,
+        scope: 'global',
+        projectId: null,
+        skillFilePath,
+        configFilePath: existsSync(configFilePath) ? configFilePath : null
+      });
+    }
   }
 }

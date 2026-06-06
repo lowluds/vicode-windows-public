@@ -80,6 +80,8 @@ export class McpServerRepository {
                args_json = @argsJson,
                cwd = @cwd,
                env_json = @envJson,
+               url = @url,
+               headers_json = @headersJson,
                enabled = @enabled,
                tool_invocation_mode = @toolInvocationMode,
                launch_approved = @launchApproved,
@@ -91,11 +93,13 @@ export class McpServerRepository {
           name: input.name,
           scope: input.scope ?? current.definition.scope,
           projectId: input.projectId === undefined ? current.definition.projectId : input.projectId,
-          transportType: input.transportType ?? 'stdio',
-          command: input.command,
+          transportType: input.transportType ?? current.definition.transportType,
+          command: input.command ?? current.definition.command,
           argsJson: JSON.stringify(input.args ?? []),
           cwd: input.cwd ?? null,
           envJson: JSON.stringify(input.env ?? {}),
+          url: input.url === undefined ? current.definition.url : input.url,
+          headersJson: JSON.stringify(input.headers ?? current.definition.headers),
           enabled: input.enabled ? 1 : 0,
           toolInvocationMode: input.toolInvocationMode ?? 'ask',
           launchApproved:
@@ -108,9 +112,9 @@ export class McpServerRepository {
       this.db
         .prepare(
           `INSERT INTO mcp_servers (
-            id, name, scope, project_id, transport_type, command, args_json, cwd, env_json, enabled, tool_invocation_mode, launch_approved, created_at, updated_at
+            id, name, scope, project_id, transport_type, command, args_json, cwd, env_json, url, headers_json, enabled, tool_invocation_mode, launch_approved, created_at, updated_at
           ) VALUES (
-            @id, @name, @scope, @projectId, @transportType, @command, @argsJson, @cwd, @envJson, @enabled, @toolInvocationMode, @launchApproved, @createdAt, @updatedAt
+            @id, @name, @scope, @projectId, @transportType, @command, @argsJson, @cwd, @envJson, @url, @headersJson, @enabled, @toolInvocationMode, @launchApproved, @createdAt, @updatedAt
           )`
         )
         .run({
@@ -119,10 +123,12 @@ export class McpServerRepository {
           scope: input.scope ?? 'global',
           projectId: input.projectId ?? null,
           transportType: input.transportType ?? 'stdio',
-          command: input.command,
+          command: input.command ?? '',
           argsJson: JSON.stringify(input.args ?? []),
           cwd: input.cwd ?? null,
           envJson: JSON.stringify(input.env ?? {}),
+          url: input.url ?? null,
+          headersJson: JSON.stringify(input.headers ?? {}),
           enabled: input.enabled ? 1 : 0,
           toolInvocationMode: input.toolInvocationMode ?? 'ask',
           launchApproved: input.launchApproved ? 1 : 0,

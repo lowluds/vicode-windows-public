@@ -53,6 +53,7 @@ describe('AgentRuntimeService', () => {
       {
         workspaceRoot: workspace,
         executionPermission: 'default',
+        isolationMode: 'patch_buffer',
         onInfo
       }
     );
@@ -70,6 +71,88 @@ describe('AgentRuntimeService', () => {
         })
       })
     );
+  });
+
+  it('returns concise validation errors before dispatching malformed native tool calls', async () => {
+    const workspace = createWorkspace({});
+    const service = new AgentRuntimeService();
+
+    await expect(
+      service.executeToolCall(
+        {
+          name: 'read_file',
+          arguments: {}
+        },
+        {
+          workspaceRoot: workspace,
+          executionPermission: 'default'
+        }
+      )
+    ).resolves.toEqual({
+      toolName: 'read_file',
+      content: 'Invalid arguments for read_file: path must be a non-empty string.',
+      isError: true
+    });
+
+    await expect(
+      service.executeToolCall(
+        {
+          name: 'write_file',
+          arguments: {
+            path: 'src/example.ts',
+            content: 123
+          }
+        },
+        {
+          workspaceRoot: workspace,
+          executionPermission: 'default'
+        }
+      )
+    ).resolves.toEqual({
+      toolName: 'write_file',
+      content: 'Invalid arguments for write_file: content must be a string.',
+      isError: true
+    });
+
+    await expect(
+      service.executeToolCall(
+        {
+          name: 'run_command',
+          arguments: {}
+        },
+        {
+          workspaceRoot: workspace,
+          executionPermission: 'full_access',
+          runtimeCommandPolicy: 'auto_approve'
+        }
+      )
+    ).resolves.toEqual({
+      toolName: 'run_command',
+      content: 'Invalid arguments for run_command: command must be a non-empty string.',
+      isError: true
+    });
+  });
+
+  it('keeps unknown tool errors separate from native argument validation', async () => {
+    const workspace = createWorkspace({});
+    const service = new AgentRuntimeService();
+
+    await expect(
+      service.executeToolCall(
+        {
+          name: 'unknown_tool',
+          arguments: {}
+        },
+        {
+          workspaceRoot: workspace,
+          executionPermission: 'default'
+        }
+      )
+    ).resolves.toEqual({
+      toolName: 'unknown_tool',
+      content: 'Unsupported tool requested: unknown_tool.',
+      isError: true
+    });
   });
 
   it('builds a stable merged app-runtime tool catalog with native tools first', async () => {
@@ -113,6 +196,7 @@ describe('AgentRuntimeService', () => {
     expect(catalog.nativeWebResearchEnabled).toBe(false);
     expect(catalog.nativeTools.map((tool) => tool.callName)).toEqual([
       'apply_patch',
+      'browser_preview_check',
       'list_directory',
       'mkdir',
       'read_file',
@@ -130,6 +214,14 @@ describe('AgentRuntimeService', () => {
         concurrencySafe: false,
         mutatesWorkspace: true,
         readsWorkspace: true
+      })
+    );
+    expect(catalog.nativeTools.find((tool) => tool.callName === 'apply_patch')).toEqual(
+      expect.objectContaining({
+        id: 'native:apply_patch',
+        requiresApproval: true,
+        visibilityGroup: 'workspace_write',
+        mutatesWorkspace: true
       })
     );
     expect(catalog.mcpTools.map((tool) => tool.name)).toEqual([
@@ -156,13 +248,148 @@ describe('AgentRuntimeService', () => {
       'native',
       'native',
       'native',
+      'native',
       'mcp',
       'mcp'
     ]);
   });
 
-  it('exposes creator bundle tools when the Vicode creator bridge is configured', async () => {
+  it('checks a browser preview through the app-owned preview backend', async () => {
+    const workspace = createWorkspace({});
+    const onInfo = vi.fn();
+    const browserPreview = {
+      checkPreview: vi.fn(async () => ({
+        url: 'http://localhost:5173/',
+        finalUrl: 'http://localhost:5173/',
+        title: 'Fixture app',
+        loaded: true,
+        expectedTextFound: true,
+        selectorResults: [
+          {
+            selector: '#root',
+            found: true
+          }
+        ],
+        consoleErrors: [],
+        loadErrors: [],
+        failedRequests: [],
+        screenshotPath: join(workspace, 'exports', 'browser-preview', 'preview.png'),
+        visibleTextExcerpt: 'Fixture app is ready.'
+      }))
+    };
+    const service = new AgentRuntimeService(undefined, undefined, browserPreview);
+
+    const result = await service.executeToolCall(
+      {
+        name: 'browser_preview_check',
+        arguments: {
+          url: 'http://localhost:5173/',
+          expected_text: 'ready',
+          expected_selectors: ['#root'],
+          capture_screenshot: true,
+          timeout_ms: 20_000
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        onInfo
+      }
+    );
+
+    expect(browserPreview.checkPreview).toHaveBeenCalledWith({
+      url: 'http://localhost:5173/',
+      expectedText: 'ready',
+      expectedSelectors: ['#root'],
+      captureScreenshot: true,
+      timeoutMs: 20_000,
+      signal: undefined
+    });
+    expect(result).toEqual({
+      toolName: 'browser_preview_check',
+      content: expect.stringContaining('Status: passed')
+    });
+    expect(result.content).toContain('Screenshot:');
+    expect(onInfo.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        activity: expect.objectContaining({
+          kind: 'tool_call',
+          toolName: 'browser_preview_check',
+          summary: 'Checking preview',
+          text: 'Preview URL: http://localhost:5173/\nExpected text: ready'
+        })
+      })
+    );
+    expect(onInfo.mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({
+        activity: expect.objectContaining({
+          kind: 'tool_result',
+          toolName: 'browser_preview_check',
+          summary: 'Checked preview',
+          status: 'completed',
+          text: expect.stringContaining('Status: passed')
+        })
+      })
+    );
+  });
+
+  it('returns browser preview misses as actionable validation failures', async () => {
+    const workspace = createWorkspace({});
+    const browserPreview = {
+      checkPreview: vi.fn(async () => ({
+        url: 'http://localhost:5173/',
+        finalUrl: 'http://localhost:5173/',
+        title: 'Broken app',
+        loaded: true,
+        expectedTextFound: false,
+        selectorResults: [
+          {
+            selector: '#app',
+            found: false
+          }
+        ],
+        consoleErrors: ['ReferenceError: App is not defined'],
+        loadErrors: [],
+        failedRequests: [],
+        screenshotPath: null,
+        visibleTextExcerpt: ''
+      }))
+    };
+    const service = new AgentRuntimeService(undefined, undefined, browserPreview);
+
+    const result = await service.executeToolCall(
+      {
+        name: 'browser_preview_check',
+        arguments: {
+          url: 'http://localhost:5173/',
+          expected_text: 'ready',
+          expected_selectors: ['#app']
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default',
+        isolationMode: 'patch_buffer'
+      }
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('Status: needs_attention');
+    expect(result.content).toContain('Expected text: missing');
+    expect(result.content).toContain('- #app: missing');
+    expect(result.content).toContain('ReferenceError: App is not defined');
+  });
+
+  it('keeps auxiliary creator and delegation tools out of the default composer catalog', async () => {
     const service = new AgentRuntimeService();
+    service.setSubagents({
+      listForThread: () => [],
+      spawn: async () => {
+        throw new Error('not used');
+      }
+    });
     service.setCreators({
       createSkillBundle: async () => {
         throw new Error('not used');
@@ -176,8 +403,127 @@ describe('AgentRuntimeService', () => {
       executionPermission: 'default'
     });
 
+    expect(catalog.nativeTools.some((tool) => tool.callName === 'spawn_subagents')).toBe(false);
+    expect(catalog.nativeTools.some((tool) => tool.callName === 'create_skill_bundle')).toBe(false);
+    expect(catalog.nativeTools.some((tool) => tool.callName === 'create_plugin_bundle')).toBe(false);
+  });
+
+  it('exposes creator bundle tools only when the catalog explicitly opts in', async () => {
+    const service = new AgentRuntimeService();
+    service.setCreators({
+      createSkillBundle: async () => {
+        throw new Error('not used');
+      },
+      createPluginBundle: async () => {
+        throw new Error('not used');
+      }
+    });
+
+    const catalog = await service.listToolCatalog({
+      executionPermission: 'default',
+      enableCreatorTools: true
+    });
+
     expect(catalog.nativeTools.some((tool) => tool.callName === 'create_skill_bundle')).toBe(true);
     expect(catalog.nativeTools.some((tool) => tool.callName === 'create_plugin_bundle')).toBe(true);
+  });
+
+  it('exposes and executes read-only Project Knowledge tools when configured', async () => {
+    const workspace = createWorkspace({});
+    const projectKnowledge = {
+      isConfigured: () => true,
+      search: vi.fn(() => [
+        {
+          label: 'Project Knowledge' as const,
+          title: 'Runtime Patterns',
+          fileName: 'runtime.md',
+          path: 'C:/knowledge/runtime.md',
+          relativePath: 'runtime.md',
+          heading: 'Web Search',
+          content: 'Use web research for current docs.',
+          score: 10,
+          retrievalReason: {
+            rank: 1,
+            reason: 'matched heading, body: web, research',
+            matchedTerms: ['web', 'research'],
+            matchedFields: ['heading', 'body']
+          }
+        }
+      ]),
+      read: vi.fn(() => ({
+        title: 'Runtime Patterns',
+        relativePath: 'runtime.md',
+        heading: 'Web Search',
+        content: 'Use web research for current docs.'
+      })),
+      list: vi.fn(() => [
+        {
+          title: 'Runtime Patterns',
+          relativePath: 'runtime.md',
+          heading: 'Web Search'
+        }
+      ])
+    };
+    const service = new AgentRuntimeService(undefined, undefined, undefined, projectKnowledge as never);
+
+    const catalog = await service.listToolCatalog({
+      executionPermission: 'default'
+    });
+    expect(catalog.nativeTools.map((tool) => tool.callName)).toEqual(expect.arrayContaining([
+      'project_knowledge_search',
+      'project_knowledge_read',
+      'project_knowledge_list'
+    ]));
+
+    const searchResult = await service.executeToolCall(
+      {
+        name: 'project_knowledge_search',
+        arguments: {
+          query: 'web research',
+          max_results: 2
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default'
+      }
+    );
+    expect(projectKnowledge.search).toHaveBeenCalledWith('web research', 2);
+    expect(searchResult.content).toContain('Title: Runtime Patterns');
+    expect(searchResult.content).toContain('Source: runtime.md > Web Search');
+    expect(searchResult.content).toContain('Matched: matched heading, body: web, research');
+
+    const readResult = await service.executeToolCall(
+      {
+        name: 'project_knowledge_read',
+        arguments: {
+          path: 'runtime.md',
+          heading: 'Web Search'
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default'
+      }
+    );
+    expect(projectKnowledge.read).toHaveBeenCalledWith('runtime.md', 'Web Search');
+    expect(readResult.content).toContain('Title: Runtime Patterns');
+    expect(readResult.content).toContain('Source: runtime.md > Web Search');
+
+    const listResult = await service.executeToolCall(
+      {
+        name: 'project_knowledge_list',
+        arguments: {
+          max_results: 10
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default'
+      }
+    );
+    expect(projectKnowledge.list).toHaveBeenCalledWith(10);
+    expect(listResult.content).toContain('- Runtime Patterns: runtime.md > Web Search');
   });
 
   it('suppresses ask-mode MCP approvals in trusted workspace tool catalogs', async () => {
@@ -457,6 +803,7 @@ describe('AgentRuntimeService', () => {
       'src/example.ts': 'export const value = 1;\n'
     });
     const onInfo = vi.fn();
+    const requestApproval = vi.fn(async () => 'approved' as const);
     const service = new AgentRuntimeService();
 
     await service.executeToolCall(
@@ -467,6 +814,7 @@ describe('AgentRuntimeService', () => {
       {
         workspaceRoot: workspace,
         executionPermission: 'default',
+        requestApproval,
         onInfo
       }
     );
@@ -508,6 +856,7 @@ describe('AgentRuntimeService', () => {
       'src/nested/file.ts': 'export const nested = true;\n'
     });
     const onInfo = vi.fn();
+    const requestApproval = vi.fn(async () => 'approved' as const);
     const service = new AgentRuntimeService();
 
     const result = await service.executeToolCall(
@@ -518,6 +867,7 @@ describe('AgentRuntimeService', () => {
       {
         workspaceRoot: workspace,
         executionPermission: 'default',
+        requestApproval,
         onInfo
       }
     );
@@ -566,6 +916,7 @@ describe('AgentRuntimeService', () => {
       'src/feature.ts': 'const value = "needle";\nconsole.log(value);\n'
     });
     const onInfo = vi.fn();
+    const requestApproval = vi.fn(async () => 'approved' as const);
     const service = new AgentRuntimeService();
 
     const result = await service.executeToolCall(
@@ -579,6 +930,7 @@ describe('AgentRuntimeService', () => {
       {
         workspaceRoot: workspace,
         executionPermission: 'default',
+        requestApproval,
         onInfo
       }
     );
@@ -597,6 +949,32 @@ describe('AgentRuntimeService', () => {
         })
       })
     );
+  });
+
+  it('searches from the nearest workspace directory when the path contains glob syntax', async () => {
+    const workspace = createWorkspace({
+      'README.md': 'Project purpose: report formatting.\n',
+      'package.json': '{ "name": "fixture" }\n',
+      'src/example.ts': 'const purpose = "implementation";\n'
+    });
+    const service = new AgentRuntimeService();
+
+    const result = await service.executeToolCall(
+      {
+        name: 'search_text',
+        arguments: {
+          query: 'purpose',
+          path: './*.{md,json}'
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default'
+      }
+    );
+
+    expect(result.isError).not.toBe(true);
+    expect(result.content).toContain('README.md:1: Project purpose: report formatting.');
   });
 
   it('searches the web through the native research backend when workspace network access is enabled', async () => {
@@ -1168,57 +1546,8 @@ describe('AgentRuntimeService', () => {
     );
   });
 
-  it('rejects direct build-ticket queue writes for autonomous lane presets', async () => {
-    const workspace = createWorkspace({
-      '.vicode/control/build-tickets/team.json': '{"version":1,"tickets":[]}\n'
-    });
-    const service = new AgentRuntimeService();
-
-    const result = await service.executeToolCall(
-      {
-        name: 'write_file',
-        arguments: {
-          path: '.vicode/control/build-tickets/team.json',
-          content: '{"status":"done"}'
-        }
-      },
-      {
-        workspaceRoot: workspace,
-        executionPermission: 'full_access',
-        executionConstraints: {
-          permissionMode: 'plan',
-          toolPolicy: {
-            preset: 'build_planner',
-            allowedToolCallNames: [],
-            disallowedToolCallNames: []
-          },
-          maxTurns: 6,
-          maxReasoningTokens: null,
-          taskBudgetTokens: null,
-          costBudgetUsd: null,
-          maxDelegationDepth: 1,
-          maxAutomaticRetries: 1,
-          maxUnchangedHandoffs: 1,
-          maxSiblingDelegates: 0
-        }
-      }
-    );
-
-    expect(result).toEqual({
-      toolName: 'write_file',
-      content:
-        'Direct queue edits are not allowed for .vicode/control/build-tickets/team.json. Use .vicode/control/update_build_ticket_queue.py instead.',
-      isError: true
-    });
-    expect(readFileSync(join(workspace, '.vicode/control/build-tickets/team.json'), 'utf8')).toBe(
-      '{"version":1,"tickets":[]}\n'
-    );
-  });
-
-  it('blocks build-planner writes outside the control plane', async () => {
-    const workspace = createWorkspace({
-      'src/generated.txt': 'before\n'
-    });
+  it('stages write_file changes in patch buffer mode without writing to disk', async () => {
+    const workspace = createWorkspace({});
     const service = new AgentRuntimeService();
 
     const result = await service.executeToolCall(
@@ -1226,83 +1555,94 @@ describe('AgentRuntimeService', () => {
         name: 'write_file',
         arguments: {
           path: 'src/generated.txt',
-          content: 'after\n'
+          content: 'hello from runtime\n'
         }
       },
       {
         workspaceRoot: workspace,
-        executionPermission: 'full_access',
-        executionConstraints: {
-          permissionMode: 'plan',
-          toolPolicy: {
-            preset: 'build_planner',
-            allowedToolCallNames: [],
-            disallowedToolCallNames: []
-          },
-          maxTurns: 6,
-          maxReasoningTokens: null,
-          taskBudgetTokens: null,
-          costBudgetUsd: null,
-          maxDelegationDepth: 1,
-          maxAutomaticRetries: 1,
-          maxUnchangedHandoffs: 1,
-          maxSiblingDelegates: 0
-        }
+        executionPermission: 'default',
+        isolationMode: 'patch_buffer',
+        threadId: 'thread-1',
+        runId: 'run-1'
       }
     );
 
     expect(result).toEqual({
       toolName: 'write_file',
-      content:
-        'Build planner lanes may only write planning artifacts such as build heartbeats and build prompts. src/generated.txt must be updated by Builder or Finisher instead.',
-      isError: true
+      content: 'Staged write_file src/generated.txt',
+      stagedWorkspaceChangeSet: {
+        threadId: 'thread-1',
+        runId: 'run-1',
+        sourceToolName: 'write_file',
+        isolationMode: 'patch_buffer',
+        status: 'proposed',
+        requestedPath: 'src/generated.txt',
+        changedPaths: ['src/generated.txt'],
+        operations: [
+          {
+            operation: 'write_file',
+            path: 'src/generated.txt',
+            beforeContent: null,
+            proposedAfterContent: 'hello from runtime\n',
+            patchText: null
+          }
+        ],
+        summary: {
+          filesChanged: 1,
+          insertions: 1,
+          deletions: 0
+        }
+      }
     });
-    expect(readFileSync(join(workspace, 'src/generated.txt'), 'utf8')).toBe('before\n');
+    expect(existsSync(join(workspace, 'src', 'generated.txt'))).toBe(false);
   });
 
-  it('blocks build-planner writes to arbitrary .vicode/control files', async () => {
-    const workspace = createWorkspace({
-      '.vicode/control/README.md': 'before\n'
-    });
+  it('stages mkdir changes in patch buffer mode without creating directories', async () => {
+    const workspace = createWorkspace({});
     const service = new AgentRuntimeService();
 
     const result = await service.executeToolCall(
       {
-        name: 'write_file',
+        name: 'mkdir',
         arguments: {
-          path: '.vicode/control/README.md',
-          content: 'after\n'
+          path: 'src/generated'
         }
       },
       {
         workspaceRoot: workspace,
-        executionPermission: 'full_access',
-        executionConstraints: {
-          permissionMode: 'plan',
-          toolPolicy: {
-            preset: 'build_planner',
-            allowedToolCallNames: [],
-            disallowedToolCallNames: []
-          },
-          maxTurns: 6,
-          maxReasoningTokens: null,
-          taskBudgetTokens: null,
-          costBudgetUsd: null,
-          maxDelegationDepth: 1,
-          maxAutomaticRetries: 1,
-          maxUnchangedHandoffs: 1,
-          maxSiblingDelegates: 0
-        }
+        executionPermission: 'default',
+        isolationMode: 'patch_buffer'
       }
     );
 
     expect(result).toEqual({
-      toolName: 'write_file',
-      content:
-        'Build planner lanes may only write planning artifacts such as build heartbeats and build prompts. .vicode/control/README.md must be updated by Builder or Finisher instead.',
-      isError: true
+      toolName: 'mkdir',
+      content: 'Staged mkdir src/generated',
+      stagedWorkspaceChangeSet: {
+        threadId: null,
+        runId: null,
+        sourceToolName: 'mkdir',
+        isolationMode: 'patch_buffer',
+        status: 'proposed',
+        requestedPath: 'src/generated',
+        changedPaths: ['src/generated'],
+        operations: [
+          {
+            operation: 'mkdir',
+            path: 'src/generated',
+            beforeContent: null,
+            proposedAfterContent: null,
+            patchText: null
+          }
+        ],
+        summary: {
+          filesChanged: 0,
+          insertions: 0,
+          deletions: 0
+        }
+      }
     });
-    expect(readFileSync(join(workspace, '.vicode/control/README.md'), 'utf8')).toBe('before\n');
+    expect(existsSync(join(workspace, 'src', 'generated'))).toBe(false);
   });
 
   it('applies a unified diff patch inside the trusted workspace', async () => {
@@ -1310,6 +1650,7 @@ describe('AgentRuntimeService', () => {
       'src/example.ts': 'export const value = 1;\n'
     });
     const onInfo = vi.fn();
+    const requestApproval = vi.fn(async () => 'approved' as const);
     const service = new AgentRuntimeService();
 
     const result = await service.executeToolCall(
@@ -1328,6 +1669,7 @@ describe('AgentRuntimeService', () => {
       {
         workspaceRoot: workspace,
         executionPermission: 'default',
+        requestApproval,
         onInfo
       }
     );
@@ -1339,6 +1681,34 @@ describe('AgentRuntimeService', () => {
     expect(readFileSync(join(workspace, 'src/example.ts'), 'utf8')).toBe(
       'export const value = 2;\n'
     );
+    expect(requestApproval).toHaveBeenCalledWith({
+      toolName: 'apply_patch',
+      command: 'apply_patch src/example.ts',
+      cwd: null,
+      workspaceRoot: workspace,
+      approvalKind: 'workspace_change',
+      workspaceChange: expect.objectContaining({
+        sourceToolName: 'apply_patch',
+        changedPaths: ['src/example.ts'],
+        operationKinds: ['apply_patch'],
+        summary: {
+          filesChanged: 1,
+          insertions: 1,
+          deletions: 1
+        },
+        preview: expect.objectContaining({
+          source: 'staged_workspace_preview',
+          files: [
+            expect.objectContaining({
+              path: 'src/example.ts',
+              status: 'modified',
+              beforeContent: 'export const value = 1;\n',
+              afterContent: 'export const value = 2;\n'
+            })
+          ]
+        })
+      })
+    });
     expect(onInfo).toHaveBeenCalledWith(
       expect.objectContaining({
         activity: expect.objectContaining({
@@ -1360,11 +1730,213 @@ describe('AgentRuntimeService', () => {
     );
   });
 
+  it('does not write an apply_patch change while diff approval is pending', async () => {
+    const workspace = createWorkspace({
+      'src/example.ts': 'export const value = 1;\n'
+    });
+    const service = new AgentRuntimeService();
+    let approve: ((decision: 'approved') => void) | null = null;
+    const requestApproval = vi.fn(() => new Promise<'approved'>((resolve) => {
+      approve = resolve;
+    }));
+
+    const resultPromise = service.executeToolCall(
+      {
+        name: 'apply_patch',
+        arguments: {
+          patch: [
+            '--- a/src/example.ts',
+            '+++ b/src/example.ts',
+            '@@ -1 +1 @@',
+            '-export const value = 1;',
+            '+export const value = 2;'
+          ].join('\n')
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default',
+        requestApproval
+      }
+    );
+
+    await vi.waitFor(() => expect(requestApproval).toHaveBeenCalledOnce());
+    expect(readFileSync(join(workspace, 'src/example.ts'), 'utf8')).toBe('export const value = 1;\n');
+    approve?.('approved');
+    await expect(resultPromise).resolves.toEqual({
+      toolName: 'apply_patch',
+      content: 'Patched src/example.ts'
+    });
+    expect(readFileSync(join(workspace, 'src/example.ts'), 'utf8')).toBe('export const value = 2;\n');
+  });
+
+  it('does not write an apply_patch change when diff approval is rejected', async () => {
+    const workspace = createWorkspace({
+      'src/example.ts': 'export const value = 1;\n'
+    });
+    const service = new AgentRuntimeService();
+
+    const result = await service.executeToolCall(
+      {
+        name: 'apply_patch',
+        arguments: {
+          patch: [
+            '--- a/src/example.ts',
+            '+++ b/src/example.ts',
+            '@@ -1 +1 @@',
+            '-export const value = 1;',
+            '+export const value = 2;'
+          ].join('\n')
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default',
+        requestApproval: vi.fn(async () => 'rejected' as const)
+      }
+    );
+
+    expect(result).toEqual({
+      toolName: 'apply_patch',
+      content: 'apply_patch was not approved by the user.',
+      isError: true
+    });
+    expect(readFileSync(join(workspace, 'src/example.ts'), 'utf8')).toBe('export const value = 1;\n');
+  });
+
+  it('does not apply a stale approved apply_patch change after workspace drift', async () => {
+    const workspace = createWorkspace({
+      'src/example.ts': 'export const value = 1;\n'
+    });
+    const service = new AgentRuntimeService();
+
+    const result = await service.executeToolCall(
+      {
+        name: 'apply_patch',
+        arguments: {
+          patch: [
+            '--- a/src/example.ts',
+            '+++ b/src/example.ts',
+            '@@ -1 +1 @@',
+            '-export const value = 1;',
+            '+export const value = 2;'
+          ].join('\n')
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default',
+        requestApproval: vi.fn(async () => {
+          writeFileSync(join(workspace, 'src/example.ts'), 'export const value = 99;\n', 'utf8');
+          return 'approved' as const;
+        })
+      }
+    );
+
+    expect(result).toEqual({
+      toolName: 'apply_patch',
+      content: 'Workspace changed after approval was requested for src/example.ts. Re-read the file and retry the patch.',
+      isError: true
+    });
+    expect(readFileSync(join(workspace, 'src/example.ts'), 'utf8')).toBe('export const value = 99;\n');
+  });
+
+  it('refuses a valid direct apply_patch when no diff approval handler is available', async () => {
+    const workspace = createWorkspace({
+      'src/example.ts': 'export const value = 1;\n'
+    });
+    const service = new AgentRuntimeService();
+
+    const result = await service.executeToolCall(
+      {
+        name: 'apply_patch',
+        arguments: {
+          patch: [
+            '--- a/src/example.ts',
+            '+++ b/src/example.ts',
+            '@@ -1 +1 @@',
+            '-export const value = 1;',
+            '+export const value = 2;'
+          ].join('\n')
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default'
+      }
+    );
+
+    expect(result).toEqual({
+      toolName: 'apply_patch',
+      content: 'apply_patch requires diff approval before workspace files can be changed.',
+      isError: true
+    });
+    expect(readFileSync(join(workspace, 'src/example.ts'), 'utf8')).toBe('export const value = 1;\n');
+  });
+
+  it('stages apply_patch deletion changes in patch buffer mode without deleting files', async () => {
+    const workspace = createWorkspace({
+      'src/obsolete.ts': 'export const obsolete = true;\n'
+    });
+    const service = new AgentRuntimeService();
+
+    const result = await service.executeToolCall(
+      {
+        name: 'apply_patch',
+        arguments: {
+          patch: [
+            '--- a/src/obsolete.ts',
+            '+++ /dev/null',
+            '@@ -1 +0,0 @@',
+            '-export const obsolete = true;'
+          ].join('\n')
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default',
+        isolationMode: 'patch_buffer'
+      }
+    );
+
+    expect(result).toEqual({
+      toolName: 'apply_patch',
+      content: 'Staged apply_patch src/obsolete.ts',
+      stagedWorkspaceChangeSet: {
+        threadId: null,
+        runId: null,
+        sourceToolName: 'apply_patch',
+        isolationMode: 'patch_buffer',
+        status: 'proposed',
+        requestedPath: null,
+        changedPaths: ['src/obsolete.ts'],
+        operations: [
+          {
+            operation: 'delete',
+            path: 'src/obsolete.ts',
+            beforeContent: 'export const obsolete = true;\n',
+            proposedAfterContent: null,
+            patchText: expect.stringContaining('--- a/src/obsolete.ts')
+          }
+        ],
+        summary: {
+          filesChanged: 1,
+          insertions: 0,
+          deletions: 1
+        }
+      }
+    });
+    expect(readFileSync(join(workspace, 'src/obsolete.ts'), 'utf8')).toBe(
+      'export const obsolete = true;\n'
+    );
+  });
+
   it('normalizes incorrect unified diff hunk counts before applying a patch', async () => {
     const workspace = createWorkspace({
       'src/example.ts': 'export const value = 1;\n'
     });
     const onInfo = vi.fn();
+    const requestApproval = vi.fn(async () => 'approved' as const);
     const service = new AgentRuntimeService();
 
     const result = await service.executeToolCall(
@@ -1384,6 +1956,7 @@ describe('AgentRuntimeService', () => {
       {
         workspaceRoot: workspace,
         executionPermission: 'default',
+        requestApproval,
         onInfo
       }
     );
@@ -1416,6 +1989,7 @@ describe('AgentRuntimeService', () => {
         ''
       ].join('\n')
     });
+    const requestApproval = vi.fn(async () => 'approved' as const);
     const service = new AgentRuntimeService();
 
     const result = await service.executeToolCall(
@@ -1435,7 +2009,8 @@ describe('AgentRuntimeService', () => {
       },
       {
         workspaceRoot: workspace,
-        executionPermission: 'default'
+        executionPermission: 'default',
+        requestApproval
       }
     );
 
@@ -1487,6 +2062,113 @@ describe('AgentRuntimeService', () => {
     expect(readFileSync(join(workspace, 'src/example.ts'), 'utf8')).toBe('export const value = 1;\n');
   });
 
+  it('rejects invalid staged patches without partial mutation', async () => {
+    const workspace = createWorkspace({
+      'src/example.ts': 'export const value = 1;\n'
+    });
+    const service = new AgentRuntimeService();
+
+    const result = await service.executeToolCall(
+      {
+        name: 'apply_patch',
+        arguments: {
+          patch: [
+            '--- a/src/example.ts',
+            '+++ b/src/example.ts',
+            '@@ -1 +1 @@',
+            '-export const value = 2;',
+            '+export const value = 3;'
+          ].join('\n')
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default',
+        isolationMode: 'patch_buffer'
+      }
+    );
+
+    expect(result).toEqual({
+      toolName: 'apply_patch',
+      content: expect.stringContaining('Patch could not be applied to src/example.ts'),
+      isError: true
+    });
+    expect(readFileSync(join(workspace, 'src/example.ts'), 'utf8')).toBe('export const value = 1;\n');
+  });
+
+  it('does not partially apply multi-file patches when a later target is invalid', async () => {
+    const workspace = createWorkspace({
+      'src/example.ts': 'export const value = 1;\n'
+    });
+    const service = new AgentRuntimeService();
+
+    const result = await service.executeToolCall(
+      {
+        name: 'apply_patch',
+        arguments: {
+          patch: [
+            '--- a/src/example.ts',
+            '+++ b/src/example.ts',
+            '@@ -1 +1 @@',
+            '-export const value = 1;',
+            '+export const value = 2;',
+            '--- a/src/missing.ts',
+            '+++ b/src/missing.ts',
+            '@@ -1 +1 @@',
+            '-export const missing = true;',
+            '+export const missing = false;'
+          ].join('\n')
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default'
+      }
+    );
+
+    expect(result).toEqual({
+      toolName: 'apply_patch',
+      content: expect.stringContaining('Patch target does not exist: src/missing.ts'),
+      isError: true
+    });
+    expect(readFileSync(join(workspace, 'src/example.ts'), 'utf8')).toBe('export const value = 1;\n');
+  });
+
+  it('rejects escaping patch targets before mutating earlier valid files', async () => {
+    const workspace = createWorkspace({
+      'src/example.ts': 'export const value = 1;\n'
+    });
+    const service = new AgentRuntimeService();
+
+    const result = await service.executeToolCall(
+      {
+        name: 'apply_patch',
+        arguments: {
+          patch: [
+            '--- a/src/example.ts',
+            '+++ b/src/example.ts',
+            '@@ -1 +1 @@',
+            '-export const value = 1;',
+            '+export const value = 2;',
+            '--- a/../outside.ts',
+            '+++ b/../outside.ts',
+            '@@ -1 +1 @@',
+            '-export const outside = true;',
+            '+export const outside = false;'
+          ].join('\n')
+        }
+      },
+      {
+        workspaceRoot: workspace,
+        executionPermission: 'default'
+      }
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('Tool path must stay inside the workspace');
+    expect(readFileSync(join(workspace, 'src/example.ts'), 'utf8')).toBe('export const value = 1;\n');
+  });
+
   maybeWindowsIt(
     'runs a command inside the trusted workspace root',
     async () => {
@@ -1513,140 +2195,6 @@ describe('AgentRuntimeService', () => {
       expect(result.toolName).toBe('run_command');
       expect(result.isError).not.toBe(true);
       expect(result.content).toContain(join(workspace, 'nested'));
-    }
-  );
-
-  maybeWindowsIt(
-    'blocks non-control run_command usage for build-planner lanes',
-    async () => {
-      const workspace = createWorkspace({
-        'package.json': '{"name":"fixture"}\n'
-      });
-      const service = new AgentRuntimeService();
-
-      const result = await service.executeToolCall(
-        {
-          name: 'run_command',
-          arguments: {
-            command: 'git status --short'
-          }
-        },
-        {
-          workspaceRoot: workspace,
-          executionPermission: 'full_access',
-          requestApproval: vi.fn(async () => 'approved' as const),
-          executionConstraints: {
-            permissionMode: 'plan',
-            toolPolicy: {
-              preset: 'build_planner',
-              allowedToolCallNames: [],
-              disallowedToolCallNames: []
-            },
-            maxTurns: 6,
-            maxReasoningTokens: null,
-            taskBudgetTokens: null,
-            costBudgetUsd: null,
-            maxDelegationDepth: 1,
-            maxAutomaticRetries: 1,
-            maxUnchangedHandoffs: 1,
-            maxSiblingDelegates: 0
-          }
-        }
-      );
-
-      expect(result).toEqual({
-        toolName: 'run_command',
-        content:
-          'Build planner lanes may only use run_command for bounded control-plane helpers such as update_build_ticket_queue.py.',
-        isError: true
-      });
-    }
-  );
-
-  maybeWindowsIt(
-    'allows build-planner helper commands when Ollama emits relative helper paths and legacy --json flags',
-    async () => {
-      const helperSource = readFileSync(
-        join(process.cwd(), '.vicode', 'control', 'update_build_ticket_queue.py'),
-        'utf8'
-      );
-      const queuePayload = JSON.stringify(
-        {
-          version: 1,
-          updatedAt: '2026-04-03T00:00:00.000Z',
-          tickets: [
-            {
-              id: 'ticket-1',
-              title: 'Seed ticket',
-              status: 'in_progress',
-              ownerLane: 'planner',
-              summary: 'Seed queue',
-              dependencies: [],
-              targetPaths: [],
-              acceptanceCriteria: [],
-              verificationSteps: [],
-              refs: [],
-              stopWhen: 'Done',
-              updatedAt: '2026-04-03T00:00:00.000Z'
-            }
-          ]
-        },
-        null,
-        2
-      );
-      const workspace = createWorkspace({
-        '.vicode/control/update_build_ticket_queue.py': helperSource,
-        '.vicode/control/build-heartbeats/current.md': '# heartbeat\n',
-        '.vicode/control/build-tickets/team.json': `${queuePayload}\n`
-      });
-      const service = new AgentRuntimeService();
-      const requestApproval = vi.fn(async () => 'approved' as const);
-
-      const result = await service.executeToolCall(
-        {
-          name: 'run_command',
-          arguments: {
-            command:
-              'python update_build_ticket_queue.py show --queue "' +
-              join(workspace, '.vicode', 'control', 'build-tickets', 'team.json') +
-              '" --json',
-            cwd: '.vicode/control/build-heartbeats'
-          }
-        },
-        {
-          workspaceRoot: workspace,
-          executionPermission: 'full_access',
-          requestApproval,
-          executionConstraints: {
-            permissionMode: 'plan',
-            toolPolicy: {
-              preset: 'build_planner',
-              allowedToolCallNames: [],
-              disallowedToolCallNames: []
-            },
-            maxTurns: 6,
-            maxReasoningTokens: null,
-            taskBudgetTokens: null,
-            costBudgetUsd: null,
-            maxDelegationDepth: 1,
-            maxAutomaticRetries: 1,
-            maxUnchangedHandoffs: 1,
-            maxSiblingDelegates: 0
-          }
-        }
-      );
-
-      expect(result.toolName).toBe('run_command');
-      expect(result.content).not.toContain(
-        'Build planner lanes may only use run_command for bounded control-plane helpers such as update_build_ticket_queue.py.'
-      );
-      expect(requestApproval).toHaveBeenCalledWith(
-        expect.objectContaining({
-          toolName: 'run_command',
-          cwd: '.vicode/control/build-heartbeats',
-          command: expect.stringContaining('.vicode/control/update_build_ticket_queue.py')
-        })
-      );
     }
   );
 
@@ -2129,7 +2677,7 @@ describe('AgentRuntimeService', () => {
     expect(result).toEqual({
       toolName: 'run_command',
       content:
-        'run_command requires Full access. Approved commands start in the workspace, run on the local host, and use isolated temp home/appdata directories by default, but they are not sandboxed to it.',
+        'run_command requires Full access. Full access enables host-local commands according to the workspace runtime policy; commands are not contained sandbox execution.',
       isError: true
     });
     expect(onInfo.mock.calls[0]?.[0]).toEqual(
@@ -2148,7 +2696,7 @@ describe('AgentRuntimeService', () => {
           toolName: 'run_command',
           summary: 'Failed run_command',
           status: 'error',
-          text: 'run_command requires Full access. Approved commands start in the workspace, run on the local host, and use isolated temp home/appdata directories by default, but they are not sandboxed to it.'
+          text: 'run_command requires Full access. Full access enables host-local commands according to the workspace runtime policy; commands are not contained sandbox execution.'
         })
       })
     );
@@ -2409,7 +2957,7 @@ describe('AgentRuntimeService', () => {
         executionConstraints: {
           permissionMode: 'default',
           toolPolicy: {
-            preset: 'builder',
+            preset: 'default',
             allowedToolCallNames: [],
             disallowedToolCallNames: []
           },
@@ -2428,7 +2976,7 @@ describe('AgentRuntimeService', () => {
     expect(spawn).not.toHaveBeenCalled();
     expect(result).toEqual({
       toolName: 'spawn_subagents',
-      content: 'spawn_subagents is disabled for delegated helper runs.',
+      content: 'Tool spawn_subagents is not available under the active execution constraints.',
       isError: true
     });
   });

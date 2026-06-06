@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { RunProgressState, ThreadDetail } from '../../shared/domain';
-import { deriveRunActivityMap, deriveRunReviewEvidence, deriveRunTranscriptItemsMap } from './run-activity';
+import type { RunEvent, RunProgressState, ThreadDetail } from '../../shared/domain';
+import {
+  deriveRunActivityMap,
+  deriveRunReviewEvidence,
+  deriveRunTranscriptItemsMap,
+  deriveStagedWorkspaceReviewItems,
+  deriveWorktreeReviewItems
+} from './run-activity';
 
 function createThreadDetail(rawOutput: ThreadDetail['rawOutput'], overrides: Partial<ThreadDetail> = {}): ThreadDetail {
   return {
@@ -34,6 +40,57 @@ function createThreadDetail(rawOutput: ThreadDetail['rawOutput'], overrides: Par
 }
 
 describe('deriveRunActivityMap', () => {
+  it('shows user-facing model capability failures without raw JSON envelopes', () => {
+    const rawError = '{"error":"this model does not support image input (ref: e1e07aae-e61d-45ad-b4a2-f680e2481657)"}';
+    const thread = createThreadDetail([
+      {
+        id: 'started',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'started',
+        payload: {},
+        createdAt: '2026-03-16T00:00:00.000Z'
+      },
+      {
+        id: 'tool-result',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          activity: {
+            kind: 'tool_result',
+            status: 'error',
+            summary: rawError,
+            text: rawError
+          }
+        },
+        createdAt: '2026-03-16T00:00:01.000Z'
+      },
+      {
+        id: 'failed',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'failed',
+        payload: {
+          message: rawError
+        },
+        createdAt: '2026-03-16T00:00:02.000Z'
+      }
+    ]);
+
+    const activity = deriveRunActivityMap(thread)['run-1'];
+    const transcript = deriveRunTranscriptItemsMap(thread)['run-1'];
+
+    expect(activity.outcomeMessage).toBe(
+      'This model does not support image input. Choose a model with image support and try again.'
+    );
+    expect(JSON.stringify(transcript)).toContain(
+      'This model does not support image input. Choose a model with image support and try again.'
+    );
+    expect(JSON.stringify(transcript)).not.toContain('{"error"');
+    expect(JSON.stringify(transcript)).not.toContain('e1e07aae');
+  });
+
   it('keeps an active terminal command in place when later output arrives', () => {
     const thread = createThreadDetail([
       {
@@ -197,7 +254,61 @@ describe('deriveRunActivityMap', () => {
     ]);
   });
 
-  it('surfaces Vicode guidance references as visible run activity', () => {
+  it('compacts redundant web-search tool results before concrete web-search evidence', () => {
+    const thread = createThreadDetail([
+      {
+        id: 'started',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'started',
+        payload: {},
+        createdAt: '2026-03-16T00:00:00.000Z'
+      },
+      {
+        id: 'web-result',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          activity: {
+            kind: 'tool_result',
+            summary: 'Completed web_search',
+            toolName: 'web_search',
+            status: 'completed',
+            text: 'query: Ollama Windows app tooling'
+          }
+        },
+        createdAt: '2026-03-16T00:00:01.000Z'
+      },
+      {
+        id: 'web-search',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          activity: {
+            kind: 'web_search',
+            phase: 'completed',
+            summary: 'Searched web for Ollama Windows app tooling',
+            query: 'Ollama Windows app tooling',
+            status: 'completed'
+          }
+        },
+        createdAt: '2026-03-16T00:00:02.000Z'
+      }
+    ]);
+
+    const transcriptItems = deriveRunTranscriptItemsMap(thread)['run-1'];
+    expect(transcriptItems).toEqual([
+      expect.objectContaining({
+        kind: 'activity_line',
+        activityKind: 'web_search',
+        label: 'Searched web for Ollama Windows app tooling'
+      })
+    ]);
+  });
+
+  it('surfaces Vicode guidance context when explicitly marked visible', () => {
     const thread = createThreadDetail([
       {
         id: 'started',
@@ -215,9 +326,9 @@ describe('deriveRunActivityMap', () => {
         payload: {
           activity: {
             kind: 'guidance',
-            summary: 'Using: Task Routing, Source-Backed Workflow',
-            text: 'Using: Task Routing, Source-Backed Workflow',
-            providerEventType: 'vicode_guidance_using'
+            summary: 'Context: Source-Backed Workflow',
+            text: 'Context: Source-Backed Workflow',
+            providerEventType: 'vicode_guidance_context'
           }
         },
         createdAt: '2026-03-16T00:00:01.000Z'
@@ -228,7 +339,7 @@ describe('deriveRunActivityMap', () => {
     expect(activity.thinkingLines).toEqual([
       expect.objectContaining({
         kind: 'guidance',
-        label: 'Using: Task Routing, Source-Backed Workflow'
+        label: 'Context: Source-Backed Workflow'
       })
     ]);
     expect(activity.activeHeading).toBe('Working');
@@ -238,9 +349,53 @@ describe('deriveRunActivityMap', () => {
       expect.objectContaining({
         kind: 'activity_line',
         activityKind: 'guidance',
-        label: 'Using: Task Routing, Source-Backed Workflow'
+        label: 'Context: Source-Backed Workflow'
       })
     ]);
+  });
+
+  it('hides Vicode guidance context when it is marked as control-plane detail', () => {
+    const thread = createThreadDetail([
+      {
+        id: 'started',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'started',
+        payload: {},
+        createdAt: '2026-03-16T00:00:00.000Z'
+      },
+      {
+        id: 'guidance',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          transcriptVisible: false,
+          activity: {
+            kind: 'guidance',
+            summary: 'Context: Source-Backed Workflow',
+            text: 'Context: Source-Backed Workflow',
+            providerEventType: 'vicode_guidance_context'
+          }
+        },
+        createdAt: '2026-03-16T00:00:01.000Z'
+      },
+      {
+        id: 'completed',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'completed',
+        payload: {},
+        createdAt: '2026-03-16T00:00:02.000Z'
+      }
+    ]);
+
+    const activity = deriveRunActivityMap(thread)['run-1'];
+    expect(activity.thinkingLines).toEqual([]);
+    expect(activity.activeHeading).toBeNull();
+
+    const transcriptItems = deriveRunTranscriptItemsMap(thread)['run-1'];
+    expect(transcriptItems).toEqual([]);
   });
 
   it('normalizes raw research tool names into friendly transcript copy', () => {
@@ -313,6 +468,93 @@ describe('deriveRunActivityMap', () => {
         activityKind: 'tool_result',
         label: 'Read the web page',
         text: 'Page URL: https://example.com/weather\nFocus: snowfall'
+      })
+    ]);
+  });
+
+  it('normalizes browser preview tool telemetry into concise transcript copy', () => {
+    const thread = createThreadDetail([
+      {
+        id: 'started',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'started',
+        payload: {},
+        createdAt: '2026-03-16T00:00:00.000Z'
+      },
+      {
+        id: 'preview-call',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          activity: {
+            kind: 'tool_call',
+            summary: 'Calling browser_preview_check',
+            toolName: 'browser_preview_check',
+            text: 'url: http://localhost:4173/\nexpected text: launch ready'
+          }
+        },
+        createdAt: '2026-03-16T00:00:01.000Z'
+      },
+      {
+        id: 'preview-result',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          activity: {
+            kind: 'tool_result',
+            summary: 'Completed browser_preview_check',
+            toolName: 'browser_preview_check',
+            status: 'completed',
+            url: 'http://localhost:4173/',
+            text: 'Status: passed\nURL: http://localhost:4173/\nConsole errors: 0\nLoad errors: 0'
+          }
+        },
+        createdAt: '2026-03-16T00:00:02.000Z'
+      },
+      {
+        id: 'completed',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'completed',
+        payload: {},
+        createdAt: '2026-03-16T00:00:02.000Z'
+      }
+    ]);
+
+    const activity = deriveRunActivityMap(thread)['run-1'];
+    expect(activity.thinkingLines).toEqual([
+      expect.objectContaining({
+        kind: 'tool_call',
+        label: 'Checking preview',
+        text: 'Preview URL: http://localhost:4173/\nExpected text: launch ready'
+      }),
+      expect.objectContaining({
+        kind: 'tool_result',
+        label: 'Checked preview',
+        text: 'Status: passed\nPreview URL: http://localhost:4173/\nConsole errors: 0\nLoad errors: 0'
+      })
+    ]);
+
+    const transcriptItems = deriveRunTranscriptItemsMap(thread)['run-1'];
+    expect(transcriptItems).toEqual([
+      expect.objectContaining({
+        kind: 'activity_line',
+        activityKind: 'tool_call',
+        label: 'Checking preview',
+        text: 'Preview URL: http://localhost:4173/\nExpected text: launch ready'
+      }),
+      expect.objectContaining({
+        kind: 'activity_line',
+        activityKind: 'tool_result',
+        label: 'Checked preview',
+        text: 'Status: passed\nPreview URL: http://localhost:4173/\nConsole errors: 0\nLoad errors: 0'
+      }),
+      expect.objectContaining({
+        kind: 'worked_for',
+        label: 'Worked for 2s'
       })
     ]);
   });
@@ -784,7 +1026,8 @@ describe('deriveRunActivityMap', () => {
       expect.objectContaining({
         kind: 'activity_line',
         activityKind: 'tool_result',
-        label: 'Command denied'
+        label: 'Command denied',
+        text: 'Command was not approved by the user.'
       })
     ]);
   });
@@ -964,6 +1207,80 @@ describe('deriveRunActivityMap', () => {
     expect(transcriptItems).toEqual([]);
   });
 
+  it('does not render hidden control-plane events in activity or transcript projections', () => {
+    const reminder = [
+      'Internal runtime reminder:',
+      'The user asked for actual workspace changes.',
+      'If the required edits are not complete yet, call the next relevant write-capable tool now.'
+    ].join('\n');
+
+    const thread = createThreadDetail([
+      {
+        id: 'started',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'started',
+        payload: {},
+        createdAt: '2026-03-16T00:00:00.000Z'
+      },
+      {
+        id: 'hidden-reminder',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          eventKind: 'internal_runtime_reminder',
+          transcriptVisible: false,
+          message: 'Prompting model to continue writing files.',
+          activity: {
+            kind: 'thinking',
+            summary: 'Prompting model to continue writing files.',
+            text: reminder,
+            providerEventType: 'ollama_tool_loop_thinking'
+          }
+        },
+        createdAt: '2026-03-16T00:00:01.000Z'
+      },
+      {
+        id: 'hidden-diagnostic',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          eventKind: 'provider_diagnostic',
+          transcriptVisible: false,
+          providerDiagnostics: {
+            providerEventType: 'item/completed',
+            itemKeys: ['raw_json'],
+            classification: 'unclassified'
+          }
+        },
+        createdAt: '2026-03-16T00:00:02.000Z'
+      },
+      {
+        id: 'failed',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'failed',
+        payload: {
+          message: 'No page files were written. Created only roofing-landing before the provider stopped.'
+        },
+        createdAt: '2026-03-16T00:00:03.000Z'
+      }
+    ]);
+
+    const activity = deriveRunActivityMap(thread)['run-1'];
+    expect(activity.thinkingLines).toEqual([]);
+
+    const transcriptItems = deriveRunTranscriptItemsMap(thread)['run-1'];
+    const transcriptText = JSON.stringify(transcriptItems);
+    expect(transcriptText).toContain('No page files were written');
+    expect(transcriptText).not.toContain('Internal runtime reminder');
+    expect(transcriptText).not.toContain('write-capable tool');
+    expect(transcriptText).not.toContain('item/completed');
+    expect(transcriptText).not.toContain('raw_json');
+  });
+
   it('renders mkdir results with a folder label instead of raw tool phrasing', () => {
     const thread = createThreadDetail([
       {
@@ -1003,6 +1320,208 @@ describe('deriveRunActivityMap', () => {
 
     const transcriptItems = deriveRunTranscriptItemsMap(thread)['run-1'];
     expect(Array.isArray(transcriptItems)).toBe(true);
+  });
+
+  it('normalizes core workspace tool telemetry into concise transcript copy', () => {
+    const thread = createThreadDetail([
+      {
+        id: 'started',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'started',
+        payload: {},
+        createdAt: '2026-03-16T00:00:00.000Z'
+      },
+      {
+        id: 'read-call',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          activity: {
+            kind: 'tool_call',
+            summary: 'Calling read_file',
+            toolName: 'read_file',
+            text: 'path: src/app.tsx'
+          }
+        },
+        createdAt: '2026-03-16T00:00:01.000Z'
+      },
+      {
+        id: 'search-result',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          activity: {
+            kind: 'tool_result',
+            summary: 'Completed search_text',
+            toolName: 'search_text',
+            status: 'completed',
+            text: 'query: browser_preview_check\npath: src\nmax_results: 5'
+          }
+        },
+        createdAt: '2026-03-16T00:00:02.000Z'
+      },
+      {
+        id: 'write-call',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          activity: {
+            kind: 'tool_call',
+            summary: 'Calling write_file',
+            toolName: 'write_file',
+            text: 'path: README.md\ncontent: # Long generated content'
+          }
+        },
+        createdAt: '2026-03-16T00:00:03.000Z'
+      },
+      {
+        id: 'patch-result',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          activity: {
+            kind: 'tool_result',
+            summary: 'Completed apply_patch',
+            toolName: 'apply_patch',
+            status: 'completed',
+            text: 'patch: *** Begin Patch ...'
+          }
+        },
+        createdAt: '2026-03-16T00:00:04.000Z'
+      }
+    ]);
+
+    const activity = deriveRunActivityMap(thread)['run-1'];
+    expect(activity.thinkingLines).toEqual([
+      expect.objectContaining({
+        kind: 'tool_call',
+        label: 'Reading file',
+        text: 'File: src/app.tsx'
+      }),
+      expect.objectContaining({
+        kind: 'tool_result',
+        label: 'Searched workspace',
+        text: 'Search query: browser_preview_check\nPath: src\nResults limit: 5'
+      }),
+      expect.objectContaining({
+        kind: 'tool_call',
+        label: 'Writing file',
+        text: 'File: README.md\nContent: provided'
+      }),
+      expect.objectContaining({
+        kind: 'tool_result',
+        label: 'Applied patch',
+        text: 'Patch: provided'
+      })
+    ]);
+  });
+
+  it('normalizes advanced skill and helper tool telemetry into concise transcript copy', () => {
+    const thread = createThreadDetail([
+      {
+        id: 'started',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'started',
+        payload: {},
+        createdAt: '2026-03-16T00:00:00.000Z'
+      },
+      {
+        id: 'skill-call',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          activity: {
+            kind: 'tool_call',
+            summary: 'Calling create_skill_bundle',
+            toolName: 'create_skill_bundle',
+            text: 'folder_name: ux-review\nscope: project\nfiles: [{ "path": "SKILL.md" }]'
+          }
+        },
+        createdAt: '2026-03-16T00:00:01.000Z'
+      },
+      {
+        id: 'skill-result',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          activity: {
+            kind: 'tool_result',
+            summary: 'Completed create_skill_bundle',
+            toolName: 'create_skill_bundle',
+            status: 'completed',
+            text: 'folder_name: ux-review'
+          }
+        },
+        createdAt: '2026-03-16T00:00:02.000Z'
+      },
+      {
+        id: 'plugin-call',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          activity: {
+            kind: 'tool_call',
+            summary: 'Calling create_plugin_bundle',
+            toolName: 'create_plugin_bundle',
+            text: 'folder_name: project-tools\nscope: global\nfiles: [{ "path": ".mcp.json" }]'
+          }
+        },
+        createdAt: '2026-03-16T00:00:03.000Z'
+      },
+      {
+        id: 'delegate-result',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          activity: {
+            kind: 'tool_result',
+            summary: 'Completed spawn_subagents',
+            toolName: 'spawn_subagents',
+            status: 'completed',
+            text: 'tasks: [{ "title": "Verify settings copy" }]'
+          }
+        },
+        createdAt: '2026-03-16T00:00:04.000Z'
+      }
+    ]);
+
+    const activity = deriveRunActivityMap(thread)['run-1'];
+
+    expect(activity.thinkingLines).toEqual([
+      expect.objectContaining({
+        kind: 'tool_call',
+        label: 'Creating skill',
+        text: 'Skill folder: ux-review\nScope: project\nFiles: provided'
+      }),
+      expect.objectContaining({
+        kind: 'tool_result',
+        label: 'Created skill',
+        text: 'Skill folder: ux-review'
+      }),
+      expect.objectContaining({
+        kind: 'tool_call',
+        label: 'Creating plugin',
+        text: 'Plugin folder: project-tools\nScope: global\nFiles: provided'
+      }),
+      expect.objectContaining({
+        kind: 'tool_result',
+        label: 'Started helper agents',
+        text: 'Helpers: provided'
+      })
+    ]);
+    expect(activity.thinkingLines.map((line) => line.label).join('\n')).not.toMatch(
+      /create_skill_bundle|create_plugin_bundle|spawn_subagents/u
+    );
   });
 
   it('trims multi-paragraph operational assistant narration when concrete work rows already explain the steps', () => {
@@ -1167,6 +1686,82 @@ describe('deriveRunActivityMap', () => {
     ]);
   });
 
+  it('puts missing file-write failure evidence before compact tool details', () => {
+    const failureMessage = 'No page files were written. Created only roofing-landing before the provider stopped. Ollama stopped before writing the required file contents.';
+    const thread = createThreadDetail([
+      {
+        id: 'started',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'started',
+        payload: {},
+        createdAt: '2026-03-16T00:00:00.000Z'
+      },
+      {
+        id: 'thinking',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          activity: {
+            kind: 'thinking',
+            summary: 'Let me create the landing page.',
+            text: 'Let me create the landing page.'
+          }
+        },
+        createdAt: '2026-03-16T00:00:01.000Z'
+      },
+      {
+        id: 'mkdir',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          activity: {
+            kind: 'mkdir',
+            summary: 'Created folder',
+            text: 'Folder: roofing-landing',
+            path: 'roofing-landing'
+          }
+        },
+        createdAt: '2026-03-16T00:00:02.000Z'
+      },
+      {
+        id: 'failed',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'failed',
+        payload: {
+          message: failureMessage
+        },
+        createdAt: '2026-03-16T00:00:05.000Z'
+      }
+    ]);
+
+    const items = deriveRunTranscriptItemsMap(thread)['run-1'];
+
+    expect(items[0]).toEqual(
+      expect.objectContaining({
+        kind: 'resolution_summary',
+        outcome: failureMessage,
+        filesChanged: ['roofing-landing'],
+        remainingRisk: 'No file-content writes were recorded before failure.'
+      })
+    );
+    expect(items).not.toContainEqual(
+      expect.objectContaining({
+        kind: 'activity_line',
+        activityKind: 'file_write'
+      })
+    );
+    expect(items).toContainEqual(
+      expect.objectContaining({
+        kind: 'worked_for',
+        label: 'Worked for 5s'
+      })
+    );
+  });
+
   it('includes MCP tools used in the resolved summary when a successful run relied on them', () => {
     const thread = createThreadDetail([
       {
@@ -1228,6 +1823,31 @@ describe('deriveRunActivityMap', () => {
     ]);
 
     const items = deriveRunTranscriptItemsMap(thread)['run-1'];
+    expect(items).toEqual([
+      expect.objectContaining({
+        kind: 'activity_line',
+        activityKind: 'tool_call',
+        toolName: 'use_mcp_tool',
+        label: 'Using MCP tool',
+        text: 'Tool: dashboard_snapshot'
+      }),
+      expect.objectContaining({
+        kind: 'activity_line',
+        activityKind: 'tool_result',
+        toolName: 'use_mcp_tool',
+        label: 'Used MCP tool',
+        text: 'Returned dashboard data.'
+      }),
+      expect.objectContaining({
+        kind: 'worked_for',
+        label: 'Worked for 4s'
+      }),
+      expect.objectContaining({
+        kind: 'resolution_summary',
+        outcome: 'Dashboard built.',
+        toolsUsed: ['dashboard_snapshot']
+      })
+    ]);
     expect(items).toContainEqual(
       expect.objectContaining({
         kind: 'resolution_summary',
@@ -1922,7 +2542,7 @@ describe('deriveRunActivityMap', () => {
         kind: 'activity_line',
         activityKind: 'tool_result',
         label: 'Blocked command: workspace network blocked',
-        text: 'run_command is blocked by this workspace network policy. The requested command looks network-oriented (curl), and approved host network access is disabled here.'
+        text: 'Command is blocked by this workspace network policy. The requested command looks network-oriented (curl), and approved host network access is disabled here.'
       })
     );
   });
@@ -1969,7 +2589,7 @@ describe('deriveRunActivityMap', () => {
         kind: 'activity_line',
         activityKind: 'tool_result',
         label: 'Blocked command: path escape',
-        text: 'run_command is blocked by runtime path policy. The command references a relative path that resolves outside the workspace (..\\..\\outside.txt).'
+        text: 'Command is blocked by runtime path policy. The command references a relative path that resolves outside the workspace (..\\..\\outside.txt).'
       })
     );
   });
@@ -2017,7 +2637,7 @@ describe('deriveRunActivityMap', () => {
         kind: 'activity_line',
         activityKind: 'tool_result',
         label: 'Blocked verification command: Full access required',
-        text: 'run_command requires Full access. Switch permissions to Full access and retry.'
+        text: 'Command requires Full access. Switch permissions to Full access and retry.'
       })
     );
   });
@@ -2589,7 +3209,7 @@ describe('deriveRunActivityMap', () => {
             kind: 'thinking'
           }),
           expect.objectContaining({
-            label: 'Calling read_file',
+            label: 'Reading file',
             kind: 'tool_call'
           })
         ]
@@ -4195,6 +4815,61 @@ describe('deriveRunActivityMap', () => {
     ]);
   });
 
+  it('surfaces automatic context compaction as a quiet transcript boundary', () => {
+    const thread = createThreadDetail([
+      {
+        id: 'started',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'started',
+        payload: {},
+        createdAt: '2026-06-01T10:00:00.000Z'
+      },
+      {
+        id: 'context-compaction',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          eventKind: 'tool_activity',
+          transcriptVisible: true,
+          activity: {
+            kind: 'context_compaction',
+            summary: 'Context automatically compacted',
+            text: 'Older thread context was summarized so the run can continue within the model context window.',
+            providerEventType: 'vicode_thread_context_compaction'
+          }
+        },
+        createdAt: '2026-06-01T10:00:01.000Z'
+      },
+      {
+        id: 'completed',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'completed',
+        payload: {},
+        createdAt: '2026-06-01T10:00:02.000Z'
+      }
+    ]);
+
+    const activity = deriveRunActivityMap(thread)['run-1'];
+    expect(activity.workedForLabel).toBeNull();
+    expect(activity.thinkingLines).toEqual([
+      expect.objectContaining({
+        kind: 'context_compaction',
+        label: 'Context automatically compacted'
+      })
+    ]);
+
+    expect(deriveRunTranscriptItemsMap(thread)['run-1']).toEqual([
+      expect.objectContaining({
+        kind: 'activity_line',
+        activityKind: 'context_compaction',
+        label: 'Context automatically compacted'
+      })
+    ]);
+  });
+
   it('does not show worked time for read-only inspection activity', () => {
     const thread = createThreadDetail([
       {
@@ -4325,5 +5000,647 @@ describe('deriveRunActivityMap', () => {
         text: "I'll keep the tone calm, premium, restrained, and direct."
       })
     ]);
+  });
+
+  it('sanitizes ANSI-colored MCP auth failures before rendering reasoning activity', () => {
+    const rawAuthFailure =
+      '\u001b[2m2026-05-25T20:22:45.473189Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2mrmcp:: transport:: worker\u001b[0m\u001b[2m:\u001b[0m worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer realm=\\"OA uth\\", resource_metadata="https://mcp.cloudflare.com/.well-known/oauth-protected-resource/mcp", error="invalid_token", error_description="Missing or invalid access token" }) [blocked]';
+    const thread = createThreadDetail([
+      {
+        id: 'started',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'started',
+        payload: {},
+        createdAt: '2026-05-25T20:22:45.000Z'
+      },
+      {
+        id: 'auth-failure',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          activity: {
+            kind: 'thinking',
+            summary: rawAuthFailure,
+            text: rawAuthFailure
+          }
+        },
+        createdAt: '2026-05-25T20:22:45.500Z'
+      }
+    ]);
+
+    const activityLine = deriveRunActivityMap(thread)['run-1'].thinkingLines[0];
+    expect(activityLine).toEqual(
+      expect.objectContaining({
+        kind: 'thinking',
+        label: 'MCP tool unavailable: authentication required.',
+        text: 'MCP tool unavailable: authentication required.'
+      })
+    );
+    expect(activityLine?.text).not.toMatch(/\u001b|\binvalid_token\b|Missing or invalid access token|Bearer realm/u);
+
+    const transcriptLine = deriveRunTranscriptItemsMap(thread)['run-1'].find(
+      (item) => item.kind === 'activity_line' && item.activityKind === 'thinking'
+    );
+    expect(transcriptLine).toEqual(
+      expect.objectContaining({
+        label: 'MCP tool unavailable: authentication required.',
+        text: 'MCP tool unavailable: authentication required.'
+      })
+    );
+  });
+});
+
+describe('deriveStagedWorkspaceReviewItems', () => {
+  function createStagedEvent(id: string, overrides: Partial<RunEvent['payload']> = {}): RunEvent {
+    return {
+      id,
+      threadId: 'thread-1',
+      runId: 'run-1',
+      eventType: 'info',
+      payload: {
+        eventKind: 'debug_detail',
+        transcriptVisible: false,
+        stagedWorkspaceChangeSet: {
+          threadId: 'thread-1',
+          runId: 'run-1',
+          sourceToolName: 'write_file',
+          isolationMode: 'patch_buffer',
+          status: 'proposed',
+          requestedPath: 'src/example.ts',
+          changedPaths: ['src/example.ts'],
+          operations: [
+            {
+              operation: 'write_file',
+              path: 'src/example.ts',
+              beforeContent: 'before-secret-token',
+              proposedAfterContent: 'after-secret-token',
+              patchText: 'patch-secret-token'
+            }
+          ],
+          summary: {
+            filesChanged: 1,
+            insertions: 2,
+            deletions: 1
+          }
+        },
+        ...overrides
+      },
+      createdAt: '2026-03-16T00:00:02.000Z'
+    };
+  }
+
+  it('pairs staged workspace proposals with later decisions without exposing staged file contents', () => {
+    const events: RunEvent[] = [
+      createStagedEvent('staged-1'),
+      {
+        id: 'decision-1',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          eventKind: 'debug_detail',
+          transcriptVisible: false,
+          stagedWorkspaceReviewDecision: {
+            action: 'applied',
+            status: 'applied',
+            threadId: 'thread-1',
+            runId: 'run-1',
+            stagedEventId: 'staged-1',
+            stagedEventIndex: 0,
+            sourceToolName: 'write_file',
+            isolationMode: 'patch_buffer',
+            changedPaths: ['src/example.ts'],
+            operationKinds: ['write_file'],
+            errorReason: null,
+            createdAt: '2026-03-16T00:00:03.000Z'
+          }
+        },
+        createdAt: '2026-03-16T00:00:03.000Z'
+      }
+    ];
+
+    const [item] = deriveStagedWorkspaceReviewItems(events, 'run-1');
+
+    expect(item).toEqual(expect.objectContaining({
+      id: 'staged-workspace:staged-1',
+      threadId: 'thread-1',
+      runId: 'run-1',
+      stagedEventId: 'staged-1',
+      stagedEventIndex: 0,
+      sourceToolName: 'write_file',
+      isolationMode: 'patch_buffer',
+      status: 'applied',
+      changedPaths: ['src/example.ts'],
+      operationCount: 1,
+      operationKinds: ['write_file'],
+      filesChanged: 1,
+      insertions: 2,
+      deletions: 1
+    }));
+    expect(JSON.stringify(item)).not.toContain('before-secret-token');
+    expect(JSON.stringify(item)).not.toContain('after-secret-token');
+    expect(JSON.stringify(item)).not.toContain('patch-secret-token');
+  });
+
+  it('uses the latest reverted staged workspace review decision without exposing staged file contents', () => {
+    const events: RunEvent[] = [
+      createStagedEvent('staged-1'),
+      {
+        id: 'decision-applied',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          eventKind: 'debug_detail',
+          transcriptVisible: false,
+          stagedWorkspaceReviewDecision: {
+            action: 'applied',
+            status: 'applied',
+            threadId: 'thread-1',
+            runId: 'run-1',
+            stagedEventId: 'staged-1',
+            stagedEventIndex: 0,
+            sourceToolName: 'write_file',
+            isolationMode: 'patch_buffer',
+            changedPaths: ['src/example.ts'],
+            operationKinds: ['write_file'],
+            errorReason: null,
+            createdAt: '2026-03-16T00:00:03.000Z'
+          }
+        },
+        createdAt: '2026-03-16T00:00:03.000Z'
+      },
+      {
+        id: 'decision-reverted',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          eventKind: 'debug_detail',
+          transcriptVisible: false,
+          stagedWorkspaceReviewDecision: {
+            action: 'reverted',
+            status: 'reverted',
+            threadId: 'thread-1',
+            runId: 'run-1',
+            stagedEventId: 'staged-1',
+            stagedEventIndex: 0,
+            sourceToolName: 'write_file',
+            isolationMode: 'patch_buffer',
+            changedPaths: ['src/example.ts'],
+            operationKinds: ['write_file'],
+            errorReason: null,
+            createdAt: '2026-03-16T00:00:04.000Z'
+          }
+        },
+        createdAt: '2026-03-16T00:00:04.000Z'
+      }
+    ];
+
+    const [item] = deriveStagedWorkspaceReviewItems(events, 'run-1');
+
+    expect(item).toEqual(expect.objectContaining({
+      status: 'reverted',
+      decision: expect.objectContaining({
+        action: 'reverted',
+        status: 'reverted'
+      })
+    }));
+    expect(JSON.stringify(item)).not.toContain('before-secret-token');
+    expect(JSON.stringify(item)).not.toContain('after-secret-token');
+    expect(JSON.stringify(item)).not.toContain('patch-secret-token');
+  });
+
+  it('pairs staged workspace proposals with later hunk decisions without exposing staged file contents', () => {
+    const events: RunEvent[] = [
+      createStagedEvent('staged-1'),
+      {
+        id: 'hunk-decision-1',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'info',
+        payload: {
+          eventKind: 'debug_detail',
+          transcriptVisible: false,
+          stagedWorkspaceHunkReviewDecision: {
+            action: 'applied',
+            status: 'applied',
+            threadId: 'thread-1',
+            runId: 'run-1',
+            source: 'staged_workspace_preview',
+            isolationMode: 'patch_buffer',
+            stagedEventId: 'staged-1',
+            stagedEventIndex: 0,
+            changedPaths: ['src/example.ts'],
+            hunkIds: ['hunk-1', 'hunk-2'],
+            acceptedHunkIds: ['hunk-1'],
+            rejectedHunkIds: ['hunk-2'],
+            filesChanged: 1,
+            insertions: 1,
+            deletions: 1,
+            errorReason: null,
+            createdAt: '2026-03-16T00:00:03.000Z',
+            beforeContent: 'before-secret-token',
+            proposedAfterContent: 'after-secret-token',
+            patchText: 'patch-secret-token'
+          }
+        },
+        createdAt: '2026-03-16T00:00:03.000Z'
+      }
+    ];
+
+    const [item] = deriveStagedWorkspaceReviewItems(events, 'run-1');
+
+    expect(item?.hunkDecision).toEqual(expect.objectContaining({
+      action: 'applied',
+      status: 'applied',
+      stagedEventId: 'staged-1',
+      hunkIds: ['hunk-1', 'hunk-2'],
+      acceptedHunkIds: ['hunk-1'],
+      rejectedHunkIds: ['hunk-2']
+    }));
+    expect(JSON.stringify(item)).not.toContain('before-secret-token');
+    expect(JSON.stringify(item)).not.toContain('after-secret-token');
+    expect(JSON.stringify(item)).not.toContain('patch-secret-token');
+  });
+
+  it('adds pending staged workspace proposals to transcript items', () => {
+    const thread = createThreadDetail([
+      createStagedEvent('staged-1'),
+      {
+        id: 'completed',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'completed',
+        payload: {},
+        createdAt: '2026-03-16T00:00:04.000Z'
+      }
+    ]);
+
+    expect(deriveRunTranscriptItemsMap(thread)['run-1']).toContainEqual(expect.objectContaining({
+      kind: 'staged_workspace_change',
+      change: expect.objectContaining({
+        status: 'pending',
+        changedPaths: ['src/example.ts']
+      })
+    }));
+  });
+});
+
+describe('deriveWorktreeReviewItems', () => {
+  function createWorktreeChangeEvent(id: string, overrides: Partial<RunEvent['payload']> = {}): RunEvent {
+    return {
+      id,
+      threadId: 'thread-1',
+      runId: 'run-1',
+      eventType: 'info',
+      payload: {
+        activity: {
+          kind: 'change_summary',
+          summary: '1 file changed',
+          changeArtifact: {
+            source: 'worktree_diff',
+            summary: {
+              filesChanged: 1,
+              insertions: 3,
+              deletions: 1
+            },
+            files: [
+              {
+                path: 'src/example.ts',
+                status: 'modified',
+                insertions: 3,
+                deletions: 1,
+                beforeContent: 'before-secret-token',
+                afterContent: 'after-secret-token',
+                previewLines: [
+                  {
+                    type: 'added',
+                    oldLineNumber: null,
+                    newLineNumber: 1,
+                    text: 'after-secret-token'
+                  }
+                ],
+                previewTruncated: false
+              }
+            ]
+          }
+        },
+        worktreeChangeEvidence: {
+          threadId: 'thread-1',
+          runId: 'run-1',
+          isolationMode: 'git_worktree',
+          status: 'ready',
+          reviewStatus: 'pending',
+          cleanupPolicy: 'manual',
+          sourceWorkspaceRelativePath: 'packages/app',
+          branchName: 'vicode/worktree/project-1/run-1',
+          baseRef: 'HEAD',
+          baseSha: 'abcdef1234567890',
+          filesChanged: 1,
+          insertions: 3,
+          deletions: 1,
+          changedPaths: ['src/example.ts']
+        },
+        ...overrides
+      },
+      createdAt: '2026-03-16T00:00:02.000Z'
+    };
+  }
+
+  function createWorktreeDecisionEvent(
+    id: string,
+    decision: {
+      action: 'applied' | 'rejected' | 'reverted';
+      status: 'applied' | 'rejected' | 'reverted' | 'failed';
+      errorReason?: string | null;
+      createdAt?: string;
+    }
+  ): RunEvent {
+    return {
+      id,
+      threadId: 'thread-1',
+      runId: 'run-1',
+      eventType: 'info',
+      payload: {
+        eventKind: 'debug_detail',
+        transcriptVisible: false,
+        worktreeReviewDecision: {
+          action: decision.action,
+          status: decision.status,
+          threadId: 'thread-1',
+          runId: 'run-1',
+          isolationMode: 'git_worktree',
+          branchName: 'vicode/worktree/project-1/run-1',
+          baseSha: 'abcdef1234567890',
+          sourceWorkspaceRelativePath: 'packages/app',
+          changedPaths: ['src/example.ts'],
+          filesChanged: 1,
+          insertions: 3,
+          deletions: 1,
+          errorReason: decision.errorReason ?? null,
+          createdAt: decision.createdAt ?? '2026-03-16T00:00:03.000Z'
+        }
+      },
+      createdAt: decision.createdAt ?? '2026-03-16T00:00:03.000Z'
+    };
+  }
+
+  function createWorktreeCleanupDecisionEvent(
+    id: string,
+    decision: {
+      status: 'cleaned' | 'failed' | 'refused';
+      reviewStatus: 'applied' | 'rejected' | 'reverted' | 'failed' | 'pending';
+      errorReason?: string | null;
+      createdAt?: string;
+    }
+  ): RunEvent {
+    return {
+      id,
+      threadId: 'thread-1',
+      runId: 'run-1',
+      eventType: 'info',
+      payload: {
+        eventKind: 'debug_detail',
+        transcriptVisible: false,
+        worktreeCleanupDecision: {
+          action: decision.status,
+          status: decision.status,
+          threadId: 'thread-1',
+          runId: 'run-1',
+          isolationMode: 'git_worktree',
+          branchName: 'vicode/worktree/project-1/run-1',
+          baseSha: 'abcdef1234567890',
+          cleanupPolicy: 'preserve_until_review',
+          reviewStatus: decision.reviewStatus,
+          errorReason: decision.errorReason ?? null,
+          createdAt: decision.createdAt ?? '2026-03-16T00:00:05.000Z'
+        }
+      },
+      createdAt: decision.createdAt ?? '2026-03-16T00:00:05.000Z'
+    };
+  }
+
+  function createWorktreeHunkDecisionEvent(
+    id: string,
+    decision: {
+      action: 'applied' | 'rejected' | 'reverted';
+      status: 'applied' | 'rejected' | 'reverted' | 'failed';
+      errorReason?: string | null;
+      createdAt?: string;
+    }
+  ): RunEvent {
+    return {
+      id,
+      threadId: 'thread-1',
+      runId: 'run-1',
+      eventType: 'info',
+      payload: {
+        eventKind: 'debug_detail',
+        transcriptVisible: false,
+        worktreeHunkReviewDecision: {
+          action: decision.action,
+          status: decision.status,
+          threadId: 'thread-1',
+          runId: 'run-1',
+          source: 'worktree_diff',
+          isolationMode: 'git_worktree',
+          branchName: 'vicode/worktree/project-1/run-1',
+          baseSha: 'abcdef1234567890',
+          sourceWorkspaceRelativePath: 'packages/app',
+          changedPaths: ['src/example.ts'],
+          hunkIds: ['hunk-1', 'hunk-2'],
+          acceptedHunkIds: ['hunk-1'],
+          rejectedHunkIds: ['hunk-2'],
+          filesChanged: 1,
+          insertions: 1,
+          deletions: 1,
+          errorReason: decision.errorReason ?? null,
+          createdAt: decision.createdAt ?? '2026-03-16T00:00:04.000Z',
+          sourceWorkspaceRoot: 'C:/must-not-leak/source',
+          worktreeWorkspaceRoot: 'C:/must-not-leak/worktree',
+          beforeContent: 'before-secret-token',
+          afterContent: 'after-secret-token',
+          patchText: 'patch-secret-token'
+        }
+      },
+      createdAt: decision.createdAt ?? '2026-03-16T00:00:04.000Z'
+    };
+  }
+
+  it('derives a pending worktree review item from the latest worktree_diff artifact', () => {
+    const [item] = deriveWorktreeReviewItems([
+      createWorktreeChangeEvent('worktree-change-1')
+    ], 'run-1');
+
+    expect(item).toEqual(expect.objectContaining({
+      id: 'worktree-review:worktree-change-1',
+      threadId: 'thread-1',
+      runId: 'run-1',
+      artifactEventId: 'worktree-change-1',
+      isolationMode: 'git_worktree',
+      status: 'pending',
+      branchName: 'vicode/worktree/project-1/run-1',
+      baseSha: 'abcdef1234567890',
+      sourceWorkspaceRelativePath: 'packages/app',
+      changedPaths: ['src/example.ts'],
+      filesChanged: 1,
+      insertions: 3,
+      deletions: 1,
+      decision: null
+    }));
+    expect(item?.artifact.source).toBe('worktree_diff');
+  });
+
+  it('pairs the latest worktree review decision with the worktree item', () => {
+    const [item] = deriveWorktreeReviewItems([
+      createWorktreeChangeEvent('worktree-change-1'),
+      createWorktreeDecisionEvent('decision-failed', {
+        action: 'applied',
+        status: 'failed',
+        errorReason: 'Source workspace changed.',
+        createdAt: '2026-03-16T00:00:03.000Z'
+      }),
+      createWorktreeDecisionEvent('decision-rejected', {
+        action: 'rejected',
+        status: 'rejected',
+        createdAt: '2026-03-16T00:00:04.000Z'
+      })
+    ], 'run-1');
+
+    expect(item).toEqual(expect.objectContaining({
+      status: 'rejected',
+      errorReason: null,
+      decision: expect.objectContaining({
+        action: 'rejected',
+        status: 'rejected'
+      })
+    }));
+  });
+
+  it('derives reverted worktree review status from worktree review decisions', () => {
+    const [item] = deriveWorktreeReviewItems([
+      createWorktreeChangeEvent('worktree-change-1'),
+      createWorktreeDecisionEvent('decision-applied', {
+        action: 'applied',
+        status: 'applied',
+        createdAt: '2026-03-16T00:00:03.000Z'
+      }),
+      createWorktreeDecisionEvent('decision-reverted', {
+        action: 'reverted',
+        status: 'reverted',
+        createdAt: '2026-03-16T00:00:04.000Z'
+      })
+    ], 'run-1');
+
+    expect(item).toEqual(expect.objectContaining({
+      status: 'reverted',
+      errorReason: null,
+      decision: expect.objectContaining({
+        action: 'reverted',
+        status: 'reverted'
+      })
+    }));
+    expect(JSON.stringify(item?.decision)).not.toContain('sourceWorkspaceRoot');
+    expect(JSON.stringify(item?.decision)).not.toContain('worktreeWorkspaceRoot');
+    expect(JSON.stringify(item?.decision)).not.toContain('before-secret-token');
+    expect(JSON.stringify(item?.decision)).not.toContain('after-secret-token');
+  });
+
+  it('pairs the latest worktree hunk decision without exposing roots or file contents', () => {
+    const [item] = deriveWorktreeReviewItems([
+      createWorktreeChangeEvent('worktree-change-1'),
+      createWorktreeHunkDecisionEvent('hunk-failed', {
+        action: 'applied',
+        status: 'failed',
+        errorReason: 'Source workspace changed.',
+        createdAt: '2026-03-16T00:00:03.000Z'
+      }),
+      createWorktreeHunkDecisionEvent('hunk-applied', {
+        action: 'applied',
+        status: 'applied',
+        createdAt: '2026-03-16T00:00:04.000Z'
+      })
+    ], 'run-1');
+
+    expect(item?.hunkDecision).toEqual(expect.objectContaining({
+      action: 'applied',
+      status: 'applied',
+      source: 'worktree_diff',
+      hunkIds: ['hunk-1', 'hunk-2'],
+      acceptedHunkIds: ['hunk-1'],
+      rejectedHunkIds: ['hunk-2']
+    }));
+    expect(JSON.stringify(item?.hunkDecision)).not.toContain('sourceWorkspaceRoot');
+    expect(JSON.stringify(item?.hunkDecision)).not.toContain('worktreeWorkspaceRoot');
+    expect(JSON.stringify(item?.hunkDecision)).not.toContain('before-secret-token');
+    expect(JSON.stringify(item?.hunkDecision)).not.toContain('after-secret-token');
+    expect(JSON.stringify(item?.hunkDecision)).not.toContain('patch-secret-token');
+  });
+
+  it('pairs the latest cleanup decision without changing the worktree review status', () => {
+    const [item] = deriveWorktreeReviewItems([
+      createWorktreeChangeEvent('worktree-change-1'),
+      createWorktreeDecisionEvent('decision-rejected', {
+        action: 'rejected',
+        status: 'rejected',
+        createdAt: '2026-03-16T00:00:03.000Z'
+      }),
+      createWorktreeCleanupDecisionEvent('cleanup-failed', {
+        status: 'failed',
+        reviewStatus: 'rejected',
+        errorReason: 'Git failed at C:/Users/test-user/worktrees/run-1.',
+        createdAt: '2026-03-16T00:00:04.000Z'
+      }),
+      createWorktreeCleanupDecisionEvent('cleanup-cleaned', {
+        status: 'cleaned',
+        reviewStatus: 'rejected',
+        createdAt: '2026-03-16T00:00:05.000Z'
+      })
+    ], 'run-1');
+
+    expect(item).toEqual(expect.objectContaining({
+      status: 'rejected',
+      cleanupStatus: 'cleaned',
+      cleanupErrorReason: null,
+      cleanupDecision: expect.objectContaining({
+        action: 'cleaned',
+        status: 'cleaned',
+        reviewStatus: 'rejected'
+      })
+    }));
+    expect(JSON.stringify(item?.cleanupDecision)).not.toContain('sourceWorkspaceRoot');
+    expect(JSON.stringify(item?.cleanupDecision)).not.toContain('worktreeWorkspaceRoot');
+    expect(JSON.stringify(item?.cleanupDecision)).not.toContain('before-secret-token');
+    expect(JSON.stringify(item?.cleanupDecision)).not.toContain('after-secret-token');
+  });
+
+  it('adds pending worktree review items to transcript items without local roots', () => {
+    const thread = createThreadDetail([
+      createWorktreeChangeEvent('worktree-change-1'),
+      {
+        id: 'completed',
+        threadId: 'thread-1',
+        runId: 'run-1',
+        eventType: 'completed',
+        payload: {},
+        createdAt: '2026-03-16T00:00:04.000Z'
+      }
+    ]);
+
+    const items = deriveRunTranscriptItemsMap(thread)['run-1'];
+
+    expect(items).toContainEqual(expect.objectContaining({
+      kind: 'worktree_workspace_change',
+      change: expect.objectContaining({
+        status: 'pending',
+        changedPaths: ['src/example.ts']
+      })
+    }));
+    expect(JSON.stringify(items)).not.toContain('C:\\');
+    expect(JSON.stringify(items)).not.toContain('worktreeRepoRoot');
+    expect(JSON.stringify(items)).not.toContain('sourceWorkspaceRoot');
   });
 });

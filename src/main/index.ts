@@ -12,12 +12,18 @@ import { OllamaRuntimeService } from './services/ollama-runtime';
 import { ProviderManager } from './services/provider-manager';
 import { VoiceService } from './services/voice';
 import { CollaborationService } from './services/collab';
-import { WorkspaceBootstrapService } from './services/workspace-bootstrap';
 import { DatabaseService } from '../storage/database';
 import { createAppServices, startDeferredAppServices } from './startup';
+import { parseOllamaLaunchArgv } from './ollama-launch-args';
+import { createOllamaLaunchController } from './ollama-launch-profile';
+import {
+  handleOllamaLaunchSecondInstance,
+  type OllamaLaunchController
+} from './ollama-launch-instance';
 
 let mainWindow: BrowserWindow | null = null;
 let appServices: ReturnType<typeof createAppServices> | null = null;
+let launchController: OllamaLaunchController | null = null;
 let db: DatabaseService | null = null;
 let updater: AppUpdaterService | null = null;
 let automations: AutomationScheduler | null = null;
@@ -26,10 +32,13 @@ let ollamaRuntime: OllamaRuntimeService | null = null;
 let mcp: McpRegistryService | null = null;
 let jobs: JobsService | null = null;
 let heartbeat: HeartbeatService | null = null;
-let workspaceBootstrap: WorkspaceBootstrapService | null = null;
 let collab: CollaborationService | null = null;
 let ipcCleanup: (() => void) | null = null;
 let deferredCleanup: (() => void) | null = null;
+let launchPendingCleanup: (() => void) | null = null;
+let pendingSecondInstanceArgv: string[] | null = null;
+let initialOllamaLaunchProfilePath: string | null = null;
+const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'aborted', 'cancelled']);
 const WINDOWS_APP_ID = 'com.vicode.windows';
 const WINDOWS_APP_NAME = 'Vicode';
 const HEARTBEAT_AUTONOMY_ENABLED = process.env.VICODE_ENABLE_HEARTBEAT_AUTONOMY === '1';
@@ -51,6 +60,13 @@ function writeStartupDebugEntry(step: string) {
 }
 
 writeStartupDebugEntry('module-loaded');
+
+try {
+  initialOllamaLaunchProfilePath = parseOllamaLaunchArgv(process.argv)?.profilePath ?? null;
+} catch (error) {
+  console.error('[startup] Invalid Ollama launch arguments.', error);
+  app.exit(1);
+}
 
 function installEditableContextMenu(window: BrowserWindow) {
   window.webContents.on('context-menu', (_event, params) => {
@@ -184,6 +200,63 @@ function installZoomShortcuts(window: BrowserWindow) {
 async function createWindow() {
   logStartupStep('begin');
   nativeTheme.themeSource = 'dark';
+  const stateDir = join(app.getPath('userData'), 'state');
+  mkdirSync(stateDir, { recursive: true });
+  logStartupStep(`state-dir-ready:${stateDir}`);
+  const services =
+    appServices ??
+    createAppServices({
+      stateDir,
+      heartbeatAutonomyEnabled: HEARTBEAT_AUTONOMY_ENABLED
+    });
+  logStartupStep('services-created');
+  appServices = services;
+  db = services.db;
+  updater = services.updater;
+  providers = services.providers;
+  ollamaRuntime = services.ollamaRuntime;
+  mcp = services.mcp;
+  jobs = services.jobs;
+  heartbeat = services.heartbeat;
+  automations = services.automations;
+  collab = services.collab;
+  launchController = launchController ?? createOllamaLaunchController({
+    db: services.db,
+    stateDir,
+    hasActiveRuns: () => services.providers.hasActiveRuns()
+  });
+  if (!launchPendingCleanup) {
+    launchPendingCleanup = services.providers.onEvent((event) => {
+      if (event.type !== 'run.status' || !TERMINAL_RUN_STATUSES.has(event.status)) {
+        return;
+      }
+      if (services.providers.hasActiveRuns()) {
+        return;
+      }
+
+      void Promise.resolve(launchController?.applyPendingProfile?.()).catch((error) => {
+        console.error('[startup] Failed to apply deferred Ollama launch profile.', error);
+      });
+    });
+  }
+
+  if (initialOllamaLaunchProfilePath) {
+    const profilePath = initialOllamaLaunchProfilePath;
+    initialOllamaLaunchProfilePath = null;
+    try {
+      const result = await launchController.handleProfilePath(profilePath);
+      logStartupStep(`ollama-launch-profile:${result.status}`);
+      if (result.profile?.configureOnly) {
+        app.quit();
+        return;
+      }
+    } catch (error) {
+      console.error('[startup] Failed to apply Ollama launch profile.', error);
+      app.quit();
+      return;
+    }
+  }
+
   const iconPath = resolveAppIconPath();
   const windowOptions: Electron.BrowserWindowConstructorOptions = {
     width: 1440,
@@ -268,28 +341,6 @@ async function createWindow() {
     });
   }
 
-  const stateDir = join(app.getPath('userData'), 'state');
-  mkdirSync(stateDir, { recursive: true });
-  logStartupStep(`state-dir-ready:${stateDir}`);
-  const services =
-    appServices ??
-    createAppServices({
-      stateDir,
-      heartbeatAutonomyEnabled: HEARTBEAT_AUTONOMY_ENABLED
-    });
-  logStartupStep('services-created');
-  appServices = services;
-  db = services.db;
-  updater = services.updater;
-  providers = services.providers;
-  ollamaRuntime = services.ollamaRuntime;
-  mcp = services.mcp;
-  jobs = services.jobs;
-  heartbeat = services.heartbeat;
-  workspaceBootstrap = services.workspaceBootstrap;
-  automations = services.automations;
-  collab = services.collab;
-
   if (!ipcCleanup) {
     ipcCleanup = registerIpc(() => mainWindow, {
       db: services.db,
@@ -298,13 +349,11 @@ async function createWindow() {
       ollamaRuntime: services.ollamaRuntime,
       skills: services.skills,
       automations: services.automations,
-      vicodeBuild: services.vicodeBuild,
       diagnostics: services.diagnostics,
       mcp: services.mcp,
       jobs: services.jobs,
       autonomousTasks: services.autonomousTasks,
       subagents: services.subagents,
-      workspaceBootstrap: services.workspaceBootstrap,
       voice: services.voice,
       collab: services.collab,
       composerTextAttachments: services.composerTextAttachments
@@ -332,23 +381,61 @@ async function createWindow() {
     });
   }
   logStartupStep('deferred-startup-scheduled');
+
+  if (pendingSecondInstanceArgv && launchController) {
+    const argv = pendingSecondInstanceArgv;
+    pendingSecondInstanceArgv = null;
+    void handleOllamaLaunchSecondInstance({
+      argv,
+      controller: launchController,
+      mainWindow
+    }).catch((error) => {
+      console.error('[startup] Failed to handle deferred Ollama launch handoff.', error);
+    });
+  }
 }
 
-app.whenReady()
-  .then(async () => {
-    app.setName(WINDOWS_APP_NAME);
-    app.setAppUserModelId(WINDOWS_APP_ID);
-    await createWindow();
-    app.on('activate', async () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
-        await createWindow();
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (_event, commandLine) => {
+    if (!launchController) {
+      pendingSecondInstanceArgv = commandLine;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) {
+          mainWindow.restore();
+        }
+        mainWindow.focus();
       }
+      return;
+    }
+
+    void handleOllamaLaunchSecondInstance({
+      argv: commandLine,
+      controller: launchController,
+      mainWindow
+    }).catch((error) => {
+      console.error('[startup] Failed to handle Ollama launch handoff.', error);
     });
-  })
-  .catch((error) => {
-    console.error('[startup] Failed to create the main window.', error);
-    app.quit();
   });
+
+  app.whenReady()
+    .then(async () => {
+      app.setName(WINDOWS_APP_NAME);
+      app.setAppUserModelId(WINDOWS_APP_ID);
+      await createWindow();
+      app.on('activate', async () => {
+        if (BrowserWindow.getAllWindows().length === 0) {
+          await createWindow();
+        }
+      });
+    })
+    .catch((error) => {
+      console.error('[startup] Failed to create the main window.', error);
+      app.quit();
+    });
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -359,6 +446,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   ipcCleanup?.();
   deferredCleanup?.();
+  launchPendingCleanup?.();
   automations?.dispose();
   heartbeat?.dispose();
   jobs?.dispose();
@@ -370,6 +458,7 @@ app.on('before-quit', () => {
   db?.close();
   ipcCleanup = null;
   deferredCleanup = null;
+  launchPendingCleanup = null;
   appServices = null;
   updater = null;
 });

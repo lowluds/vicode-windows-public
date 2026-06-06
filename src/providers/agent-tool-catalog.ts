@@ -30,6 +30,7 @@ export interface BuildAgentRuntimeToolCatalogInput {
   runtimeCommandPolicy?: ProjectRuntimeCommandPolicy;
   runtimeNetworkPolicy?: ProjectRuntimeNetworkPolicy;
   nativeWebResearchEnabled: boolean;
+  projectKnowledgeEnabled?: boolean;
   delegationEnabled?: boolean;
   creatorToolsEnabled?: boolean;
   mcpTools: McpToolDescriptor[];
@@ -43,39 +44,22 @@ const TOOL_PRESET_VISIBILITY_GROUPS: Record<
     'workspace_read',
     'workspace_write',
     'web_research',
+    'browser_preview',
     'host_command',
     'delegate',
+    'knowledge',
     'mcp'
   ]),
   planner: new Set<AgentRuntimeToolVisibilityGroup>([
     'workspace_read',
     'web_research',
-    'mcp'
-  ]),
-  build_planner: new Set<AgentRuntimeToolVisibilityGroup>([
-    'workspace_read',
-    'workspace_write',
-    'web_research',
-    'host_command',
-    'delegate',
-    'mcp'
-  ]),
-  builder: new Set<AgentRuntimeToolVisibilityGroup>([
-    'workspace_read',
-    'workspace_write',
-    'web_research',
-    'host_command',
-    'delegate',
-    'mcp'
-  ]),
-  finisher: new Set<AgentRuntimeToolVisibilityGroup>([
-    'workspace_read',
-    'host_command',
+    'knowledge',
     'mcp'
   ]),
   subagent: new Set<AgentRuntimeToolVisibilityGroup>([
     'workspace_read',
     'web_research',
+    'knowledge',
     'mcp'
   ])
 };
@@ -153,6 +137,12 @@ function deriveNativeToolHints(visibilityGroup: AgentRuntimeToolVisibilityGroup)
         reviewHint: 'external_research',
         orchestrationHint: 'research'
       };
+    case 'browser_preview':
+      return {
+        renderHint: 'web',
+        reviewHint: 'none',
+        orchestrationHint: 'execute'
+      };
     case 'host_command':
       return {
         renderHint: 'shell',
@@ -164,6 +154,12 @@ function deriveNativeToolHints(visibilityGroup: AgentRuntimeToolVisibilityGroup)
         renderHint: 'delegate',
         reviewHint: 'none',
         orchestrationHint: 'delegate'
+      };
+    case 'knowledge':
+      return {
+        renderHint: 'workspace',
+        reviewHint: 'none',
+        orchestrationHint: 'inspect'
       };
     case 'mcp':
       return {
@@ -205,7 +201,9 @@ function createNativeToolDescriptor(
     mutatesWorkspace: metadata.mutatesWorkspace,
     readsWorkspace: metadata.readsWorkspace,
     usesNetwork: metadata.usesNetwork,
-    contentTrust: metadata.visibilityGroup === 'web_research' ? 'untrusted_content' : 'trusted',
+    contentTrust: metadata.visibilityGroup === 'web_research' || metadata.visibilityGroup === 'browser_preview'
+      ? 'untrusted_content'
+      : 'trusted',
     serverId: null,
     serverName: null,
     mcpToolName: null
@@ -333,6 +331,10 @@ export function buildAgentRuntimeToolCatalog(
 
       if (isNativeWebResearchToolName(tool.callName)) {
         return nativeWebResearchEnabled;
+      }
+
+      if (tool.visibilityGroup === 'knowledge') {
+        return input.projectKnowledgeEnabled === true;
       }
 
       if (tool.callName === 'spawn_subagents') {

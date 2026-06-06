@@ -4,8 +4,6 @@ import { Shimmer } from './ai-elements/shimmer';
 
 export interface LiveRunStatusSnapshot {
   actionLabel: string | null;
-  reasoningLabel: string | null;
-  reasoningText: string | null;
 }
 
 function summarizeLiveActivityLine(line: ThinkingLineViewModel | null) {
@@ -52,44 +50,31 @@ function summarizeTerminalCommand(command: TerminalCommandViewModel | null) {
   return null;
 }
 
-function normalizeReasoningText(line: ThinkingLineViewModel | null) {
-  if (!line) {
-    return null;
-  }
-
-  const normalizedText = line.text.trim();
-  if (normalizedText.length > 0) {
-    return normalizedText;
-  }
-
-  const normalizedLabel = line.label.trim();
-  return normalizedLabel.length > 0 ? normalizedLabel : null;
-}
-
 export function deriveLiveRunStatusSnapshot(
   activity: RunActivityViewModel | null
 ): LiveRunStatusSnapshot {
   if (!activity || activity.state !== 'running') {
     return {
-      actionLabel: null,
-      reasoningLabel: null,
-      reasoningText: null
+      actionLabel: null
     };
   }
 
   const latestReasoningLine =
     [...activity.thinkingLines]
       .reverse()
-      .find((line) => line.kind === 'thinking' && normalizeReasoningText(line)) ?? null;
+      .find((line) => line.kind === 'thinking') ?? null;
   const latestActionLine =
     [...activity.thinkingLines]
       .reverse()
-      .find((line) => line.kind !== 'thinking' && line.kind !== 'skill' && line.kind !== 'memory_checkpoint') ?? null;
+      .find((line) =>
+        line.kind !== 'thinking' &&
+        line.kind !== 'skill' &&
+        line.kind !== 'memory_checkpoint' &&
+        line.kind !== 'context_compaction'
+      ) ?? null;
   const latestTerminalCommand =
     [...activity.terminalCommands].reverse().find((command) => command.status === 'running') ?? null;
 
-  const reasoningText = normalizeReasoningText(latestReasoningLine);
-  const reasoningLabel = latestReasoningLine?.label?.trim() || null;
   const actionLabel =
     summarizeTerminalCommand(latestTerminalCommand) ??
     summarizeLiveActivityLine(latestActionLine) ??
@@ -98,15 +83,17 @@ export function deriveLiveRunStatusSnapshot(
     'Working';
 
   return {
-    actionLabel,
-    reasoningLabel,
-    reasoningText
+    actionLabel
   };
 }
 
 export function shouldShowLiveRunAction(snapshot: LiveRunStatusSnapshot) {
   const actionLabel = snapshot.actionLabel?.trim() ?? '';
-  return actionLabel.length > 0;
+  if (!actionLabel) {
+    return false;
+  }
+
+  return true;
 }
 
 export function LiveRunStatus({ activity }: { activity: RunActivityViewModel | null }) {

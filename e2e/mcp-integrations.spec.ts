@@ -2,29 +2,21 @@ import path from 'node:path';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { expect, test, type Page } from '@playwright/test';
-import { buildSkillCreatorPrompt } from '../src/shared/creatorImports';
-import { closeApp, launchApp, openTitlebarSurface, waitForBridge, waitForThreadSurfaceReady } from './helpers/electron';
+import { closeApp, launchApp, waitForBridge, waitForThreadSurfaceReady } from './helpers/electron';
 
-async function openCatalogTab(window: Page, tab: 'plugins' | 'skills') {
-  const tabButton = window.getByTestId(`skills-tab-${tab}`);
-  if (!(await tabButton.isVisible().catch(() => false))) {
-    await openTitlebarSurface(window, 'nav-plugins', tabButton);
-  }
-  await expect(tabButton).toBeVisible();
-  if ((await tabButton.getAttribute('aria-selected')) !== 'true') {
-    await tabButton.click();
-  }
+async function appendSkillMention(window: Page, partialToken: string, expectedSkillName: string) {
+  const composer = window.getByTestId('composer-input');
+  await composer.click();
+  await composer.pressSequentially(partialToken);
+  const skillPickerItem = window.locator('.composer-skill-picker-item').filter({ hasText: expectedSkillName }).first();
+  await expect(skillPickerItem).toBeVisible();
+  await skillPickerItem.click();
+  const value = await composer.inputValue();
+  expect(value).toMatch(/\$[a-z0-9-]+/i);
+  return value.match(/\$[a-z0-9-]+/i)?.[0] ?? '';
 }
 
-async function openPlugins(window: Page) {
-  await openCatalogTab(window, 'plugins');
-}
-
-async function openSkills(window: Page) {
-  await openCatalogTab(window, 'skills');
-}
-
-test('plugins support official setup, approval, refresh, disable, removal, and persistence', async () => {
+test('parked MCP tooling supports official setup, approval gating, removal, and persistence', async () => {
   const { app, window: launchedWindow } = await launchApp({
     bridgePaths: ['vicode.app', 'vicode.mcp']
   });
@@ -33,26 +25,37 @@ test('plugins support official setup, approval, refresh, disable, removal, and p
 
   try {
     await window.evaluate(async () => {
-        const servers = await window.vicode.mcp.listServers();
-        await Promise.all(servers.map((server) => window.vicode.mcp.removeServer(server.id)));
-      });
-
-      await openPlugins(window);
-
-      await window.getByTestId('mcp-official-add-shadcn').click();
-    const shadcnServerId = await window.evaluate(async () => {
       const servers = await window.vicode.mcp.listServers();
-      const shadcn = servers.find(
-        (server) => server.command.toLowerCase() === 'npx' && JSON.stringify(server.args) === JSON.stringify(['shadcn@latest', 'mcp'])
-      );
-      return shadcn?.id ?? null;
+      await Promise.all(servers.map((server) => window.vicode.mcp.removeServer(server.id)));
     });
-    expect(shadcnServerId).toBeTruthy();
-    await expect(window.getByTestId(`mcp-configured-card-${shadcnServerId}`)).toBeVisible();
-    await expect(window.getByTestId(`mcp-configured-state-${shadcnServerId}`)).toContainText('approval_required');
 
-    await window.getByTestId(`mcp-configured-remove-${shadcnServerId}`).click();
-    await expect(window.getByTestId(`mcp-configured-card-${shadcnServerId}`)).toHaveCount(0);
+    await expect(window.getByTestId('nav-plugins')).toHaveCount(0);
+
+    const shadcn = await window.evaluate(async () => {
+      const server = await window.vicode.mcp.setupRecommended({ entryId: 'shadcn', projectId: null });
+      const servers = await window.vicode.mcp.listServers();
+      const persisted = servers.find((entry) => entry.id === server.id) ?? null;
+      return {
+        server,
+        persisted
+      };
+    });
+    expect(shadcn.server.command.toLowerCase()).toBe('npx');
+    expect(shadcn.server.args).toEqual(['shadcn@latest', 'mcp']);
+    expect(shadcn.server.state?.status).toBe('approval_required');
+    expect(shadcn.persisted?.id).toBe(shadcn.server.id);
+
+    await window.evaluate(async (serverId) => {
+      await window.vicode.mcp.removeServer(serverId);
+    }, shadcn.server.id);
+    await expect
+      .poll(async () => {
+        return await window!.evaluate(async (serverId) => {
+          const servers = await window.vicode.mcp.listServers();
+          return servers.some((server) => server.id === serverId);
+        }, shadcn.server.id);
+      })
+      .toBe(false);
   } finally {
     if (window) {
       try {
@@ -68,7 +71,7 @@ test('plugins support official setup, approval, refresh, disable, removal, and p
   }
 });
 
-test('skills can be created from the plugins surface', async () => {
+test('skills stay backend-owned while composer mentions expose the minimal user flow', async () => {
   const workspaceDir = mkdtempSync(path.join(tmpdir(), 'vicode-skill-create-e2e-'));
   const { app, window } = await launchApp({
     bridgePaths: ['vicode.app', 'vicode.skills', 'vicode.threads', 'vicode.projects', 'vicode.settings']
@@ -81,8 +84,6 @@ test('skills can be created from the plugins surface', async () => {
     const seeded = await window.evaluate(async ({ name, workspaceDir }) => {
       const bootstrap = await window.vicode.app.getBootstrap();
       const provider =
-        bootstrap.providers.find((entry) => entry.id === 'openai') ??
-        bootstrap.providers.find((entry) => entry.id === 'gemini') ??
         bootstrap.providers.find((entry) => entry.id === 'ollama') ??
         null;
       if (!provider) {
@@ -97,22 +98,28 @@ test('skills can be created from the plugins surface', async () => {
         project.defaultModelByProvider[provider.id] ??
         bootstrap.preferences.defaultModelByProvider[provider.id] ??
         provider.models[0]?.id ??
-        'gpt-5';
+        'qwen2.5-coder:14b-instruct-q6_K';
       const thread = await window.vicode.threads.create({
         projectId: project.id,
         providerId: provider.id,
         modelId,
         executionPermission: 'default'
       });
+      const existingSkills = await window.vicode.skills.list();
+      await Promise.all(existingSkills.filter((skill) => skill.name === name).map((skill) => window.vicode.skills.remove(skill.id)));
+      await window.vicode.skills.save({
+        name,
+        description: 'Used to verify the minimal composer skill mention flow.',
+        instructions: 'Use this skill when the e2e suite needs a deterministic custom skill.',
+        scope: 'global',
+        providerTargets: bootstrap.providers.map((entry) => entry.id),
+        enabled: true,
+        projectId: null
+      });
       await window.vicode.settings.save({
         selectedProjectId: project.id,
         lastOpenedThreadId: thread.id
       });
-      const skills = await window.vicode.skills.list();
-      const existing = skills.find((skill) => skill.name === name);
-      if (existing) {
-        await window.vicode.skills.remove(existing.id);
-      }
       return { projectId: project.id };
     }, { name: skillName, workspaceDir });
     projectId = seeded.projectId;
@@ -121,23 +128,16 @@ test('skills can be created from the plugins surface', async () => {
     await waitForBridge(window, ['vicode.app', 'vicode.skills', 'vicode.threads', 'vicode.projects', 'vicode.settings']);
     await waitForThreadSurfaceReady(window);
 
-    await openSkills(window);
-    await window.getByRole('button', { name: 'Create', exact: true }).click();
-    await window.getByRole('menuitem', { name: 'Create skill' }).click();
-
+    await expect(window.getByTestId('nav-plugins')).toHaveCount(0);
     const composer = window.getByTestId('composer-input');
     await expect(composer).toBeVisible();
-    await expect(window.locator('.windows-titlebar-context-thread')).toContainText('Create skill');
-    await expect(composer).toHaveValue(buildSkillCreatorPrompt());
-    await expect(window.getByTestId('composer-attached-skill-skill-creator')).toBeVisible();
+    const insertedToken = await appendSkillMention(window, '$ui', skillName);
+    await expect(composer).toHaveValue(new RegExp(`^\\${insertedToken}\\s*$`, 'u'));
   } finally {
     try {
       await window.evaluate(async (name) => {
         const skills = await window.vicode.skills.list();
-        const existing = skills.find((skill) => skill.name === name);
-        if (existing) {
-          await window.vicode.skills.remove(existing.id);
-        }
+        await Promise.all(skills.filter((skill) => skill.name === name).map((skill) => window.vicode.skills.remove(skill.id)));
       }, skillName);
       if (projectId) {
         await window.evaluate(async (targetProjectId) => {

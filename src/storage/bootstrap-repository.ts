@@ -1,11 +1,10 @@
-import type { Preferences, Project, ShellBootstrapData, ThreadSummary, PersonalizationSettings } from '../shared/domain';
+import type { Preferences, Project, ShellBootstrapData, ThreadSummary } from '../shared/domain';
 
 export class BootstrapRepository {
   constructor(
     private readonly listProjects: () => Project[],
     private readonly listThreads: (projectId: string) => ThreadSummary[],
-    private readonly getPreferences: () => Preferences,
-    private readonly getPersonalization: () => PersonalizationSettings
+    private readonly getPreferences: () => Preferences
   ) {}
 
   getBootstrapData(): ShellBootstrapData {
@@ -15,8 +14,7 @@ export class BootstrapRepository {
       threadsByProject: Object.fromEntries(
         projects.map((project) => [project.id, this.listThreads(project.id)])
       ),
-      preferences: this.getPreferences(),
-      personalization: this.getPersonalization()
+      preferences: this.getPreferences()
     };
   }
 }

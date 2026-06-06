@@ -10,6 +10,7 @@ export const AGENT_TOOL_NAMES = [
   'map_site',
   'crawl_site',
   'research_topic',
+  'browser_preview_check',
   'mkdir',
   'write_file',
   'apply_patch',
@@ -89,6 +90,14 @@ const AGENT_TOOL_POLICIES: AgentToolPolicy[] = [
     name: 'research_topic',
     label: 'Research topics',
     description: 'Build a bounded multi-source research packet from public web sources through Vicode-owned web research tools.',
+    category: 'network',
+    minimumPermission: 'default',
+    workspaceBounded: false
+  },
+  {
+    name: 'browser_preview_check',
+    label: 'Check browser previews',
+    description: 'Load a local preview URL through Vicode-owned browser validation and summarize render health.',
     category: 'network',
     minimumPermission: 'default',
     workspaceBounded: false

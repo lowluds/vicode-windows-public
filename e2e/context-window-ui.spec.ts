@@ -8,9 +8,8 @@ async function seedContextFixture(window: Page, workspaceDir: string) {
   return await window.evaluate(async ({ workspaceDir }) => {
     const bootstrap = await window.vicode.app.getBootstrap();
     const provider =
-      bootstrap.providers.find((entry) => entry.id === 'openai') ??
-      bootstrap.providers.find((entry) => entry.id === 'gemini') ??
       bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+      bootstrap.providers.find((entry) => entry.id === 'openai_compatible') ??
       null;
 
     if (!provider) {
@@ -27,7 +26,7 @@ async function seedContextFixture(window: Page, workspaceDir: string) {
       project.defaultModelByProvider[provider.id] ??
       bootstrap.preferences.defaultModelByProvider[provider.id] ??
       provider.models[0]?.id ??
-      'gpt-5';
+      'qwen2.5-coder:14b-instruct-q6_K';
 
     const thread = await window.vicode.threads.create({
       projectId: project.id,
@@ -78,7 +77,7 @@ test.describe.serial('context window ui', () => {
     rmSync(workspaceDir, { recursive: true, force: true });
   });
 
-  test('keeps the context hover surface readable across viewport sizes', async () => {
+  test('keeps context usage in the sidebar instead of the composer', async () => {
     const launched = await launchElectronApp({
       bridgePaths: ['vicode.app', 'vicode.projects', 'vicode.threads']
     });
@@ -93,29 +92,31 @@ test.describe.serial('context window ui', () => {
     const composer = window.getByTestId('composer-input');
     await expect(composer).toBeVisible();
 
-    const trigger = window.getByTestId('composer-context-window-trigger');
-    await expect(trigger).toBeVisible();
-    await expect(trigger).toHaveAttribute('aria-label', /Context window/);
+    await expect(window.getByTestId('composer-context-window-trigger')).toHaveCount(0);
+    const status = window.getByTestId('sidebar-context-window-status');
+    await expect(status).toBeVisible();
+    await expect(status).toContainText('Ctx');
+    await expect(status).toContainText(/%/);
 
-    await trigger.hover();
-
-    const tooltip = window.getByTestId('composer-context-window-tooltip');
-    await expect(tooltip).toBeVisible();
-    await expect(tooltip).toContainText('full');
-    await expect(tooltip).toContainText('tokens used');
-
-    const desktopBox = await tooltip.boundingBox();
+    const desktopBox = await status.boundingBox();
     expect(desktopBox).not.toBeNull();
-    expect(desktopBox!.width).toBeGreaterThanOrEqual(260);
+    expect(desktopBox!.width).toBeGreaterThan(0);
+    expect(desktopBox!.x).toBeGreaterThanOrEqual(0);
+    expect(desktopBox!.x + desktopBox!.width).toBeLessThanOrEqual(1280);
+
+    await status.click();
+    await expect(status).toHaveAttribute('aria-expanded', 'false');
+    await expect(status.locator('em')).toHaveCount(0);
+    await status.click();
+    await expect(status).toHaveAttribute('aria-expanded', 'true');
+    await expect(status.locator('em')).toBeVisible();
 
     await window.setViewportSize({ width: 820, height: 760 });
-    await expect(trigger).toBeVisible();
-    await trigger.hover();
-    await expect(tooltip).toBeVisible();
+    await expect(window.getByTestId('composer-context-window-trigger')).toHaveCount(0);
+    await expect(status).toBeVisible();
 
-    const compactBox = await tooltip.boundingBox();
+    const compactBox = await status.boundingBox();
     expect(compactBox).not.toBeNull();
-    expect(compactBox!.width).toBeLessThanOrEqual(788);
     expect(compactBox!.x).toBeGreaterThanOrEqual(0);
     expect(compactBox!.x + compactBox!.width).toBeLessThanOrEqual(820);
   });

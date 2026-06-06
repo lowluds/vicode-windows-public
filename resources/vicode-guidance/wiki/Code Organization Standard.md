@@ -43,6 +43,18 @@ Before substantial code edits, identify the ownership map:
 
 New behavior should land in the smallest existing owner that already matches the responsibility. If no clear owner exists, create a focused module or component rather than expanding an unrelated file.
 
+## Analyzability Rule
+
+Code should be easy for both humans and tools to inspect. Before adding complex behavior, check whether the implementation keeps:
+
+- control flow simple enough to trace without reconstructing hidden call paths
+- loops, retries, polling, and queue processing bounded or explicitly nonterminating by design
+- data, state, and permissions scoped to the smallest practical owner
+- function and module responsibilities small enough to verify in isolation
+- input checks, output checks, and error propagation close to the boundary that owns them
+
+Use these as review triggers, not universal line-count laws. The point is to preserve boundedness, diagnosability, and reviewability.
+
 ## File Bloat Triggers
 
 These are review triggers, not absolute laws:
@@ -126,3 +138,4 @@ Before finishing, ask:
 - [[Docs As Code]]
 - [[Verification Standards]]
 - [[Cleanup And Stale Artifact Discipline]]
+- [[Source - Power of 10 Safety-Critical Code]]

@@ -4,7 +4,12 @@
 ---
 type: workflow
 status: active
-updated: 2026-04-23
+updated: 2026-05-30
+aliases:
+  - cleanup discipline
+  - stale artifact cleanup
+  - stale docs cleanup
+  - safe deletion
 ---
 
 # Cleanup And Stale Artifact Discipline

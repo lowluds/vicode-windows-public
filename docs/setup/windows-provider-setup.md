@@ -2,17 +2,18 @@
 
 This is the public setup guide for the currently supported Vicode provider lanes.
 
-Release-blocking providers:
-
-- `OpenAI`
-- `Gemini`
-
-Supported secondary lane:
+Release-blocking provider lane:
 
 - `Ollama`
 
-Temporarily hidden compatibility lanes in the current beta UI:
+Supported API-key lane:
 
+- `Custom API` / OpenAI-compatible keys
+
+Retired provider CLI lanes, hidden from the current beta provider surface:
+
+- `OpenAI / Codex`
+- `Gemini`
 - `Qwen`
 - `Kimi`
 
@@ -32,56 +33,40 @@ Current external beta delivery path:
 - packaged Windows installer and desktop app
 - npm publish remains under audit and is not yet a supported end-user install route
 
-## OpenAI / Codex
+## Custom API / OpenAI-Compatible Keys
 
 Recommended for:
 
-- highest-fidelity coding workflows
-- strongest benchmark path
-- main release-blocking lane
+- OpenAI-compatible `/v1` API providers
+- OpenAI API keys when the tester has an OpenAI model they want to use
+- app-owned Custom API provider setup without a provider-native CLI install
 
 Expected setup:
 
-1. Install the Codex CLI on Windows and confirm it is on `PATH`.
-2. Sign in through the Codex CLI.
-3. Open Vicode and refresh providers if needed.
+1. Open `Settings > Providers`.
+2. Add a `Custom API` provider.
+3. Enter the OpenAI-compatible `/v1` base URL.
+4. Save the API key and default model.
+5. Refresh providers and select the saved Custom API model in the composer.
+
+For OpenAI testing, use:
+
+- base URL: `https://api.openai.com/v1`
+- current operator test model: `gpt-5.4-nano`
 
 Current Vicode truth:
 
-- Codex runs as a provider-owned CLI lane
-- Vicode does not claim app-owned approval pauses for this lane
+- OpenAI/Codex CLI setup is retired for this beta route
+- OpenAI-compatible API-key runs use the Custom API provider lane
+- Vicode owns approvals and app-runtime tooling for this lane
 - an attached workspace folder is required before workspace-dependent execution
-- if Vicode finds an existing Codex CLI sign-in on this machine, it shows that as a local sign-in the user may explicitly adopt; it does not silently import or sync those credentials
-
-## Gemini
-
-Recommended for:
-
-- second release-blocking lane
-- strong planner and coding workflows
-
-Expected setup:
-
-1. Install the Gemini CLI on Windows and confirm it is on `PATH`.
-2. Sign in through the Gemini CLI or configure a supported API-key path when applicable.
-3. Open Vicode and refresh providers if needed.
-
-Current Vicode truth:
-
-- Gemini runs as a provider-owned CLI lane
-- Gemini keeps its own approval and sandbox boundary
-- an attached workspace folder is required before workspace-dependent execution
-- if Vicode finds an existing Gemini CLI sign-in on this machine, it shows that as a local sign-in the user may explicitly adopt; it does not silently import or sync those credentials
-- when Vicode starts a fresh Gemini CLI sign-in, it launches Gemini's browser-based OAuth flow through a managed background CLI process instead of requiring a separate visible terminal window
 
 ## Ollama
 
 Recommended for:
 
-- local or hosted secondary coding lane
+- primary local coding lane for the current narrow beta
 - app-owned runtime and approval behavior inside Vicode
-
-Two supported routes:
 
 ### Local Ollama
 
@@ -89,53 +74,55 @@ Two supported routes:
 2. Start the local runtime, or let Vicode connect to an already reachable local Ollama instance.
 3. Pull or select a supported coding model.
 
-### Hosted Ollama
+Remote or self-hosted local runtime:
 
-1. Add an Ollama API key in Vicode settings.
-2. Refresh the provider to load cloud models.
+- Vicode currently supports a non-default local Ollama base URL through `VICODE_OLLAMA_BASE_URL`.
+- Set the environment variable before launching Vicode, for example `VICODE_OLLAMA_BASE_URL=http://127.0.0.1:11434`.
+- There is no dedicated Settings field for this yet; use the environment path for beta validation and remote-runtime troubleshooting.
+
+Context guidance:
+
+- For coding-agent tasks, [Ollama recommends](https://docs.ollama.com/context-length) at least `64000` context tokens when the model and hardware can support it.
+- For local models, set the context length in the Ollama app or start Ollama with `OLLAMA_CONTEXT_LENGTH=64000 ollama serve`.
+- Use `ollama ps` to verify the allocated context and processor split before treating a local model as certified for larger coding workflows.
+
+Model capability labels:
+
+- Ollama model labels such as `tools`, `thinking`, `vision`, `code`, and `cloud` are useful setup hints, not Vicode certification labels.
+- `tools` means a model is worth probing through Vicode's tool loop; it does not prove file-writing in the app.
+- `vision` means a model may be suitable for image attachment workflows; it does not imply code-editing or write support.
+- Current G5 evidence lives in [Ollama model capability matrix](../ollama-listing-readiness/model-capability-matrix.md). Keep local write-capable claims caveated until a repeatable app-level drill passes.
 
 Current Vicode truth:
 
 - Ollama is the only active production lane where Vicode owns runtime approval behavior directly
+- Ollama API keys and hosted/cloud Ollama setup are retired for this beta route
 - an attached workspace folder is required before workspace-dependent execution
 - workspace command and network policy apply to app-owned shell execution in this lane
 
-## Qwen and Kimi
+## Retired Provider CLI Lanes
 
 Current stance:
 
-- available as compatibility-only lanes
-- currently hidden from the beta provider UI
-- not part of the active production optimization program
-- keep install and run truth honest, but do not expect the same depth of active hardening as OpenAI, Gemini, or Ollama
+- hidden from the beta provider UI
+- not part of public setup guidance
+- not release-blocking
+- retained only as historical provider IDs for old state/schema compatibility
 
-Use them only if you explicitly want to probe those compatibility paths.
+This includes OpenAI/Codex CLI, Gemini, Qwen, and Kimi. Old runs on these lanes should fail with a clear retired-provider message rather than trying to launch a provider CLI.
 
 ## Privacy and Local Sign-In
 
-Vicode follows an explicit-adoption model for provider-owned CLI auth:
+Vicode follows an app-owned credential model for the current beta lanes:
 
-- it may detect that a supported provider CLI is already signed in on the current machine
-- it does not automatically import, upload, or silently reuse that local sign-in
-- the user explicitly chooses whether to adopt that existing CLI sign-in inside Vicode
-- if the user prefers, they can re-run the provider's official CLI sign-in flow instead
+- Custom API keys are saved inside Vicode for this PC
+- local Ollama uses the local runtime
+- Ollama API keys are retired for this beta route
+- retired provider CLI sign-ins are not a public setup path
 
-This keeps provider credentials provider-owned and makes local sign-in reuse an intentional user action rather than an implicit background behavior.
+This keeps beta setup focused on Ollama and OpenAI-compatible API keys.
 
-In Settings > Providers, Vicode now keeps that behind one primary `Connect` action for CLI-backed providers:
-
-- if a machine-local CLI sign-in is already present, `Connect` adopts it explicitly into Vicode
-- if no local sign-in is present yet, `Connect` opens the provider's official CLI login flow
-- manual provider CLI launch remains available as a secondary troubleshooting action, not a parallel primary path
-
-For Gemini specifically, Vicode now forces the official Google OAuth path through Gemini CLI's documented auth settings and auto-confirms the browser handoff prompt in the background. Users should see the browser sign-in flow directly, without having to manage a separate terminal window themselves.
-
-CLI resolution stays simple for public installs:
-
-- Vicode first resolves the provider CLI from `PATH`
-- if Vicode has already discovered a valid executable path on the current machine, it can reuse that resolved executable
-- if neither exists, Vicode shows install guidance instead of asking the user to type a folder path
-- normal provider setup should not require a manual directory entry for browser-based sign-in flows like Codex or Gemini
+Vicode should not write, delete, sync, install, uninstall, or clean files inside another provider application's private app-state folders.
 
 ## Native Module Repair
 
@@ -171,7 +158,7 @@ Live provider validation:
 
 ```bash
 npm run e2e:live
-npm run validate:mixed-use
+npm run certify:openai-compatible
 ```
 
 Packaged Windows beta handoff:

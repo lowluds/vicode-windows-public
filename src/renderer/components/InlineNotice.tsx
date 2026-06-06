@@ -39,7 +39,7 @@ export function InlineNotice({ actions, level, message, onDismiss, title }: Inli
       data-level={level}
       role={level === 'error' ? 'alert' : 'status'}
       className={cx(
-        'fixed left-1/2 top-12 z-[60] w-[min(calc(100vw-56px),1040px)] -translate-x-1/2 rounded-[var(--ui-radius-lg)] border bg-[color:var(--ui-surface-2)] px-3 py-2 shadow-[var(--ui-shadow-apple)]',
+        'fixed left-1/2 top-12 z-[60] w-[min(calc(100vw-56px),1040px)] -translate-x-1/2 rounded-[8px] border bg-[color:var(--ui-surface-2)] px-3 py-2 shadow-none',
         levelClass
       )}
     >

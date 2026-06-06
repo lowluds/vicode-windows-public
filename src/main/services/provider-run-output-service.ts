@@ -1,6 +1,6 @@
-import type { ProviderId } from '../../shared/domain';
+import type { ProviderId, RunChangeArtifact } from '../../shared/domain';
 import type { DatabaseService } from '../../storage/database';
-import { OllamaFinalAnswerFormatter } from './ollama-final-answer-formatter';
+import type { HarnessWorktreeSession } from './harness-worktree-session';
 import { formatProviderCompletionOutput } from './provider-completion-output';
 
 type WorkspaceSnapshot = {
@@ -20,6 +20,8 @@ type FinalizeExecutionInput = {
   projectFolderPath: string | null;
   approvedPlan: boolean;
   titlePrompt: string | null;
+  changeArtifactSource?: RunChangeArtifact['source'];
+  harnessWorktreeSession?: HarnessWorktreeSession | null;
 };
 
 type ProviderCleanupInput = FinalizeExecutionInput & {
@@ -29,8 +31,7 @@ type ProviderCleanupInput = FinalizeExecutionInput & {
 
 export class ProviderRunOutputService {
   constructor(
-    private readonly db: Pick<DatabaseService, 'getThread'>,
-    private readonly ollamaFinalAnswerFormatter: OllamaFinalAnswerFormatter
+    private readonly db: Pick<DatabaseService, 'getThread'>
   ) {}
 
   collectAssistantText(threadId: string, runId: string) {
@@ -57,17 +58,6 @@ export class ProviderRunOutputService {
       return;
     }
 
-    if (input.providerId === 'ollama') {
-      try {
-        const rewritten = await this.ollamaFinalAnswerFormatter.rewrite(input.modelId, input.output);
-        if (rewritten?.trim()) {
-          nextOutput = rewritten.trim();
-        }
-      } catch {
-        nextOutput = fallbackOutput;
-      }
-    }
-
     if (isDisposed() || !nextOutput) {
       return;
     }
@@ -79,7 +69,9 @@ export class ProviderRunOutputService {
       workspaceSnapshot: input.workspaceSnapshot,
       projectFolderPath: input.projectFolderPath,
       approvedPlan: input.approvedPlan,
-      titlePrompt: input.titlePrompt
+      titlePrompt: input.titlePrompt,
+      changeArtifactSource: input.changeArtifactSource,
+      harnessWorktreeSession: input.harnessWorktreeSession
     });
   }
 }

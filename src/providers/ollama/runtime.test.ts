@@ -49,6 +49,23 @@ describe('LocalOllamaRuntime', () => {
     });
   });
 
+  it('uses the configured base URL for local runtime requests', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ models: [] }), { status: 200 }));
+    const runtime = new LocalOllamaRuntime('http://127.0.0.1:15432', fetchImpl, vi.fn(), vi.fn());
+
+    await runtime.listTags();
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://127.0.0.1:15432/api/tags',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json'
+        }),
+        signal: expect.any(AbortSignal)
+      })
+    );
+  });
+
   it('forwards caller abort signals through runtime fetch', async () => {
     const fetchImpl = vi.fn(async (_url: string, options?: RequestInit) => {
       expect(options?.signal?.aborted).toBe(true);

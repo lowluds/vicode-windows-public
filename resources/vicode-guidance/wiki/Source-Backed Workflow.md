@@ -59,6 +59,7 @@ Do not browse first when the repo already tells you where truth lives.
 - distinguish sourced facts from recommendations
 - stop and research when the current guidance is not strong enough
 - prefer exact code references or close analogs from genuine sources over invented patterns
+- perform a short library discovery pass before rebuilding non-trivial commodity functionality from scratch
 - use invention only when the repo and the available sources do not already define a better path
 
 Before substantial edits, make the source basis explicit.
@@ -102,3 +103,4 @@ Implement the smallest source-backed change:
 
 - [[Source - Karpathy LLM Wiki Gist]]
 - project pattern sweep
+- [[Library-First Development]]

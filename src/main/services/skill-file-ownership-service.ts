@@ -1,21 +1,17 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { PROVIDER_IDS, type ProviderId, type SkillDefinition } from '../../shared/domain';
 import { buildSkillDocument, normalizeSkillMetadata, type SkillMetadataShape, type SkillSyncState } from '../../shared/skills';
-import { assertOutsideOperatorCodexHome, isInsideOperatorCodexHome, isPathInsideRoot } from './codex-app-boundary';
+import { isInsideOperatorCodexHome, isPathInsideRoot } from './codex-app-boundary';
 
-const CODEX_APP_HOME_SYNC_BLOCKED_MESSAGE =
-  'Vicode does not write to the Codex app home. Manage Codex native skills in Codex, or use Vicode runtime skills without provider-folder export.';
 const CODEX_APP_HOME_REMOVE_BLOCKED_MESSAGE =
   'Vicode did not remove provider files inside the Codex app home. Manage Codex native skills in Codex.';
+const PROVIDER_MANAGED_REMOVE_BLOCKED_MESSAGE =
+  'Vicode did not remove provider-managed skill files. Manage provider-native skills in the provider app.';
 
 function ensureDirectory(path: string) {
   mkdirSync(path, { recursive: true });
-}
-
-function safeDelete(path: string) {
-  rmSync(path, { recursive: true, force: true });
 }
 
 type SkillFileOwnershipDependencies = {
@@ -32,7 +28,7 @@ export class SkillFileOwnershipService {
     }
 
     let next = this.ensureCanonicalFiles(this.deps.upsertSkill(skill));
-    next = this.applyProviderSync(next);
+    next = this.clearLegacyProviderSync(next);
     return next;
   }
 
@@ -60,8 +56,12 @@ export class SkillFileOwnershipService {
         };
       }
       if (isPathInsideRoot(providerRoot, targetDir)) {
-        assertOutsideOperatorCodexHome(targetDir, 'remove provider skill export');
-        safeDelete(targetDir);
+        return {
+          exported: false,
+          path: null,
+          updatedAt: current.updatedAt ?? new Date().toISOString(),
+          error: PROVIDER_MANAGED_REMOVE_BLOCKED_MESSAGE
+        };
       }
     }
 
@@ -73,20 +73,19 @@ export class SkillFileOwnershipService {
     };
   }
 
-  getProviderRoot(providerId: ProviderId) {
-    if (providerId === 'openai') {
-      return join(homedir(), '.codex', 'skills');
+  private getProviderRoot(providerId: ProviderId) {
+    switch (providerId) {
+      case 'openai':
+        return join(homedir(), '.codex', 'skills');
+      case 'gemini':
+        return join(homedir(), '.gemini', 'skills');
+      case 'qwen':
+        return join(homedir(), '.qwen', 'skills');
+      case 'kimi':
+        return join(homedir(), '.kimi', 'skills');
+      case 'ollama':
+        return join(homedir(), '.ollama', 'skills');
     }
-
-    if (providerId === 'gemini') {
-      return join(homedir(), '.gemini', 'skills');
-    }
-
-    if (providerId === 'qwen') {
-      return join(homedir(), '.qwen', 'skills');
-    }
-
-    return join(homedir(), '.kimi', 'skills');
   }
 
   getDefaultFolderName(skillId: string, slug: string, origin: SkillDefinition['origin']) {
@@ -113,7 +112,6 @@ export class SkillFileOwnershipService {
           origin: skill.origin,
           providerTargets: skill.providerTargets,
           category: metadata.category,
-          syncTargets: metadata.syncTargets,
           updatedAt: skill.updatedAt
         },
         null,
@@ -136,14 +134,13 @@ export class SkillFileOwnershipService {
     });
   }
 
-  private applyProviderSync(skill: SkillDefinition) {
+  private clearLegacyProviderSync(skill: SkillDefinition) {
     const metadata = normalizeSkillMetadata(skill.metadata, skill.name);
     let nextSkill = skill;
     let nextMetadata = metadata;
 
     for (const providerId of PROVIDER_IDS) {
-      const shouldSync = skill.enabled && skill.scope === 'global' && metadata.syncTargets.includes(providerId);
-      const nextState = shouldSync ? this.writeProviderSync(nextSkill, providerId) : this.removeProviderSync(nextSkill, providerId);
+      const nextState = this.removeProviderSync(nextSkill, providerId);
       nextMetadata = {
         ...nextMetadata,
         syncState: {
@@ -197,41 +194,6 @@ export class SkillFileOwnershipService {
         syncState: nextSyncState
       }
     });
-  }
-
-  private writeProviderSync(skill: SkillDefinition, providerId: ProviderId): SkillSyncState {
-    if (providerId === 'openai') {
-      return {
-        exported: false,
-        path: null,
-        updatedAt: new Date().toISOString(),
-        error: CODEX_APP_HOME_SYNC_BLOCKED_MESSAGE
-      };
-    }
-
-    const metadata = normalizeSkillMetadata(skill.metadata, skill.name);
-    const folderName = metadata.folderName ?? this.getDefaultFolderName(skill.id, metadata.slug, skill.origin);
-    const folder = join(this.getProviderRoot(providerId), folderName);
-    const path = join(folder, 'SKILL.md');
-
-    try {
-      assertOutsideOperatorCodexHome(folder, 'write provider skill export');
-      ensureDirectory(folder);
-      writeFileSync(path, buildSkillDocument(skill), 'utf8');
-      return {
-        exported: true,
-        path,
-        updatedAt: new Date().toISOString(),
-        error: null
-      };
-    } catch (error) {
-      return {
-        exported: false,
-        path,
-        updatedAt: new Date().toISOString(),
-        error: error instanceof Error ? error.message : 'Failed to export skill.'
-      };
-    }
   }
 
   private getCanonicalFolder(skill: SkillDefinition, metadata: SkillMetadataShape) {

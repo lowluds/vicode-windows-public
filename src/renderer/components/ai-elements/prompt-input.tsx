@@ -93,7 +93,7 @@ export function PromptInputActionMenuTrigger({
 }: PromptInputActionMenuTriggerProps) {
   return (
     <IconButton
-      className={cx('composer-icon-button rounded-full', className)}
+      className={cx('composer-icon-button', className)}
       label={label}
       {...props}
     >
@@ -126,7 +126,7 @@ export function PromptInputSubmit({
 }: PromptInputSubmitProps) {
   return (
     <IconButton
-      className={cx('composer-send-button rounded-full', className)}
+      className={cx('composer-send-button', className)}
       label={label}
       {...props}
     >

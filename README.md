@@ -1,172 +1,96 @@
 # Vicode
 
-Vicode is a Windows-first Electron desktop app for AI-assisted coding workflows.
+Vicode is a Windows-first desktop app for AI-assisted coding.
 
-It is intentionally smaller than Codex, Claude Code, or full IDE shells, but it is aiming at the same core bar:
+It is intentionally smaller than Codex, Cursor, Claude Code, or a full IDE. The goal is a focused local coding shell: open a project, start a thread, run a provider, inspect the result, and keep the workflow understandable.
 
-- coherent local project threads
-- trustworthy provider execution
-- calm, premium transcript UX
-- real coding workflows from prompt to changed files and verification
+Current beta candidate: `0.2.8`
 
-Release-blocking providers:
+`0.2.8` remains unpublished until the release owner chooses public beta or a
+private/invite-only beta link.
 
-- `OpenAI`
-- `Gemini`
+Public source mirror: [lowluds/vicode-windows-public](https://github.com/lowluds/vicode-windows-public)
 
-Supported secondary lane:
+Windows beta releases: [lowluds/vicode-windows-releases](https://github.com/lowluds/vicode-windows-releases/releases)
 
-- `Ollama`
+## What Vicode Is
 
-Temporarily hidden compatibility lanes in the current beta UI:
+Vicode is built for developers and beta testers who want a quieter AI coding app with local project state and explicit provider execution.
 
-- `Qwen`
-- `Kimi`
+It currently focuses on:
 
-## Status
-
-Current package version:
-
-- `0.2.6`
-
-Current platform stance:
-
-- Windows-first
-- Electron desktop app
-- local-first SQLite state
-
-Current external beta path:
-
-- packaged Windows installer and unpacked app are the active external handoff path
-- installed Windows builds now check for desktop updates on launch
-- update status is visible in `Settings > General` and in the titlebar
-- when a desktop update is ready, clicking the titlebar update action restarts Vicode immediately and installs it, even if that interrupts the current run
-- desktop update artifacts publish to the public release-only repo at [lowluds/vicode-windows-releases](https://github.com/lowluds/vicode-windows-releases)
-- public beta source snapshots should publish through the curated mirror repo at [lowluds/vicode-windows-public](https://github.com/lowluds/vicode-windows-public), not by making the internal working repo public directly
-- npm packaging is still under audit and is not yet a supported end-user install route
-- beta bug reports should go through [GitHub Issues](https://github.com/lowluds/vicode-windows/issues)
-
-If you are beta testing Vicode for the first time, start here:
-
-- [docs/releases/beta-tester-quick-start.md](./docs/releases/beta-tester-quick-start.md)
-
-If you are reviewing the current release line in more detail, start here:
-
-- [docs/releases/0.2.6-reviewer-guide.md](./docs/releases/0.2.6-reviewer-guide.md)
-
-## What Vicode Already Does
-
-- project and thread persistence
-- attached-workspace execution and bootstrap flows
-- provider execution across OpenAI, Gemini, and Ollama, with parked compatibility adapters for Qwen and Kimi kept in the repo but hidden from the current beta UI
+- local projects, threads, and run history
+- workspace trust before provider execution
+- Ollama as the current release-blocking provider lane
+- normalized model transports for Ollama responses, Ollama chat, and OpenAI-compatible Custom API keys
 - skills and MCP integration surfaces
-- run evidence, review surfaces, and transcript compaction
-- collaboration is currently parked from the primary app shell while the core coding workflow is hardened
-- diagnostics export and live benchmark coverage
+- diagnostics, release validation, and reproducible Windows packaging
 
-## Requirements
+Vicode is not trying to become a generic IDE, a plugin marketplace, an admin panel, or a Discord-style collaboration client.
 
-Recommended development environment:
+## Beta Testers
 
-- Windows 11
-- Node.js 24.x
-- npm 10+
+Start here:
 
-Supported development baseline right now:
+- [Beta tester quick start](./docs/releases/beta-tester-quick-start.md)
+- [Current reviewer guide](./docs/releases/0.2.8-reviewer-guide.md)
+- [Current release notes](./docs/releases/0.2.8.md)
 
-- Windows only is the primary hardening target
-- Node 24.x is the tested baseline for native-module and Electron workflow stability
+Install the packaged Windows app from the release page after the matching
+installer is published or shared privately by the release owner:
 
-If native dependencies drift after an install or Electron change, run:
+- [Vicode Windows releases](https://github.com/lowluds/vicode-windows-releases/releases)
+
+Use GitHub Issues for beta feedback:
+
+- [Share beta feedback](https://github.com/lowluds/vicode-windows-public/issues/new?template=beta-feedback.yml)
+- [Report a reproducible bug](https://github.com/lowluds/vicode-windows-public/issues/new?template=bug-report.yml)
+- [View open issues](https://github.com/lowluds/vicode-windows-public/issues)
+
+Good beta reports include:
+
+- Vicode version
+- Windows version
+- install path, such as installer, unpacked build, or local dev build
+- provider used, such as local Ollama or Custom API with an OpenAI-compatible key
+- which first-run checks were completed
+- exact steps to reproduce
+- expected behavior
+- actual behavior
+- screenshots, logs, or error text when available
+
+## Contributors
+
+Pull requests are welcome when they keep Vicode focused, Windows-safe, and easier to trust.
+
+Before opening a PR:
+
+1. Read [CONTRIBUTING.md](./CONTRIBUTING.md).
+2. Fork the repo or create a dedicated feature branch.
+3. Keep the branch narrow.
+4. Update tests or docs when behavior changes.
+5. Run the relevant verification commands before submitting.
+
+For most code changes:
 
 ```bash
-npm run native:prepare:electron
+npm test
+npm run build
 ```
 
-## Quick Start
-
-1. Install dependencies:
-
-```bash
-npm install
-```
-
-2. Start the app:
-
-```bash
-npm run dev
-```
-
-3. Run the canonical deterministic desktop sweep when you want the full local gate:
+For the full deterministic desktop sweep:
 
 ```bash
 npm run verify:desktop
 ```
 
-4. Or run the narrower baseline:
+If you touch provider execution, preload, Electron startup, native dependencies, or persistence, also run:
 
 ```bash
-npm test
-npm run build
 npm run smoke
 ```
 
-## Provider Setup
-
-Use the Windows provider setup guide:
-
-- [docs/setup/windows-provider-setup.md](./docs/setup/windows-provider-setup.md)
-
-That guide covers:
-
-- OpenAI / Codex CLI
-- Gemini CLI
-- Ollama local and hosted modes as the supported secondary lane
-- current expectations for the parked Qwen and Kimi compatibility lanes
-
-Auth/privacy model:
-
-- Vicode can detect an existing provider CLI login on the current machine
-- it does not automatically import, sync, or silently adopt that local sign-in
-- the user explicitly chooses whether to use an existing CLI sign-in inside Vicode
-- Vicode and the OpenAI Codex app are separate applications; Vicode should not
-  mutate the operator's real Codex app files under `~/.codex`
-
-## Verification
-
-Core verification:
-
-```bash
-npm test
-npm run build
-npm run smoke
-```
-
-Canonical deterministic desktop sweep:
-
-```bash
-npm run verify:desktop
-```
-
-Deterministic UI/E2E:
-
-```bash
-npm run e2e
-```
-
-Live provider certification:
-
-```bash
-npm run e2e:live
-```
-
-Mixed-use provider validation:
-
-```bash
-npm run validate:mixed-use
-```
-
-Packaged release / beta handoff:
+For packaging or release-facing changes:
 
 ```bash
 npm run dist:win
@@ -175,35 +99,101 @@ npm run audit:release
 npm run audit:repo-public
 ```
 
-Published Windows update channel:
+Open pull requests here:
+
+- [Create a pull request](https://github.com/lowluds/vicode-windows/compare)
+
+## Agent Orientation
+
+This repo is friendly to coding agents, but the project has firm boundaries.
+
+Agents should preserve these rules:
+
+- keep privileged work in the Electron main process
+- keep preload narrow and typed
+- keep renderer code unprivileged
+- keep model-only providers on the normalized transport path when feasible
+- keep provider-specific behavior behind provider transports or retired-provider adapters
+- do not fabricate assistant output when a provider fails
+- do not mark a run completed unless the provider reached a real terminal state
+- do not execute retired provider-owned CLI lanes
+- keep filesystem scans bounded
+- do not mutate external provider app data such as the historical Codex app state under `~/.codex`
+
+Process boundaries:
+
+- main process: [`src/main`](./src/main)
+- preload bridge: [`src/preload`](./src/preload)
+- renderer UI: [`src/renderer`](./src/renderer)
+- shared contracts: [`src/shared`](./src/shared)
+- storage: [`src/storage`](./src/storage)
+- providers: [`src/providers`](./src/providers)
+
+Project guidance for agents:
+
+- [AGENTS.md](./AGENTS.md)
+- [Engineering source of truth](./docs/engineering/README.md)
+- [Ollama listing readiness](./docs/ollama-listing-readiness/README.md)
+- [Verification playbook](./docs/engineering/verification-playbook.md)
+- [Windows release runbook](./docs/engineering/windows-release-runbook.md)
+
+## Local Development
+
+Recommended environment:
+
+- Windows 11
+- Node.js `24.x`
+- npm `10+`
+
+Install dependencies:
 
 ```bash
-npm run release:win
+npm install
 ```
 
-Use that only when the release is backed by a tag or draft release in
-`lowluds/vicode-windows-releases` and the required `GH_TOKEN` /
-`GITHUB_TOKEN` publish credentials are available. The release path should run
-the same Electron native-prep/build steps as `dist:win` before publishing.
+Start the app:
 
-## Contributing
+```bash
+npm run dev
+```
 
-See:
+If native dependencies drift after an install or Electron change:
 
-- [CONTRIBUTING.md](./CONTRIBUTING.md)
+```bash
+npm run native:prepare:electron
+```
 
-## Release Notes
+## Provider Setup
+
+Use the Windows provider setup guide:
+
+- [Windows provider setup](./docs/setup/windows-provider-setup.md)
+
+Current provider stance:
+
+- release-blocking: Ollama
+- active beta API-key lane: Custom API / OpenAI-compatible keys
+- normalized backend lanes: Ollama responses, Ollama chat, OpenAI-compatible Custom API chat
+- retired provider CLI lanes: OpenAI/Codex, Gemini, Qwen, and Kimi keep historical IDs only for storage/schema compatibility and fail with a retired-provider message
+
+Ollama runs through the local Ollama runtime/API for this beta route. Ollama API keys and hosted/cloud Ollama setup are retired. Local model writing is model-dependent, so broad local write-capable execution should stay caveated in public claims.
+
+OpenAI usage should be configured through `Custom API` with an OpenAI-compatible `/v1` base URL and API key. Vicode should not write, delete, sync, install, uninstall, or clean files inside another provider application's private app-state folders.
+
+## Release And Source Distribution
+
+The supported external beta path is the packaged Windows installer.
+
+- Installer and updater artifacts publish through [lowluds/vicode-windows-releases](https://github.com/lowluds/vicode-windows-releases).
+- Public beta source snapshots should publish through the curated mirror repo [lowluds/vicode-windows-public](https://github.com/lowluds/vicode-windows-public).
+- `npm pack` and `npm publish` are not the current end-user release path.
+
+Release references:
 
 - [CHANGELOG.md](./CHANGELOG.md)
-- [docs/releases/beta-tester-quick-start.md](./docs/releases/beta-tester-quick-start.md)
-- [docs/releases/0.2.6.md](./docs/releases/0.2.6.md)
-- [docs/releases/0.2.6-reviewer-guide.md](./docs/releases/0.2.6-reviewer-guide.md)
-
-## Internal Engineering Docs
-
-Canonical internal execution docs live in:
-
-- [docs/engineering/README.md](./docs/engineering/README.md)
+- [Beta tester quick start](./docs/releases/beta-tester-quick-start.md)
+- [0.2.8 release notes](./docs/releases/0.2.8.md)
+- [0.2.8 reviewer guide](./docs/releases/0.2.8-reviewer-guide.md)
 
 ## License
 

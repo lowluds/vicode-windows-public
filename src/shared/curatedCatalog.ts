@@ -1,6 +1,6 @@
 import type { ProviderId, SkillCategory } from './domain';
 
-export type CuratedSkillInstallKind = 'provider_native' | 'github_folder';
+export type CuratedSkillInstallKind = 'provider_reference' | 'github_folder';
 export type CuratedMcpCatalogCategory = 'ui' | 'design' | 'component-system' | 'deploy' | 'backend' | 'collaboration';
 export type CuratedMcpSupportState = 'supported' | 'planned';
 export type CuratedSkillStatus = 'keep' | 'experimental';
@@ -25,7 +25,6 @@ export interface CuratedSkillCatalogEntry {
   owner?: string;
   repo?: string;
   path?: string;
-  installTarget?: string;
   featured: boolean;
 }
 
@@ -34,7 +33,7 @@ export interface CuratedMcpCatalogEntry {
   name: string;
   publisher: string;
   description: string;
-  docsUrl: string;
+  docsUrl?: string | null;
   category: CuratedMcpCatalogCategory;
   supportState: CuratedMcpSupportState;
   transport: 'stdio' | 'http' | 'remote';
@@ -222,13 +221,13 @@ export const officialSkillPack: CuratedSkillCatalogEntry[] = [
   }
 ];
 
-export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
+export const providerReferenceCatalog: CuratedSkillCatalogEntry[] = [
   {
     id: 'codex-aspnet-core',
     name: 'AspNet Core',
     publisher: 'OpenAI',
     description: '[Windows only] Build and review ASP.NET Core apps.',
-    installKind: 'provider_native',
+    installKind: 'provider_reference',
     providerId: 'openai',
     providerTargets: ['openai'],
     browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated/aspnet-core',
@@ -245,7 +244,7 @@ export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
     name: 'ChatGPT Apps',
     publisher: 'OpenAI',
     description: 'Build and scaffold ChatGPT apps.',
-    installKind: 'provider_native',
+    installKind: 'provider_reference',
     providerId: 'openai',
     providerTargets: ['openai'],
     browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated/chatgpt-apps',
@@ -262,7 +261,7 @@ export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
     name: 'Figma',
     publisher: 'OpenAI',
     description: 'Use Figma MCP for design-to-code workflows.',
-    installKind: 'provider_native',
+    installKind: 'provider_reference',
     providerId: 'openai',
     providerTargets: ['openai'],
     browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated/figma',
@@ -279,7 +278,7 @@ export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
     name: 'GH Address Comments',
     publisher: 'OpenAI',
     description: 'Address GitHub PR comments quickly.',
-    installKind: 'provider_native',
+    installKind: 'provider_reference',
     providerId: 'openai',
     providerTargets: ['openai'],
     browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated/gh-address-comments',
@@ -296,7 +295,7 @@ export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
     name: 'GH Fix CI',
     publisher: 'OpenAI',
     description: 'Debug failing GitHub Actions CI.',
-    installKind: 'provider_native',
+    installKind: 'provider_reference',
     providerId: 'openai',
     providerTargets: ['openai'],
     browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated/gh-fix-ci',
@@ -313,7 +312,7 @@ export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
     name: 'Jupyter Notebook',
     publisher: 'OpenAI',
     description: 'Create and iterate on notebooks.',
-    installKind: 'provider_native',
+    installKind: 'provider_reference',
     providerId: 'openai',
     providerTargets: ['openai'],
     browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated/jupyter-notebook',
@@ -330,7 +329,7 @@ export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
     name: 'Linear',
     publisher: 'OpenAI',
     description: 'Manage Linear issues from Codex.',
-    installKind: 'provider_native',
+    installKind: 'provider_reference',
     providerId: 'openai',
     providerTargets: ['openai'],
     browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated/linear',
@@ -347,7 +346,7 @@ export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
     name: 'PDF',
     publisher: 'OpenAI',
     description: 'Work with and review PDF documents.',
-    installKind: 'provider_native',
+    installKind: 'provider_reference',
     providerId: 'openai',
     providerTargets: ['openai'],
     browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated/pdf',
@@ -364,7 +363,7 @@ export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
     name: 'Slides',
     publisher: 'OpenAI',
     description: 'Create and refine presentation decks.',
-    installKind: 'provider_native',
+    installKind: 'provider_reference',
     providerId: 'openai',
     providerTargets: ['openai'],
     browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated/slides',
@@ -381,7 +380,7 @@ export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
     name: 'Context7',
     publisher: 'Upstash',
     description: 'Up-to-date code docs for any prompt.',
-    installKind: 'provider_native',
+    installKind: 'provider_reference',
     providerId: 'gemini',
     providerTargets: ['gemini'],
     browseUrl: 'https://github.com/upstash/context7',
@@ -398,11 +397,10 @@ export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
     name: 'Stitch',
     publisher: 'Google',
     description: 'Gemini UI generation and app stitching workflows.',
-    installKind: 'provider_native',
+    installKind: 'provider_reference',
     providerId: 'gemini',
     providerTargets: ['gemini'],
     browseUrl: 'https://github.com/gemini-cli-extensions/stitch',
-    installTarget: 'https://github.com/gemini-cli-extensions/stitch',
     token: '@gemini-cli-extensions/stitch',
     category: 'frontend',
     official: true,
@@ -415,12 +413,11 @@ export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
     id: 'gemini-browserbase-mcp',
     name: 'Browserbase MCP',
     publisher: 'Browserbase',
-    description: 'Browserbase remote browser automation for Gemini CLI.',
-    installKind: 'provider_native',
+    description: 'Browserbase remote browser automation reference retained for retired Gemini provider workflows.',
+    installKind: 'provider_reference',
     providerId: 'gemini',
     providerTargets: ['gemini'],
     browseUrl: 'https://github.com/browserbase/mcp-server-browserbase',
-    installTarget: 'https://github.com/browserbase/mcp-server-browserbase',
     token: '@browserbase/mcp-server-browserbase',
     category: 'mcp',
     official: true,
@@ -434,11 +431,10 @@ export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
     name: 'Chrome DevTools MCP',
     publisher: 'Chrome DevTools',
     description: 'Browser inspection and debugging through Chrome DevTools.',
-    installKind: 'provider_native',
+    installKind: 'provider_reference',
     providerId: 'gemini',
     providerTargets: ['gemini'],
     browseUrl: 'https://github.com/ChromeDevTools/chrome-devtools-mcp',
-    installTarget: 'https://github.com/ChromeDevTools/chrome-devtools-mcp',
     token: '@ChromeDevTools/chrome-devtools-mcp',
     category: 'mcp',
     official: true,
@@ -452,7 +448,7 @@ export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
     name: 'GitHub MCP Server',
     publisher: 'GitHub',
     description: 'GitHub-aware workflows and repository operations.',
-    installKind: 'provider_native',
+    installKind: 'provider_reference',
     providerId: 'gemini',
     providerTargets: ['gemini'],
     browseUrl: 'https://github.com/github/github-mcp-server',
@@ -469,7 +465,7 @@ export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
     name: 'GenAI Toolbox',
     publisher: 'Google',
     description: 'Google APIs and tools for Gemini workflows.',
-    installKind: 'provider_native',
+    installKind: 'provider_reference',
     providerId: 'gemini',
     providerTargets: ['gemini'],
     browseUrl: 'https://github.com/googleapis/genai-toolbox',
@@ -485,8 +481,8 @@ export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
     id: 'gemini-elasticsearch',
     name: 'Elasticsearch',
     publisher: 'Elastic',
-    description: 'Official Elasticsearch extension for Gemini CLI.',
-    installKind: 'provider_native',
+    description: 'Official Elasticsearch extension reference retained for retired Gemini provider workflows.',
+    installKind: 'provider_reference',
     providerId: 'gemini',
     providerTargets: ['gemini'],
     browseUrl: 'https://github.com/elastic/gemini-cli-elasticsearch',
@@ -497,7 +493,10 @@ export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
     verification: 'source-reviewed',
     notes: ['Official backend workflow, but specialized and not a default recommendation.'],
     featured: false
-  },
+  }
+];
+
+export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
   {
     id: 'anthropic-docx',
     name: 'Docx',
@@ -652,22 +651,25 @@ export const extendedSkillCatalog: CuratedSkillCatalogEntry[] = [
   }
 ];
 
-export const curatedSkillCatalog: CuratedSkillCatalogEntry[] = [...officialSkillPack, ...extendedSkillCatalog];
+export const curatedSkillCatalog: CuratedSkillCatalogEntry[] = [
+  ...officialSkillPack,
+  ...extendedSkillCatalog
+];
 
 export const officialMcpCatalog: CuratedMcpCatalogEntry[] = [
   {
     id: 'internal-analysis',
     name: 'Vicode Internal Analysis MCP',
     publisher: 'Vicode',
-    description: 'Bounded local analysis MCP for engineering docs, build-control summaries, and safe workspace inspection.',
-    docsUrl: 'https://github.com/openai/codex',
+    description: 'Bounded local analysis MCP for engineering docs and safe workspace inspection.',
+    docsUrl: null,
     category: 'backend',
     supportState: 'supported',
     transport: 'stdio',
     envVars: [],
     setupNotes: [
       'Project-scoped setup that binds to the selected workspace root.',
-      'Exposes engineering docs, build-control summary, and bounded source inspection for autonomous analysis.'
+      'Exposes engineering docs and bounded source inspection for autonomous analysis.'
     ]
   },
   {

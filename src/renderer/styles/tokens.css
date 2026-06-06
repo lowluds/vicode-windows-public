@@ -2,7 +2,7 @@
 :root {
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --ui-font-body: "Geist Variable", "Segoe UI Variable", "Segoe UI", sans-serif;
+  --ui-font-body: "Inter Variable", "Inter", "Segoe UI Variable", "Segoe UI", sans-serif;
   --ui-font-mono: "Geist Mono Variable", "Cascadia Mono", "Consolas", monospace;
   --ui-app-bg: var(--background);
   --ui-app-bg-elevated: color-mix(in oklab, var(--sidebar) 92%, var(--foreground) 8%);
@@ -28,6 +28,10 @@
   --ui-accent: color-mix(in srgb, var(--foreground) 78%, var(--muted-foreground) 22%);
   --ui-accent-strong: var(--foreground);
   --ui-accent-soft: color-mix(in srgb, var(--foreground) 8%, transparent);
+  --ui-link: color-mix(in srgb, var(--color-blue-600) 86%, var(--foreground) 14%);
+  --ui-link-strong: color-mix(in srgb, var(--color-blue-700) 88%, var(--foreground) 12%);
+  --ui-link-soft: color-mix(in srgb, var(--color-blue-500) 12%, transparent);
+  --ui-link-border: color-mix(in srgb, var(--color-blue-500) 30%, transparent);
   --ui-default-accent: #3f3f3f;
   --ui-accent-foreground-light: #f5f5f5;
   --ui-accent-foreground-dark: #111111;
@@ -85,6 +89,13 @@
   --ui-danger-soft: color-mix(in srgb, var(--destructive) 14%, transparent);
   --ui-danger-soft-strong: color-mix(in srgb, var(--destructive) 20%, transparent);
   --ui-danger-border: color-mix(in srgb, var(--destructive) 28%, transparent);
+  --ui-collection-red: #ff3b30;
+  --ui-collection-orange: #ff9500;
+  --ui-collection-yellow: #ffd60a;
+  --ui-collection-green: #32d74b;
+  --ui-collection-blue: #0a84ff;
+  --ui-collection-purple: #bf5af2;
+  --ui-collection-gray: #8e8e93;
   --ui-alpha-02: color-mix(in srgb, var(--foreground) 2%, transparent);
   --ui-alpha-025: color-mix(in srgb, var(--foreground) 2.5%, transparent);
   --ui-alpha-03: color-mix(in srgb, var(--foreground) 3%, transparent);
@@ -215,6 +226,10 @@
 }
 
 .dark {
+  --ui-link: color-mix(in srgb, var(--color-blue-400) 84%, var(--foreground) 16%);
+  --ui-link-strong: color-mix(in srgb, var(--color-blue-300) 88%, var(--foreground) 12%);
+  --ui-link-soft: color-mix(in srgb, var(--color-blue-400) 14%, transparent);
+  --ui-link-border: color-mix(in srgb, var(--color-blue-400) 34%, transparent);
   --ui-window-bar-gradient: linear-gradient(180deg, #1a1a1a, #181818);
   --ui-window-sidebar-gradient: linear-gradient(180deg, #222222, #1f1f1f);
   --ui-window-pane-gradient: linear-gradient(180deg, #1a1a1a, #181818);
@@ -547,6 +562,31 @@ textarea:focus-visible {
   animation: app-loading-echo 1.35s cubic-bezier(0.33, 0, 0.2, 1) infinite;
 }
 
+.themed-wolf-logo {
+  display: inline-grid;
+  place-items: center;
+}
+
+.themed-wolf-logo-image {
+  grid-area: 1 / 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.themed-wolf-logo-light {
+  display: none;
+}
+
+.light .themed-wolf-logo-dark {
+  display: none;
+}
+
+.light .themed-wolf-logo-light {
+  display: block;
+}
+
 @keyframes app-loading-spin {
   from {
     transform: rotate(0deg);
@@ -660,7 +700,7 @@ textarea:focus-visible {
   color: var(--ui-text-title);
   font-size: var(--ui-font-size-xs);
   box-shadow: var(--ui-shadow-apple);
-  z-index: 60;
+  z-index: 100;
 }
 
 .ui-stable-scroll {

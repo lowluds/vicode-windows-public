@@ -6,8 +6,7 @@ import type {
   ReviewItem,
   SubagentSummary,
   ThreadDetail,
-  ThreadSummary,
-  VicodeBuildSnapshot
+  ThreadSummary
 } from '../../shared/domain';
 
 type UseShellTaskSyncInput = {
@@ -26,14 +25,12 @@ type UseShellTaskSyncInput = {
   listAutomations: () => Promise<AutomationDefinition[]>;
   listJobs: () => Promise<JobDefinition[]>;
   listPendingReviews: () => Promise<ReviewItem[]>;
-  getBuildSnapshot: (projectId: string | null) => Promise<VicodeBuildSnapshot | null>;
   listThreadSubagents: (threadId: string) => Promise<SubagentSummary[]>;
   listThreadAutonomousTasks: (threadId: string) => Promise<AutonomousTaskSummary[]>;
   openThread: (threadId: string) => Promise<void>;
   setAutomations: (value: AutomationDefinition[]) => void;
   setJobs: (value: JobDefinition[]) => void;
   setReviewItems: (value: ReviewItem[]) => void;
-  setVicodeBuildSnapshot: (value: VicodeBuildSnapshot | null) => void;
   setSubagentsByThreadId: (
     value:
       | Record<string, SubagentSummary[]>
@@ -51,7 +48,6 @@ export function useShellTaskSync(input: UseShellTaskSyncInput) {
   const listAutomations = useEffectEvent(input.listAutomations);
   const listJobs = useEffectEvent(input.listJobs);
   const listPendingReviews = useEffectEvent(input.listPendingReviews);
-  const getBuildSnapshot = useEffectEvent(input.getBuildSnapshot);
   const listThreadSubagents = useEffectEvent(input.listThreadSubagents);
   const listThreadAutonomousTasks = useEffectEvent(input.listThreadAutonomousTasks);
   const openThread = useEffectEvent(input.openThread);
@@ -71,7 +67,7 @@ export function useShellTaskSync(input: UseShellTaskSyncInput) {
       input.setJobs(nextJobs);
     });
 
-    if (input.route !== 'automations' && input.route !== 'build-control') {
+    if (input.route !== 'automations') {
       return () => {
         cancelled = true;
       };
@@ -85,23 +81,8 @@ export function useShellTaskSync(input: UseShellTaskSyncInput) {
       input.setJobs(nextJobs);
     });
 
-    void getBuildSnapshot(input.selectedProjectId).then((snapshot) => {
-      if (!cancelled) {
-        input.setVicodeBuildSnapshot(snapshot);
-      }
-    });
-
-    const refreshTimer = window.setInterval(() => {
-      void getBuildSnapshot(input.selectedProjectIdRef.current).then((snapshot) => {
-        if (!cancelled) {
-          input.setVicodeBuildSnapshot(snapshot);
-        }
-      });
-    }, 10000);
-
     return () => {
       cancelled = true;
-      window.clearInterval(refreshTimer);
     };
   }, [
     input.route,
@@ -109,12 +90,11 @@ export function useShellTaskSync(input: UseShellTaskSyncInput) {
     input.selectedProjectIdRef,
     input.setAutomations,
     input.setJobs,
-    input.setReviewItems,
-    input.setVicodeBuildSnapshot
+    input.setReviewItems
   ]);
 
   useEffect(() => {
-    if (!input.pendingReviewRevealRequestedRef.current || (input.route !== 'automations' && input.route !== 'build-control')) {
+    if (!input.pendingReviewRevealRequestedRef.current || input.route !== 'automations') {
       return;
     }
 

@@ -10,3 +10,7 @@ export function isTranscriptNearBottomPosition(
 export function shouldAutoFollowTranscript(input: { threadChanged: boolean; autoFollow: boolean }) {
   return input.threadChanged || input.autoFollow;
 }
+
+export function shouldPauseTranscriptAutoFollowForWheel(deltaY: number) {
+  return deltaY < 0;
+}

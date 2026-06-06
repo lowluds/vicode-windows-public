@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  decodeOllamaModelId,
+  encodeOllamaLocalModelId,
   getProviderMetadata,
+  isOllamaLocalModelId,
+  isRetiredProviderId,
+  OLLAMA_DEFAULT_LOCAL_MODEL_ID,
+  OLLAMA_LIGHTWEIGHT_SMOKE_MODEL_ID,
   providerBlockedRunMessage,
   providerCanRunInComposer,
+  providerCapabilities,
   providerCliAuthLaunch,
   providerCliCommands,
-  providerCliExecutableName,
-  providerCapabilities,
   providerPermissionBoundaryNote,
   providerPermissionOptionDisabled,
   providerModelTriggerSummary,
@@ -22,6 +27,9 @@ import {
   providerSetupMenuSummary,
   providerModelRecommendationLabel,
   providerRecommendedRouteSummary,
+  providerRetiredMessage,
+  resolveProviderThinkingDefault,
+  resolveOllamaApiKeyForModel,
   providerSubagentConcurrencyLimit,
   providerUsesHostedApi,
   selectPreferredOllamaModel,
@@ -31,14 +39,14 @@ import {
 } from './providers';
 
 describe('shared provider helpers', () => {
-  it('treats hosted Ollama api-key mode as composer-runnable without a local install', () => {
+  it('does not treat legacy Ollama api-key mode as composer-runnable without a local install', () => {
     expect(
       providerCanRunInComposer({
         id: 'ollama',
         installed: false,
         authMode: 'api_key'
       })
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('still requires a local install for Ollama cli mode', () => {
@@ -51,67 +59,76 @@ describe('shared provider helpers', () => {
     ).toBe(false);
   });
 
-  it('recognizes hosted Ollama api-key mode explicitly', () => {
+  it('does not expose a hosted Ollama API mode', () => {
     expect(
       providerUsesHostedApi({
         id: 'ollama',
         authMode: 'api_key'
       })
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it('marks local Ollama model ids without routing any Ollama model through API-key auth', () => {
+    const localModelId = encodeOllamaLocalModelId('qwen3-coder:30b');
+
+    expect(localModelId).toBe('local:qwen3-coder:30b');
+    expect(encodeOllamaLocalModelId(localModelId)).toBe(localModelId);
+    expect(isOllamaLocalModelId(localModelId)).toBe(true);
+    expect(isOllamaLocalModelId('qwen3-coder:30b')).toBe(false);
+    expect(decodeOllamaModelId(localModelId)).toBe('qwen3-coder:30b');
+    expect(resolveOllamaApiKeyForModel(localModelId, 'cloud-key')).toBeNull();
+    expect(resolveOllamaApiKeyForModel('qwen3-coder:30b', 'cloud-key')).toBeNull();
   });
 
   it('marks Ollama as supporting runtime skill resources through prompt-backed injection', () => {
     expect(providerCapabilities('ollama').supportsRuntimeSkillResources).toBe(true);
   });
 
-  it('declares lane authority explicitly for CLI-backed and app-hosted providers', () => {
-    expect(providerCapabilities('openai')).toMatchObject({
-      executionAuthority: 'provider_cli',
-      approvalAuthority: 'none',
-      sandboxAuthority: 'provider_cli',
-      requiresTrustedWorkspace: true
-    });
-    expect(providerCapabilities('gemini')).toMatchObject({
-      executionAuthority: 'provider_cli',
-      approvalAuthority: 'provider_cli',
-      sandboxAuthority: 'provider_cli',
-      requiresTrustedWorkspace: true
-    });
+  it('defaults Ollama thinking on while unsupported providers stay off', () => {
+    expect(providerCapabilities('ollama').supportsThinkingToggle).toBe(true);
+    expect(resolveProviderThinkingDefault('ollama')).toBe(true);
+    expect(resolveProviderThinkingDefault('openai')).toBe(false);
+    expect(resolveProviderThinkingDefault('openai_compatible')).toBe(false);
+  });
+
+  it('declares lane authority explicitly for supported app-hosted providers', () => {
     expect(providerCapabilities('ollama')).toMatchObject({
       executionAuthority: 'app_runtime',
       approvalAuthority: 'app',
       sandboxAuthority: 'app_runtime',
       requiresTrustedWorkspace: true
     });
-    expect(providerCapabilities('kimi')).toMatchObject({
-      executionAuthority: 'provider_cli',
-      approvalAuthority: 'none',
-      sandboxAuthority: 'none',
+    expect(providerCapabilities('openai_compatible')).toMatchObject({
+      executionAuthority: 'app_runtime',
+      approvalAuthority: 'app',
+      sandboxAuthority: 'app_runtime',
       requiresTrustedWorkspace: true
     });
   });
 
   it('surfaces lane-specific permission boundaries from shared provider metadata', () => {
-    expect(providerPermissionBoundaryNote('openai', 'default')).toContain('does not expose an app approval pause');
-    expect(providerPermissionBoundaryNote('gemini', 'full_access')).toContain('owns approval and sandbox behavior');
+    expect(providerPermissionBoundaryNote('openai', 'default')).toContain('OpenAI CLI has been retired');
+    expect(providerPermissionBoundaryNote('gemini', 'full_access')).toContain('Gemini CLI has been retired');
     expect(providerPermissionBoundaryNote('ollama', 'default')).toContain('Vicode owns approvals in this lane');
-    expect(providerPermissionBoundaryNote('kimi', 'default')).toContain('requires Full access');
+    expect(providerPermissionBoundaryNote('kimi', 'default')).toContain('Kimi CLI has been retired');
   });
 
-  it('disables invalid permission options for lanes that require full access', () => {
+  it('disables invalid permission options for lanes that require full access or are retired', () => {
     expect(providerPermissionOptionDisabled('kimi', 'default')).toBe(true);
-    expect(providerPermissionOptionDisabled('kimi', 'full_access')).toBe(false);
-    expect(providerPermissionOptionDisabled('openai', 'default')).toBe(false);
+    expect(providerPermissionOptionDisabled('kimi', 'full_access')).toBe(true);
+    expect(providerPermissionOptionDisabled('openai', 'default')).toBe(true);
+    expect(providerPermissionOptionDisabled('ollama', 'default')).toBe(false);
   });
 
-  it('prefers coder-style hosted Ollama models when available', () => {
+  it('prefers the GPU-safe local Ollama default even when larger coder models are present', () => {
     expect(
       selectPreferredOllamaModel([
+        { id: 'qwen2.5-coder:32b-instruct-q3_K_M' },
         { id: 'llama3.1:8b' },
-        { id: 'qwen3-coder-next' },
+        { id: OLLAMA_DEFAULT_LOCAL_MODEL_ID },
         { id: 'deepseek-r1:8b' }
       ])
-    ).toEqual({ id: 'qwen3-coder-next' });
+    ).toEqual({ id: OLLAMA_DEFAULT_LOCAL_MODEL_ID });
   });
 
   it('prefers a practical high-quality Ollama vision model when available', () => {
@@ -136,39 +153,26 @@ describe('shared provider helpers', () => {
     ).toEqual({ id: 'gemma3:4b', supportsVision: true });
   });
 
-  it('returns a primary and alternate hosted Ollama validation set', () => {
+  it('returns the 14B default and 7B smoke Ollama validation set when available', () => {
     expect(
       selectPreferredOllamaValidationModels([
-        { id: 'qwen3-coder-next' },
+        { id: 'qwen2.5-coder:32b-instruct-q3_K_M' },
+        { id: OLLAMA_DEFAULT_LOCAL_MODEL_ID },
+        { id: OLLAMA_LIGHTWEIGHT_SMOKE_MODEL_ID },
         { id: 'llama3.1:8b' },
         { id: 'deepseek-r1:8b' }
       ])
-    ).toEqual([{ id: 'qwen3-coder-next' }, { id: 'llama3.1:8b' }]);
+    ).toEqual([{ id: OLLAMA_DEFAULT_LOCAL_MODEL_ID }, { id: OLLAMA_LIGHTWEIGHT_SMOKE_MODEL_ID }]);
   });
 
-  it('prefers lower-cost background agent models by provider', () => {
-    expect(
-      selectPreferredSubagentModel('openai', [
-        { id: 'gpt-5.4', recommendation: 'recommended' },
-        { id: 'gpt-5.4-mini', recommendation: 'fast' }
-      ])
-    ).toEqual({ id: 'gpt-5.4-mini', recommendation: 'fast' });
-
-    expect(
-      selectPreferredSubagentModel('gemini', [
-        { id: 'gemini-2.5-pro', recommendation: 'recommended' },
-        { id: 'gemini-2.5-flash', recommendation: 'fast' },
-        { id: 'gemini-2.5-flash-lite' }
-      ])
-    ).toEqual({ id: 'gemini-2.5-flash', recommendation: 'fast' });
-
+  it('prefers lower-cost background agent models for supported providers', () => {
     expect(
       selectPreferredSubagentModel('ollama', [
-        { id: 'qwen3-coder:30b', recommendation: 'recommended' },
-        { id: 'qwen3-coder:7b' },
+        { id: OLLAMA_DEFAULT_LOCAL_MODEL_ID, recommendation: 'recommended' },
+        { id: OLLAMA_LIGHTWEIGHT_SMOKE_MODEL_ID, recommendation: 'fast' },
         { id: 'llama3.1:8b' }
       ])
-    ).toEqual({ id: 'qwen3-coder:7b' });
+    ).toEqual({ id: OLLAMA_LIGHTWEIGHT_SMOKE_MODEL_ID, recommendation: 'fast' });
   });
 
   it('maps recommendation flags to user-facing labels', () => {
@@ -179,24 +183,70 @@ describe('shared provider helpers', () => {
   });
 
   it('exposes provider-aware subagent concurrency caps', () => {
-    expect(providerSubagentConcurrencyLimit('openai')).toBe(4);
-    expect(providerSubagentConcurrencyLimit('gemini')).toBe(4);
-    expect(providerSubagentConcurrencyLimit('qwen')).toBe(3);
-    expect(providerSubagentConcurrencyLimit('kimi')).toBe(3);
+    expect(providerSubagentConcurrencyLimit('openai')).toBe(0);
+    expect(providerSubagentConcurrencyLimit('gemini')).toBe(0);
+    expect(providerSubagentConcurrencyLimit('qwen')).toBe(0);
+    expect(providerSubagentConcurrencyLimit('kimi')).toBe(0);
     expect(providerSubagentConcurrencyLimit('ollama')).toBe(2);
+    expect(providerSubagentConcurrencyLimit('openai_compatible')).toBe(2);
   });
 
   it('returns provider-specific serious-coding guidance', () => {
-    expect(providerRecommendedRouteSummary('openai')).toContain('Newest available');
-    expect(providerRecommendedRouteSummary('gemini')).toContain('Auto Gemini 2.5');
-    expect(providerRecommendedRouteSummary('ollama', { hosted: true })).toMatch(/cloud/i);
-    expect(providerRecommendedRouteSummary('ollama', { hosted: false })).toMatch(/local/i);
+    expect(providerRecommendedRouteSummary('openai')).toContain('retired');
+    expect(providerRecommendedRouteSummary('gemini')).toContain('retired');
+    expect(providerRecommendedRouteSummary('ollama')).toMatch(/local/i);
+    expect(providerRecommendedRouteSummary('openai_compatible')).toContain('custom OpenAI-compatible');
+    expect(providerRecommendedRouteSummary('qwen')).toContain('retired');
+    expect(providerRecommendedRouteSummary('kimi')).toContain('retired');
+  });
+
+  it('marks CLI-backed providers as retired provider ids', () => {
+    expect(isRetiredProviderId('openai')).toBe(true);
+    expect(isRetiredProviderId('gemini')).toBe(true);
+    expect(isRetiredProviderId('qwen')).toBe(true);
+    expect(isRetiredProviderId('kimi')).toBe(true);
+    expect(isRetiredProviderId('ollama')).toBe(false);
+    expect(isRetiredProviderId('openai_compatible')).toBe(false);
+    expect(providerRetiredMessage('openai')).toContain('OpenAI-compatible custom API');
+    expect(providerRetiredMessage('qwen')).toContain('normalized Ollama lane');
+    expect(providerCanRunInComposer({ id: 'openai', installed: true, authState: 'connected', authMode: 'api_key', models: [{ id: 'gpt-5' }] })).toBe(false);
+    expect(providerCanRunInComposer({ id: 'gemini', installed: true, authMode: 'cli' })).toBe(false);
+    expect(providerCanRunInComposer({ id: 'qwen', installed: true, authMode: 'cli' })).toBe(false);
+  });
+
+  it('keeps retired provider CLI launch metadata inert', () => {
+    for (const providerId of ['openai', 'gemini', 'qwen', 'kimi'] as const) {
+      expect(providerCliCommands(providerId)).toEqual([]);
+      expect(providerCliAuthLaunch(providerId)).toEqual({ title: null, args: [] });
+    }
+  });
+
+  it('requires a configured custom provider for the OpenAI-compatible composer lane', () => {
+    expect(
+      providerCanRunInComposer({
+        id: 'openai_compatible',
+        installed: true,
+        authState: 'connected',
+        authMode: 'api_key',
+        models: []
+      })
+    ).toBe(false);
+    expect(
+      providerCanRunInComposer({
+        id: 'openai_compatible',
+        installed: true,
+        authState: 'connected',
+        authMode: 'api_key',
+        models: [{ id: 'custom:openai:gpt-5.4-nano' }]
+      })
+    ).toBe(true);
   });
 
   it('summarizes transitional setup states for provider menus', () => {
-    expect(providerSetupMenuSummary({ id: 'openai', installed: true, authState: 'checking', authMode: 'cli' })).toBe('Finishing sign-in');
+    expect(providerSetupMenuSummary({ id: 'openai', installed: true, authState: 'checking', authMode: 'cli' })).toBe('Provider retired');
     expect(providerSetupMenuSummary({ id: 'ollama', installed: true, authState: 'detected', authMode: null })).toBe('Start local runtime');
-    expect(providerSetupMenuSummary({ id: 'gemini', installed: false, authState: 'missing_cli', authMode: 'cli' })).toContain('Gemini CLI');
+    expect(providerSetupMenuSummary({ id: 'openai_compatible', installed: false, authState: 'disconnected', authMode: 'api_key' })).toBe('Add custom API');
+    expect(providerSetupMenuSummary({ id: 'gemini', installed: false, authState: 'missing_cli', authMode: 'cli' })).toBe('Provider retired');
   });
 
   it('replaces stale model labels with setup state in the composer trigger', () => {
@@ -205,7 +255,7 @@ describe('shared provider helpers', () => {
         { id: 'openai', installed: false, authState: 'missing_cli', authMode: 'cli', models: [] },
         null
       )
-    ).toContain('Codex CLI');
+    ).toBe('Provider retired');
     expect(
       providerModelTriggerSummary(
         { id: 'ollama', installed: true, authState: 'detected', authMode: null, models: [] },
@@ -222,17 +272,17 @@ describe('shared provider helpers', () => {
 
   it('returns provider-specific setup guidance for blocked states', () => {
     expect(providerSetupGuidance({ id: 'ollama', installed: true, authState: 'detected', authMode: null })).toContain('not running yet');
-    expect(providerSetupGuidance({ id: 'openai', installed: false, authState: 'missing_cli', authMode: 'cli' })).toContain('Codex CLI');
+    expect(providerSetupGuidance({ id: 'openai_compatible', installed: false, authState: 'disconnected', authMode: 'api_key' })).toContain('custom provider');
     expect(providerBlockedRunMessage({ id: 'ollama', installed: true, authState: 'detected', authMode: null })).toContain('not running yet');
-    expect(providerBlockedRunMessage({ id: 'gemini', installed: true, authState: 'disconnected', authMode: 'cli' })).toContain('before sending');
+    expect(providerBlockedRunMessage({ id: 'gemini', installed: true, authState: 'disconnected', authMode: 'cli' })).toContain('retired');
   });
 
   it('returns shared settings labels for the main provider states', () => {
-    expect(providerSettingsAuthTitle({ id: 'openai', installed: false, authState: 'missing_cli', authMode: 'cli' })).toBe('Install Codex CLI');
-    expect(providerSettingsAuthDescription({ id: 'gemini', installed: false, authState: 'missing_cli', authMode: 'cli', message: undefined })).toContain('Gemini CLI');
-    expect(providerSettingsAuthTitle({ id: 'gemini', installed: true, authState: 'detected', authMode: 'cli' })).toBe('Local sign-in found');
-    expect(providerSettingsPillLabel({ id: 'gemini', installed: true, authState: 'detected', authMode: 'cli' })).toBe('Found locally');
-    expect(providerSettingsConnectLabel({ id: 'gemini', authState: 'detected', authMode: 'cli' })).toBe('Connect');
+    expect(providerSettingsAuthTitle({ id: 'openai', installed: false, authState: 'missing_cli', authMode: 'cli' })).toBe('Provider retired');
+    expect(providerSettingsAuthDescription({ id: 'gemini', installed: false, authState: 'missing_cli', authMode: 'cli', message: undefined })).toContain('Gemini CLI has been retired');
+    expect(providerSettingsAuthTitle({ id: 'gemini', installed: true, authState: 'detected', authMode: 'cli' })).toBe('Provider retired');
+    expect(providerSettingsPillLabel({ id: 'gemini', installed: true, authState: 'detected', authMode: 'cli' })).toBe('Retired');
+    expect(providerSettingsConnectLabel({ id: 'gemini', authState: 'detected', authMode: 'cli' })).toBe('Unavailable');
     expect(
       providerSettingsAuthDescription({
         id: 'gemini',
@@ -241,31 +291,76 @@ describe('shared provider helpers', () => {
         authMode: 'cli',
         message: undefined
       })
-    ).toContain('Choose Connect');
-    expect(providerSettingsConnectLabel({ id: 'openai', authState: 'disconnected', authMode: null })).toBe('Connect');
-    expect(providerSettingsConnectLabel({ id: 'openai', authState: 'disconnected', authMode: 'cli' })).toBe('Connect');
-    expect(providerSettingsInstallActionLabel({ id: 'openai', authMode: 'cli' })).toBe('Install Codex CLI');
+    ).toContain('Gemini CLI has been retired');
+    expect(providerSettingsConnectLabel({ id: 'openai', authState: 'disconnected', authMode: null })).toBe('Unavailable');
+    expect(providerSettingsConnectLabel({ id: 'openai', authState: 'disconnected', authMode: 'cli' })).toBe('Unavailable');
+    expect(providerSettingsInstallActionLabel({ id: 'openai', authMode: 'cli' })).toBe('Unavailable');
+    expect(
+      providerSettingsAuthDescription({
+        id: 'qwen',
+        installed: true,
+        authState: 'disconnected',
+        authMode: null,
+        message: undefined
+      })
+    ).toContain('Qwen CLI has been retired');
+    expect(providerSettingsAuthTitle({ id: 'kimi', installed: false, authState: 'missing_cli', authMode: null })).toBe('Provider retired');
+    expect(providerSettingsPillLabel({ id: 'kimi', installed: false, authState: 'missing_cli', authMode: null })).toBe('Retired');
+    expect(providerSettingsConnectLabel({ id: 'kimi', authState: 'missing_cli', authMode: null })).toBe('Unavailable');
+    expect(providerSettingsInstallActionLabel({ id: 'kimi', authMode: null })).toBe('Unavailable');
+    expect(providerSettingsInstallLabel({ id: 'kimi', installed: false, authMode: null }, null)).toBe('Retired');
+    expect(
+      providerSettingsStatusSummary(
+        { id: 'kimi', installed: false, authState: 'missing_cli', authMode: null, models: [] },
+        null
+      )
+    ).toContain('Kimi CLI has been retired');
   });
 
-  it('returns shared settings labels for cloud and local Ollama states', () => {
-    expect(providerSettingsAuthTitle({ id: 'ollama', installed: false, authState: 'connected', authMode: 'api_key' })).toBe('Cloud models are ready');
-    expect(providerSettingsPillLabel({ id: 'ollama', installed: false, authState: 'connected', authMode: 'api_key' })).toBe('Cloud ready');
-    expect(providerSettingsInstallLabel({ id: 'ollama', installed: false, authMode: 'api_key' }, null)).toBe('Cloud only');
+  it('returns shared settings labels for local-only Ollama states', () => {
+    expect(providerSettingsAuthTitle({ id: 'ollama', installed: false, authState: 'connected', authMode: 'api_key' })).toBe('Install local Ollama');
+    expect(providerSettingsPillLabel({ id: 'ollama', installed: false, authState: 'connected', authMode: 'api_key' })).toBe('Not installed');
+    expect(providerSettingsInstallLabel({ id: 'ollama', installed: false, authMode: 'api_key' }, null)).toBe('Local install optional');
     expect(
       providerSettingsStatusSummary(
         { id: 'ollama', installed: false, authState: 'connected', authMode: 'api_key', models: [] },
         null
       )
-    ).toContain('Cloud models are connected');
+    ).toContain('Install Ollama and pull a local model');
+    expect(
+      providerSettingsStatusSummary(
+        {
+          id: 'ollama',
+          installed: true,
+          authState: 'connected',
+          authMode: 'api_key',
+          models: [
+            { id: 'qwen3-cloud' },
+            { id: encodeOllamaLocalModelId('qwen3-local:14b') }
+          ]
+        },
+        null
+      )
+    ).toBe('2 local models available');
     expect(
       providerSettingsOllamaModeSummary(
         { id: 'ollama', installed: false, authState: 'connected', authMode: 'api_key' },
         null
       )
-    ).toContain('Cloud models');
+    ).toContain('Install Ollama');
 
     expect(providerSettingsAuthTitle({ id: 'ollama', installed: true, authState: 'detected', authMode: null })).toBe('Local Ollama is installed');
     expect(providerSettingsPillLabel({ id: 'ollama', installed: true, authState: 'detected', authMode: null })).toBe('Needs start');
+    expect(providerSettingsAuthTitle({ id: 'ollama', installed: true, authState: 'connected', authMode: null })).toBe('Ollama is available');
+    expect(
+      providerSettingsAuthDescription({
+        id: 'ollama',
+        installed: true,
+        authState: 'connected',
+        authMode: null,
+        message: 'Ollama local runtime is ready, but no local models were found. Pull a model first.'
+      })
+    ).toBe('Ollama local runtime is ready, but no local models were found. Pull a model first.');
     expect(
       providerSettingsStatusSummary(
         { id: 'ollama', installed: true, authState: 'detected', authMode: null, models: [] },
@@ -293,26 +388,24 @@ describe('shared provider helpers', () => {
         { id: 'ollama', installed: true, authState: 'connected', authMode: null, models: [] },
         { managedByApp: false, reachable: true, starting: false }
       )
-    ).toBe('Local Ollama is reachable, but no local models were found yet');
+    ).toBe('No local models found. Pull a local model first.');
+    expect(
+      providerSettingsOllamaModeSummary(
+        { id: 'ollama', installed: true, authState: 'connected', authMode: null },
+        { managedByApp: false, reachable: true, starting: false }
+      )
+    ).toBe('Use local models from this PC.');
   });
 
-  it('aligns the main provider defaults with the benchmark-backed starting routes', () => {
-    expect(getProviderMetadata('openai').defaultModelId).toBe('gpt-5.5');
-    expect(getProviderMetadata('gemini').defaultModelId).toBe('auto-gemini-2.5');
-    expect(getProviderMetadata('ollama').defaultModelId).toBe('qwen3-coder');
+  it('aligns supported provider defaults with the current beta routes', () => {
+    expect(getProviderMetadata('ollama').defaultModelId).toBe(OLLAMA_DEFAULT_LOCAL_MODEL_ID);
+    expect(getProviderMetadata('openai_compatible').defaultModelId).toBe('openai-compatible');
   });
 
-  it('centralizes CLI command resolution and auth launch metadata for shared provider setup flows', () => {
-    expect(providerCliCommands('openai')).toEqual(['codex.cmd', 'codex.exe', 'codex']);
-    expect(providerCliCommands('gemini')).toEqual(['gemini.cmd', 'gemini.exe', 'gemini']);
-    expect(providerCliExecutableName('gemini')).toBe('gemini.cmd');
-    expect(providerCliAuthLaunch('openai')).toEqual({
-      title: 'OpenAI Codex Login',
-      args: ['login']
-    });
-    expect(providerCliAuthLaunch('gemini')).toEqual({
-      title: 'Gemini CLI Login',
-      args: []
-    });
+  it('keeps the surfaced provider set to Ollama plus configured OpenAI-compatible APIs', () => {
+    expect(getProviderMetadata('ollama').label).toBe('Ollama');
+    expect(getProviderMetadata('openai_compatible').label).toBe('Custom API');
+    expect(isRetiredProviderId('openai')).toBe(true);
+    expect(isRetiredProviderId('gemini')).toBe(true);
   });
 });

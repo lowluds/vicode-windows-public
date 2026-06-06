@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createProviderModelFromId, sanitizeDiscoveredModels } from './catalog';
+import { OLLAMA_DEFAULT_LOCAL_MODEL_ID, OLLAMA_LIGHTWEIGHT_SMOKE_MODEL_ID } from '../shared/providers';
 
 describe('provider catalog recommendations', () => {
   it('marks quick OpenAI models without guessing the live Codex default', () => {
@@ -18,8 +19,14 @@ describe('provider catalog recommendations', () => {
     expect(createProviderModelFromId('gemini', 'auto-gemini-2.5')?.recommendation).toBe('recommended');
   });
 
-  it('sorts coder-first Ollama models ahead of general local models', () => {
+  it('sorts the 14B Ollama default and 7B quick model ahead of general local models', () => {
     const models = sanitizeDiscoveredModels('ollama', [
+      {
+        id: OLLAMA_LIGHTWEIGHT_SMOKE_MODEL_ID,
+        label: 'Qwen 2.5 Coder 7B',
+        description: 'Smoke model.',
+        supportsVision: false
+      },
       {
         id: 'qwen3',
         label: 'Qwen 3',
@@ -30,6 +37,12 @@ describe('provider catalog recommendations', () => {
         id: 'qwen3-coder',
         label: 'Qwen 3 Coder',
         description: 'Coding Ollama model.',
+        supportsVision: false
+      },
+      {
+        id: OLLAMA_DEFAULT_LOCAL_MODEL_ID,
+        label: 'Qwen 2.5 Coder 14B Q6',
+        description: 'Default local model.',
         supportsVision: false
       },
       {
@@ -46,9 +59,16 @@ describe('provider catalog recommendations', () => {
       }
     ]);
 
-    expect(models.map((model) => model.id)).toEqual(['qwen3-coder', 'deepseek-coder', 'qwen3', 'llama3.1']);
+    expect(models.map((model) => model.id)).toEqual([
+      OLLAMA_DEFAULT_LOCAL_MODEL_ID,
+      OLLAMA_LIGHTWEIGHT_SMOKE_MODEL_ID,
+      'qwen3-coder',
+      'deepseek-coder',
+      'qwen3',
+      'llama3.1'
+    ]);
     expect(models[0].recommendation).toBe('recommended');
-    expect(models[1].recommendation).toBeUndefined();
+    expect(models[1].recommendation).toBe('fast');
   });
 
   it('can preserve provider runtime order for Ollama discovery', () => {
@@ -78,6 +98,11 @@ describe('provider catalog recommendations', () => {
     expect(createProviderModelFromId('ollama', 'deepseek-coder:33b')).toMatchObject({
       id: 'deepseek-coder:33b',
       recommendation: undefined,
+      supportsVision: false
+    });
+    expect(createProviderModelFromId('ollama', OLLAMA_LIGHTWEIGHT_SMOKE_MODEL_ID)).toMatchObject({
+      id: OLLAMA_LIGHTWEIGHT_SMOKE_MODEL_ID,
+      recommendation: 'fast',
       supportsVision: false
     });
   });

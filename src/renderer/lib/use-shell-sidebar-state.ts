@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointer
 import {
   clampSidebarWidth,
   SIDEBAR_COLLAPSED_STORAGE_KEY,
+  SIDEBAR_COLLAPSED_WIDTH,
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_WIDTH_STORAGE_KEY,
   resolveStoredSidebarCollapsed,
   resolveStoredSidebarWidth,
+  resolveSidebarResizePreviewWidth,
   resolveSidebarMaxWidth
 } from './sidebar-layout';
 
@@ -28,8 +30,9 @@ export function useShellSidebarState(input: UseShellSidebarStateInput) {
     return resolveStoredSidebarWidth(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY), window.innerWidth);
   });
   const [sidebarResizing, setSidebarResizing] = useState(false);
-  const sidebarResizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const sidebarResizeStateRef = useRef<{ startX: number; startWidth: number; startedCollapsed: boolean } | null>(null);
   const liveSidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
+  const liveSidebarCollapsedRef = useRef(sidebarCollapsed);
   const sidebarResizeFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -49,6 +52,10 @@ export function useShellSidebarState(input: UseShellSidebarStateInput) {
   useEffect(() => {
     liveSidebarWidthRef.current = sidebarWidth;
   }, [sidebarWidth]);
+
+  useEffect(() => {
+    liveSidebarCollapsedRef.current = sidebarCollapsed;
+  }, [sidebarCollapsed]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -106,9 +113,21 @@ export function useShellSidebarState(input: UseShellSidebarStateInput) {
 
     function finishSidebarResize() {
       const committedWidth = liveSidebarWidthRef.current;
+      const currentResize = sidebarResizeStateRef.current;
       sidebarResizeStateRef.current = null;
       setSidebarResizing(false);
-      setSidebarWidth(committedWidth);
+      if (committedWidth <= SIDEBAR_COLLAPSED_WIDTH) {
+        setSidebarCollapsed(true);
+        const restoredWidth = clampSidebarWidth(
+          currentResize?.startWidth ?? sidebarWidth,
+          window.innerWidth
+        );
+        liveSidebarWidthRef.current = restoredWidth;
+        setSidebarWidth(restoredWidth);
+        return;
+      }
+      setSidebarCollapsed(false);
+      setSidebarWidth(clampSidebarWidth(committedWidth, window.innerWidth));
     }
 
     function handleSidebarResize(event: PointerEvent) {
@@ -117,7 +136,20 @@ export function useShellSidebarState(input: UseShellSidebarStateInput) {
         return;
       }
       const nextWidth = currentResize.startWidth + (event.clientX - currentResize.startX);
-      paintSidebarWidth(clampSidebarWidth(nextWidth, window.innerWidth));
+      const liveWidth = resolveSidebarResizePreviewWidth(
+        nextWidth,
+        currentResize.startedCollapsed,
+        window.innerWidth
+      );
+      const nextCollapsed = liveWidth <= SIDEBAR_COLLAPSED_WIDTH;
+      if (nextCollapsed !== liveSidebarCollapsedRef.current) {
+        liveSidebarCollapsedRef.current = nextCollapsed;
+        setSidebarCollapsed(nextCollapsed);
+      }
+      if (!nextCollapsed) {
+        setSidebarWidth((currentWidth) => (currentWidth === liveWidth ? currentWidth : liveWidth));
+      }
+      paintSidebarWidth(liveWidth);
     }
 
     document.body.classList.add('is-sidebar-resizing');
@@ -138,15 +170,17 @@ export function useShellSidebarState(input: UseShellSidebarStateInput) {
   }
 
   function startSidebarResize(event: ReactPointerEvent<HTMLDivElement>) {
-    if (sidebarCollapsed || typeof window === 'undefined') {
+    if (typeof window === 'undefined') {
       return;
     }
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    liveSidebarWidthRef.current = sidebarWidth;
+    const startWidth = sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : sidebarWidth;
+    liveSidebarWidthRef.current = startWidth;
     sidebarResizeStateRef.current = {
       startX: event.clientX,
-      startWidth: sidebarWidth
+      startWidth,
+      startedCollapsed: sidebarCollapsed
     };
     setSidebarResizing(true);
   }

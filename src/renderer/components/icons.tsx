@@ -51,6 +51,7 @@ import {
   Sparkles,
   SquareTerminal,
   Trash,
+  Undo2,
   Video,
   X,
   ListChecks,
@@ -119,6 +120,7 @@ export const CopyIcon = iconFactory(Copy, 16);
 export const RefreshIcon = iconFactory(LoaderCircle, 16);
 export const ArchiveIcon = iconFactory(Archive, 16);
 export const TrashIcon = iconFactory(Trash, 16);
+export const UndoIcon = iconFactory(Undo2, 16);
 export const SaveIcon = iconFactory(Save, 16);
 export const CloseIcon = iconFactory(X, 16);
 export const TaskIcon = iconFactory(ListChecks, 16);

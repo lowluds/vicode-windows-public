@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { curatedSkillCatalog, officialSkillPack } from './curatedCatalog';
+import { curatedSkillCatalog, officialSkillPack, providerReferenceCatalog } from './curatedCatalog';
 
 describe('curated skill catalog', () => {
   it('uses unique ids and tokens across the catalog', () => {
@@ -30,16 +30,23 @@ describe('curated skill catalog', () => {
     }
   });
 
-  it('keeps install metadata coherent for provider-native and imported skills', () => {
+  it('keeps visible install metadata coherent for imported skills', () => {
     for (const entry of curatedSkillCatalog) {
-      if (entry.installKind === 'provider_native') {
-        expect(entry.providerId).toBeTruthy();
-        expect(entry.providerTargets).toHaveLength(1);
-      } else {
-        expect(entry.owner).toBeTruthy();
-        expect(entry.repo).toBeTruthy();
-        expect(entry.path).toBeTruthy();
-      }
+      expect(entry.installKind).toBe('github_folder');
+      expect(entry.owner).toBeTruthy();
+      expect(entry.repo).toBeTruthy();
+      expect(entry.path).toBeTruthy();
+    }
+  });
+
+  it('keeps provider-managed references separate from installable Vicode skills', () => {
+    expect(providerReferenceCatalog.length).toBeGreaterThan(0);
+    for (const entry of providerReferenceCatalog) {
+      expect(entry.installKind).toBe('provider_reference');
+      expect(curatedSkillCatalog.some((candidate) => candidate.id === entry.id)).toBe(false);
+      expect(entry.browseUrl).toMatch(/^https:\/\//);
+      expect(entry.providerId).toBeTruthy();
+      expect(entry).not.toHaveProperty('installTarget');
     }
   });
 });

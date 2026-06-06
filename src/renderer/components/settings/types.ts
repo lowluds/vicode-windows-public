@@ -2,10 +2,13 @@ import type { Dispatch, SetStateAction } from 'react';
 import type {
   AppMeta,
   AppUpdateState,
+  CustomProviderSettings,
+  CustomProviderSettingsSaveInput,
+  LibrarySourcesSnapshot,
   OllamaPullProgress,
-  PersonalizationSettings,
   Preferences,
   Project,
+  ProjectKnowledgeIndexStatus,
   ProjectRuntimeCommandPolicy,
   ProjectRuntimeNetworkPolicy,
   ProviderDescriptor,
@@ -13,18 +16,22 @@ import type {
   SettingsSection,
   ThreadSummary
 } from '../../../shared/domain';
-import type { OllamaRuntimeSnapshot, StorageDiagnostics, WorkspaceBootstrapStatus } from '../../../shared/ipc';
+import type { OllamaRuntimeSnapshot, StorageDiagnostics } from '../../../shared/ipc';
 
 export interface SettingsViewProps {
   section: SettingsSection;
   setSection: (section: SettingsSection) => void;
   onBack: () => void;
   providers: ProviderDescriptor[];
+  customProviders: CustomProviderSettings[];
   preferences: Preferences | null;
+  librarySources: LibrarySourcesSnapshot | null;
+  projectKnowledgeIndexStatus: ProjectKnowledgeIndexStatus | null;
+  refreshProjectKnowledgeIndex: () => Promise<void>;
+  openProjectKnowledgeSuggestedIndexDraft: () => Promise<void>;
   savePreferences: (input: Partial<Preferences>) => Promise<void>;
-  personalization: PersonalizationSettings;
-  savePersonalization: (input: Partial<PersonalizationSettings>) => Promise<void>;
-  resetPersonalization: () => Promise<void>;
+  refreshLibrarySources: () => Promise<void>;
+  rescanSkillLibrary: () => Promise<void>;
   apiKeys: Record<ProviderId, string>;
   setApiKeys: Dispatch<SetStateAction<Record<ProviderId, string>>>;
   connectProvider: (providerId: ProviderId, mode?: 'cli' | 'api_key') => Promise<void>;
@@ -32,6 +39,8 @@ export interface SettingsViewProps {
   beginProviderInstall: (providerId: ProviderId) => void;
   clearProviderAuth: (providerId: ProviderId) => Promise<void>;
   refreshProvider: (providerId: ProviderId) => Promise<void>;
+  saveCustomProvider: (input: CustomProviderSettingsSaveInput) => Promise<CustomProviderSettings>;
+  deleteCustomProvider: (providerId: string) => Promise<void>;
   pullOllamaModel: (model: string) => Promise<void>;
   ollamaPullProgress: OllamaPullProgress | null;
   ollamaRuntimeStatus: OllamaRuntimeSnapshot | null;
@@ -39,6 +48,7 @@ export interface SettingsViewProps {
   deleteOllamaModel: (model: string) => Promise<void>;
   saveProviderApiKey: (providerId: ProviderId) => Promise<void>;
   exportDiagnostics: () => Promise<void>;
+  exportActiveThreadReport: () => Promise<void>;
   clearAllProviderAuth: () => Promise<void>;
   appMeta: AppMeta | null;
   appUpdateState: AppUpdateState | null;
@@ -57,12 +67,7 @@ export interface SettingsViewProps {
     projectId: string,
     runtimeNetworkPolicy: ProjectRuntimeNetworkPolicy
   ) => Promise<void>;
-  workspaceBootstrapStatus: WorkspaceBootstrapStatus | null;
-  openWorkspaceBootstrap: () => Promise<void>;
   activeThreadTitle: string | null;
-  captureDailyNoteFromThread: () => Promise<void>;
-  promoteThreadToMemory: () => Promise<void>;
-  suggestUserPreferenceFromThread: () => Promise<void>;
   archivedThreads: ThreadSummary[];
   projects: Project[];
   restoreArchivedThread: (threadId: string) => Promise<void>;

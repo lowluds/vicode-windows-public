@@ -2,7 +2,6 @@ import { ActionButton, PrimaryButton, SelectField, StatusPill, TextInput } from 
 import { deriveUpdateInstallActionLabel } from '../../lib/app-update';
 import { normalizeHexColor } from '../../lib/theme';
 import type { SettingsViewProps } from './types';
-import type { WorkspaceContractFileStatus } from '../../../shared/ipc';
 import {
   accentModeOptions,
   appearanceModeOptions,
@@ -15,7 +14,7 @@ import {
   SettingsSectionHeader
 } from './shared';
 
-const GITHUB_BUG_REPORT_URL = 'https://github.com/lowluds/vicode-windows/issues/new?template=bug-report.yml';
+const GITHUB_BUG_REPORT_URL = 'https://github.com/lowluds/vicode-windows-public/issues/new';
 
 function formatUpdateTime(value: string | null) {
   if (!value) {
@@ -61,79 +60,14 @@ function updateStatusLabel(state: SettingsViewProps['appUpdateState']) {
   }
 }
 
-const fallbackContractFiles: WorkspaceContractFileStatus[] = [
-  {
-    kind: 'agents',
-    label: 'Operating guide',
-    fileName: 'AGENTS.md',
-    relativePath: 'AGENTS.md',
-    purpose: 'Stable repo rules and working standards.',
-    exists: false,
-    required: true,
-    loadMode: 'direct_prompt'
-  },
-  {
-    kind: 'soul',
-    label: 'Agent identity',
-    fileName: 'SOUL.md',
-    relativePath: 'SOUL.md',
-    purpose: 'Optional workspace tone and collaborator posture.',
-    exists: false,
-    required: false,
-    loadMode: 'direct_prompt'
-  },
-  {
-    kind: 'user',
-    label: 'User preferences',
-    fileName: 'USER.md',
-    relativePath: 'USER.md',
-    purpose: 'Durable communication and approval preferences.',
-    exists: false,
-    required: false,
-    loadMode: 'direct_prompt'
-  },
-  {
-    kind: 'memory',
-    label: 'Long-term memory',
-    fileName: 'MEMORY.md',
-    relativePath: 'MEMORY.md',
-    purpose: 'Curated facts and decisions that survive threads.',
-    exists: false,
-    required: false,
-    loadMode: 'memory_retrieval'
-  },
-  {
-    kind: 'daily_note',
-    label: 'Recent notes',
-    fileName: 'memory/YYYY-MM-DD.md',
-    relativePath: 'memory/YYYY-MM-DD.md',
-    purpose: 'Rolling workspace notes promoted through review.',
-    exists: false,
-    required: false,
-    loadMode: 'memory_retrieval'
-  }
-];
-
-function getWorkspaceContractFiles(status: SettingsViewProps['workspaceBootstrapStatus']) {
-  if (status?.contractFiles?.length) {
-    return status.contractFiles;
-  }
-
-  const existing = new Set(status?.existingFiles ?? []);
-  return fallbackContractFiles.map((file) => ({
-    ...file,
-    exists: existing.has(file.relativePath)
-  }));
-}
-
 function workspaceProfileTone(settings: SettingsViewProps) {
   if (!settings.selectedProject) {
     return 'detected';
   }
-  if (!settings.selectedProject.trusted || settings.workspaceBootstrapStatus?.needsBootstrap) {
+  if (!settings.selectedProject.trusted) {
     return 'checking';
   }
-  return settings.workspaceBootstrapStatus?.eligible ? 'connected' : 'detected';
+  return settings.selectedProject.folderPath ? 'connected' : 'detected';
 }
 
 function workspaceProfileLabel(settings: SettingsViewProps) {
@@ -143,66 +77,36 @@ function workspaceProfileLabel(settings: SettingsViewProps) {
   if (!settings.selectedProject.trusted) {
     return 'Not trusted';
   }
-  if (!settings.workspaceBootstrapStatus?.eligible) {
+  if (!settings.selectedProject.folderPath) {
     return 'Unavailable';
   }
-  return settings.workspaceBootstrapStatus.needsBootstrap ? 'Setup needed' : 'Active';
-}
-
-function fileStatusTone(file: WorkspaceContractFileStatus) {
-  if (file.exists) {
-    return 'connected';
-  }
-  return file.required ? 'checking' : 'detected';
-}
-
-function fileStatusLabel(file: WorkspaceContractFileStatus) {
-  if (file.exists) {
-    return 'Present';
-  }
-  return file.required ? 'Needed' : 'Optional';
-}
-
-function formatLoadMode(file: WorkspaceContractFileStatus) {
-  switch (file.loadMode) {
-    case 'direct_prompt':
-      return 'Prompt';
-    case 'memory_retrieval':
-      return 'Recall';
-    default:
-      return 'Draft only';
-  }
+  return 'App managed';
 }
 
 function workspaceSetupDescription(settings: SettingsViewProps) {
   if (!settings.selectedProject) {
-    return 'Select a project before setting up workspace files.';
+    return 'Open a project to let Vicode assemble context for coding runs.';
   }
   if (!settings.selectedProject.trusted) {
     return 'Trust this workspace before providers can use project files.';
   }
-  if (!settings.workspaceBootstrapStatus?.eligible) {
-    return settings.workspaceBootstrapStatus?.reason ?? 'Workspace setup is unavailable for this project.';
+  if (!settings.selectedProject.folderPath) {
+    return 'Project context requires a real project folder.';
   }
-  if (settings.workspaceBootstrapStatus.needsBootstrap) {
-    const missing = settings.workspaceBootstrapStatus.missingFiles.join(', ');
-    return missing ? `Missing: ${missing}` : 'Required workspace files are not ready yet.';
-  }
-  return 'Project files and memory are ready for trusted runs.';
+  return 'Vicode detects project context automatically and keeps recall, notes, and durable context app-managed.';
 }
 
-function formatActiveThreadReviewDescription(settings: SettingsViewProps) {
-  if (!settings.selectedProject?.trusted) {
-    return 'Trust the current workspace before saving notes from a thread.';
+function formatProjectContextName(settings: SettingsViewProps) {
+  const project = settings.selectedProject;
+  if (!project) {
+    return 'No project selected';
   }
-  if (!settings.activeThreadTitle) {
-    return 'Open a thread to create a review draft before saving.';
+
+  const folderName = project.folderPath?.split(/[\\/]/u).filter(Boolean).pop() ?? null;
+  if (folderName && folderName !== project.name) {
+    return `${project.name} - ${folderName}`;
   }
-  const title =
-    settings.activeThreadTitle.length > 72
-      ? `${settings.activeThreadTitle.slice(0, 69).trim()}...`
-      : settings.activeThreadTitle;
-  return `Creates a review draft from "${title}" before saving.`;
+  return project.name;
 }
 
 interface GeneralSettingsSectionProps {
@@ -216,9 +120,8 @@ export function GeneralSettingsSection({
   defaultAccentColor,
   currentAccentColor
 }: GeneralSettingsSectionProps) {
-  const workspaceContractFiles = getWorkspaceContractFiles(settings.workspaceBootstrapStatus);
-  const canCreateThreadMemoryReviews = Boolean(settings.activeThreadTitle && settings.selectedProject?.trusted);
   const updateInstallLabel = deriveUpdateInstallActionLabel();
+  const updateInstallDisabled = settings.appUpdateState?.status !== 'downloaded';
   const updateDescription = settings.appUpdateState?.status === 'downloaded'
     ? settings.appUpdateState.availableVersion
       ? `Version ${settings.appUpdateState.availableVersion} is ready. Restarting now installs it immediately and stops the current run if one is active.`
@@ -229,7 +132,7 @@ export function GeneralSettingsSection({
     <div className={`${SETTINGS_SECTION_CLASS} settings-general-section`}>
       <SettingsSectionHeader
         title="App"
-        description="Keep routine behavior, workspace setup, and desktop updates predictable."
+        description="Keep routine behavior, project context, and desktop updates predictable."
       />
 
       <SettingsPanel title="Behavior" description="Controls that change how the app responds while you work.">
@@ -323,81 +226,24 @@ export function GeneralSettingsSection({
       </SettingsPanel>
 
       <SettingsPanel
-        title="Workspace"
-        description="What Vicode can use when trusted runs work in this project."
+        title="Project context"
+        description="Vicode handles workspace instructions and memory behind the scenes."
         className="settings-workspace-agent-panel"
       >
         <SettingsRow
-          label="Project setup"
+          label="Context"
           description={workspaceSetupDescription(settings)}
           className="settings-workspace-project-row"
         >
-          <div className="settings-row-actions">
-            <StatusPill tone={workspaceProfileTone(settings)}>{workspaceProfileLabel(settings)}</StatusPill>
-            <PrimaryButton
-              size="compact"
-              onClick={() => void settings.openWorkspaceBootstrap()}
-              disabled={!settings.workspaceBootstrapStatus?.eligible}
-            >
-              {settings.workspaceBootstrapStatus?.needsBootstrap ? 'Set up' : 'Review files'}
-            </PrimaryButton>
-          </div>
+          <StatusPill tone={workspaceProfileTone(settings)}>{workspaceProfileLabel(settings)}</StatusPill>
         </SettingsRow>
         <div className="settings-workspace-project-path">
-          {settings.selectedProject
-            ? `${settings.selectedProject.name}${settings.selectedProject.folderPath ? ` - ${settings.selectedProject.folderPath}` : ''}`
-            : 'No project selected'}
-        </div>
-        <div className="settings-workspace-file-list" aria-label="Workspace files">
-          {workspaceContractFiles.map((file) => (
-            <div key={file.kind} className="settings-workspace-file-row">
-              <div className="settings-workspace-agent-file-copy">
-                <strong>{file.fileName}</strong>
-                <span>{file.label}</span>
-              </div>
-              <div className="settings-workspace-agent-file-meta">
-                <StatusPill tone={fileStatusTone(file)}>{fileStatusLabel(file)}</StatusPill>
-                <span>{formatLoadMode(file)}</span>
-              </div>
-            </div>
-          ))}
+          {formatProjectContextName(settings)}
         </div>
         <div className="settings-stat-grid settings-workspace-agent-context">
-          <span>Context files: {settings.personalization.useWorkspaceInstructions ? 'on' : 'off'}</span>
-          <span>Memory recall: when relevant</span>
+          <span>Project files: detected automatically</span>
+          <span>Memory: handled by Vicode</span>
         </div>
-        <SettingsRow
-          label="Save from this thread"
-          description={formatActiveThreadReviewDescription(settings)}
-          className="settings-memory-save-row"
-        >
-          <div className="settings-row-actions">
-            <ActionButton
-              size="compact"
-              tone="quiet"
-              onClick={() => void settings.captureDailyNoteFromThread()}
-              disabled={!canCreateThreadMemoryReviews}
-            >
-              Daily note
-            </ActionButton>
-            <ActionButton
-              size="compact"
-              tone="quiet"
-              onClick={() => void settings.promoteThreadToMemory()}
-              disabled={!canCreateThreadMemoryReviews}
-            >
-              Project fact
-            </ActionButton>
-            <ActionButton
-              size="compact"
-              tone="quiet"
-              onClick={() => void settings.suggestUserPreferenceFromThread()}
-              disabled={!canCreateThreadMemoryReviews}
-            >
-              User preference
-            </ActionButton>
-          </div>
-        </SettingsRow>
       </SettingsPanel>
 
       <SettingsPanel
@@ -435,7 +281,7 @@ export function GeneralSettingsSection({
               <PrimaryButton
                 size="compact"
                 onClick={() => void settings.restartToUpdate()}
-                disabled={updateInstallQueued}
+                disabled={updateInstallDisabled}
               >
                 {updateInstallLabel}
               </PrimaryButton>
@@ -456,7 +302,7 @@ export function GeneralSettingsSection({
       >
         <SettingsRow
           label="Bug reports"
-          description="Open the public GitHub Issues form to report a bug or track known fixes."
+          description="Open the public GitHub Issues form. Attach a thread report when the issue came from a specific run."
         >
           <ActionButton
             size="compact"
@@ -464,6 +310,23 @@ export function GeneralSettingsSection({
             onClick={() => void window.vicode.app.openExternal(GITHUB_BUG_REPORT_URL)}
           >
             Open GitHub Issues
+          </ActionButton>
+        </SettingsRow>
+        <SettingsRow
+          label="Thread report"
+          description={
+            settings.activeThreadTitle
+              ? 'Create a redacted local report for the current thread.'
+              : 'Open a thread to create a redacted report for an issue.'
+          }
+        >
+          <ActionButton
+            size="compact"
+            tone="quiet"
+            onClick={() => void settings.exportActiveThreadReport()}
+            disabled={!settings.activeThreadTitle}
+          >
+            Create report
           </ActionButton>
         </SettingsRow>
       </SettingsPanel>

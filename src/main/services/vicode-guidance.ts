@@ -38,14 +38,49 @@ const CASUAL_PROMPT_PATTERN =
   /^(?:(?:hi|hello|hey|yo|sup)[,\s]*)?(?:hi|hello|hey|yo|sup|how(?:'s|s| is) it going|how are you|what'?s up|thanks|thank you|ok|okay|cool|nice|great|got it|sounds good|all good)[\s.?!]*$/iu;
 
 const TASK_INTENT_PATTERN =
-  /\b(?:add|analy[sz]e|audit|build|change|check|configure|create|debug|deploy|design|diagnose|document|draft|edit|fix|implement|improve|inspect|install|integrate|investigate|migrate|package|patch|plan|polish|refactor|release|repair|review|run|setup|ship|test|troubleshoot|update|verify|write)\b|(?:^|[\s`"'(])(?:src|docs|test|scripts|resources|package\.json|tsconfig|vite|electron|react|typescript|css|tsx|api|database|provider|adapter|renderer|main process|preload)(?:[\s`"',).:]|$)|(?:[A-Za-z]:\\|\/|\\)[^\s]+/iu;
+  /\b(?:add|analy[sz]e|audit|build|change|check|configure|create|debug|deploy|design|diagnose|document|draft|edit|fix|implement|improve|inspect|install|integrate|investigate|migrate|package|patch|plan|polish|refactor|release|repair|review|run|setup|ship|test|troubleshoot|update|verify|write)\b|(?:^|[\s`"'(])(?:src|docs|test|scripts|resources|package\.json|tsconfig|vite|electron|react|typescript|css|tsx|api|database|provider|adapter|renderer|main process|preload|ollama|project knowledge|knowledge base|retrieval|rag|agents\.md|memory\.md|json schema|structured outputs)(?:[\s`"',).:]|$)|(?:[A-Za-z]:\\|\/|\\)[^\s]+/iu;
 
 const OBSIDIAN_LINK_PATTERN = /\[\[([^\]]+)\]\]/giu;
 
 const GUIDANCE_ROUTES: GuidanceRoute[] = [
   {
+    pattern: /\b(?:ollama|local\s+(?:model|models|llm|llms)|model freshness|context window|embedding|embeddings)\b/iu,
+    files: [
+      'wiki/Ollama And Local Models.md',
+      'wiki/Retrieval For Coding Projects.md',
+      'wiki/Structured Outputs And Evals.md'
+    ]
+  },
+  {
+    pattern: /\b(?:agents|agents\.md|memory\.md|project knowledge|knowledge base|retrieval|rag|wiki|memory|context|guidance|guardrail|instructions|skill|skills)\b/iu,
+    files: [
+      'wiki/Retrieval For Coding Projects.md',
+      'wiki/Source Quality And Grounding.md',
+      'wiki/Markdown KB Retrieval Design.md',
+      'wiki/Search And Retrieval.md',
+      'wiki/Capability Routing Standard.md'
+    ]
+  },
+  {
+    pattern: /\b(?:tool|tools|permission|permissions|trust|sandbox|prompt injection|secret|secrets|mcp)\b/iu,
+    files: [
+      'wiki/Tool Use And Trust.md',
+      'wiki/Security And Secrets.md',
+      'wiki/Agent Runtime Patterns.md'
+    ]
+  },
+  {
+    pattern: /\b(?:structured output|structured outputs|json schema|schema|schemas|eval|evals|evaluate|benchmark|deterministic|validation|temperature)\b/iu,
+    files: [
+      'wiki/Structured Outputs And Evals.md',
+      'wiki/Source Quality And Grounding.md',
+      'wiki/Verification Standards.md'
+    ]
+  },
+  {
     pattern: /\b(?:add|build|change|debug|fix|implement|inspect|patch|refactor|repair|run|test|troubleshoot|update|verify)\b/iu,
     files: [
+      'wiki/Coding Agent Workflows.md',
       'wiki/Source-Backed Workflow.md',
       'wiki/Execution Discipline.md',
       'wiki/Verification Standards.md'
@@ -78,14 +113,6 @@ const GUIDANCE_ROUTES: GuidanceRoute[] = [
     files: [
       'wiki/Security And Secrets.md',
       'wiki/Verification Standards.md'
-    ]
-  },
-  {
-    pattern: /\b(wiki|knowledge|retrieval|memory|context|guidance|guardrail|agents|instructions|skill|skills)\b/iu,
-    files: [
-      'wiki/Markdown KB Retrieval Design.md',
-      'wiki/Search And Retrieval.md',
-      'wiki/Capability Routing Standard.md'
     ]
   },
   {

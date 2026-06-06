@@ -11,12 +11,23 @@ export function deriveCurrentRunId(thread: ThreadDetail | null, activeRunId: str
     return activeRunId;
   }
 
-  if (!thread || !isActiveThreadStatus(thread.status)) {
+  if (!thread) {
     return null;
   }
 
   const latestRunId = [...thread.rawOutput].reverse().find((event) => event.runId)?.runId ?? null;
   if (!latestRunId) {
+    return null;
+  }
+
+  if (thread.status === 'failed' || thread.status === 'aborted') {
+    const terminalEvent = [...thread.rawOutput].reverse().find(
+      (event) => event.runId === latestRunId && (event.eventType === 'failed' || event.eventType === 'aborted')
+    );
+    return terminalEvent ? latestRunId : null;
+  }
+
+  if (!isActiveThreadStatus(thread.status)) {
     return null;
   }
 

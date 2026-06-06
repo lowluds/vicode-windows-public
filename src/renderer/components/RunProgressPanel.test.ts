@@ -24,9 +24,9 @@ describe('RunProgressPanel', () => {
         profile: 'heartbeat',
         phase: 'active',
         title: 'Autonomy: Verify onboarding copy',
-        note: 'This heartbeat run is using delegated context only: AGENTS.md and codex.md when present. SOUL.md, USER.md, auto memory, and inline thread history stay with the main thread.',
-        includedContext: ['AGENTS.md', 'codex.md'],
-        excludedContext: ['SOUL.md', 'USER.md', 'auto memory', 'inline thread history']
+        note: 'This heartbeat run is using a thin delegated context. Full project memory and main-thread history stay with the composer run.',
+        includedContext: ['Project instructions', 'Provider compatibility notes'],
+        excludedContext: ['Full project memory', 'Main-thread history']
       },
       contextPressure: null,
       checkpointReminder: null,
@@ -38,5 +38,7 @@ describe('RunProgressPanel', () => {
     expect(html).toContain('Background task active');
     expect(html).toContain('Delegated context');
     expect(html).toContain('1 of 3 tasks completed');
+    expect(html).not.toContain('ui-surface-card');
+    expect(html).not.toContain('shadow-[');
   });
 });

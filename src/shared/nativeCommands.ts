@@ -1,5 +1,4 @@
 export type NativeComposerCommandId =
-  | 'autonomous-builds'
   | 'build-app'
   | 'enhance'
   | 'plan'
@@ -21,18 +20,10 @@ export interface NativeComposerCommand {
 }
 
 const nativeComposerCommandAliases: Partial<Record<NativeComposerCommandId, string[]>> = {
-  'autonomous-builds': ['build-plan', 'auto-build'],
   plan: ['plan-mode']
 };
 
 export const nativeComposerCommands: NativeComposerCommand[] = [
-  {
-    id: 'autonomous-builds',
-    token: 'autonomous-builds',
-    title: 'Autonomous Builds',
-    description: 'Start or hand off an autonomous build plan for this thread.',
-    category: 'workflow'
-  },
   {
     id: 'build-app',
     token: 'build-app',
@@ -124,10 +115,6 @@ export function resolveNativeComposerCommand(token: string) {
 
   if (normalized === 'plan-mode') {
     return nativeCommandByToken.get('plan') ?? null;
-  }
-
-  if (normalized === 'build-plan' || normalized === 'auto-build') {
-    return nativeCommandByToken.get('autonomous-builds') ?? null;
   }
 
   return nativeCommandByToken.get(normalized) ?? null;

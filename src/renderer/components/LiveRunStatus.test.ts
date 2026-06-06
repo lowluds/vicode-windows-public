@@ -22,7 +22,7 @@ function createActivity(overrides: Partial<RunActivityViewModel> = {}): RunActiv
 }
 
 describe('deriveLiveRunStatusSnapshot', () => {
-  it('surfaces the latest action label and latest reasoning text separately', () => {
+  it('surfaces the latest action label without promoting reasoning text', () => {
     const snapshot = deriveLiveRunStatusSnapshot(
       createActivity({
         activeHeading: 'Thinking',
@@ -48,7 +48,6 @@ describe('deriveLiveRunStatusSnapshot', () => {
     );
 
     expect(snapshot.actionLabel).toBe('Searching the web');
-    expect(snapshot.reasoningText).toBe('Comparing open-source finetuning options before replying.');
   });
 
   it('prefers the live terminal command summary when a command is still running', () => {
@@ -72,7 +71,6 @@ describe('deriveLiveRunStatusSnapshot', () => {
     );
 
     expect(snapshot.actionLabel).toBe('Running command');
-    expect(snapshot.reasoningText).toBeNull();
   });
 
   it('falls back to the active heading when no detailed line is available', () => {
@@ -84,7 +82,26 @@ describe('deriveLiveRunStatusSnapshot', () => {
     );
 
     expect(snapshot.actionLabel).toBe('Working');
-    expect(snapshot.reasoningText).toBeNull();
+  });
+
+  it('does not promote automatic context compaction to the composer live status', () => {
+    const snapshot = deriveLiveRunStatusSnapshot(
+      createActivity({
+        activeHeading: 'Thinking',
+        thinkingLines: [
+          {
+            id: 'context-compaction',
+            kind: 'context_compaction',
+            label: 'Context automatically compacted',
+            text: 'Older thread context was summarized.',
+            url: null,
+            path: null
+          }
+        ]
+      })
+    );
+
+    expect(snapshot.actionLabel).toBe('Thinking');
   });
 
   it('keeps the generic Thinking shimmer visible when no detailed reasoning text exists yet', () => {
@@ -97,12 +114,11 @@ describe('deriveLiveRunStatusSnapshot', () => {
     const html = renderToStaticMarkup(React.createElement(LiveRunStatus, { activity }));
 
     expect(snapshot.actionLabel).toBe('Thinking');
-    expect(snapshot.reasoningText).toBeNull();
     expect(shouldShowLiveRunAction(snapshot)).toBe(true);
     expect(html).toContain('Thinking');
   });
 
-  it('summarizes detailed reasoning as a generic Thinking status above the composer', () => {
+  it('keeps detailed reasoning out of the composer live status because the transcript owns it', () => {
     const activity = createActivity({
       thinkingLines: [
         {
@@ -120,13 +136,12 @@ describe('deriveLiveRunStatusSnapshot', () => {
     const html = renderToStaticMarkup(React.createElement(LiveRunStatus, { activity }));
 
     expect(snapshot.actionLabel).toBe('Thinking');
-    expect(snapshot.reasoningText).toBe('Inspecting the existing page before editing.');
     expect(shouldShowLiveRunAction(snapshot)).toBe(true);
     expect(html).toContain('Thinking');
     expect(html).not.toContain('Inspecting the existing page before editing.');
   });
 
-  it('keeps the concrete action visible without rendering reasoning details above the composer', () => {
+  it('shows concrete action status without duplicating live reasoning text', () => {
     const activity = createActivity({
       thinkingLines: [
         {
@@ -152,7 +167,6 @@ describe('deriveLiveRunStatusSnapshot', () => {
     const html = renderToStaticMarkup(React.createElement(LiveRunStatus, { activity }));
 
     expect(snapshot.actionLabel).toBe('Searching the web');
-    expect(snapshot.reasoningText).toBe('Comparing sources before drafting the response.');
     expect(shouldShowLiveRunAction(snapshot)).toBe(true);
     expect(html).toContain('Searching the web');
     expect(html).not.toContain('Comparing sources before drafting the response.');

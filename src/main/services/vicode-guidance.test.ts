@@ -131,6 +131,31 @@ describe('VicodeGuidanceService', () => {
     ).toBe('[[Search And Retrieval]]');
   });
 
+  it('selects first-party Ollama and Project Knowledge seed pages from the packaged bundle', () => {
+    const guidanceRoot = join(process.cwd(), 'resources', 'vicode-guidance');
+    const service = new VicodeGuidanceService({ guidanceRoot });
+
+    const result = service.resolveForPrompt({
+      prompt: 'Help an Ollama local model use AGENTS.md, Project Knowledge retrieval, embeddings, and JSON schema evals.'
+    });
+    const titles = result?.documents.map((document) => document.title) ?? [];
+
+    expect(titles).toEqual(
+      expect.arrayContaining([
+        'Ollama And Local Models',
+        'Retrieval For Coding Projects',
+        'Structured Outputs And Evals',
+        'Source Quality And Grounding'
+      ])
+    );
+    expect(result?.documents.find((document) => document.title === 'Ollama And Local Models')?.content).toContain(
+      '/api/embed'
+    );
+    expect(
+      result?.documents.find((document) => document.title === 'Retrieval For Coding Projects')?.content
+    ).toContain('AGENTS.md');
+  });
+
   it('returns null when no curated guidance files are available', () => {
     const guidanceRoot = createGuidanceRoot({});
     const service = new VicodeGuidanceService({ guidanceRoot });

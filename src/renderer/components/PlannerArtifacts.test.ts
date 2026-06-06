@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { PlannerPlan, PlannerQuestionSet } from '../../shared/domain';
+import type { PlannerPlan, PlannerQuestionSet, RunProgressState } from '../../shared/domain';
 import { PlannerPlanCard, PlannerPlanStatusRow, PlannerQuestionCard } from './PlannerArtifacts';
 
 function createPlan(title: string, overrides: Partial<PlannerPlan> = {}): PlannerPlan {
@@ -49,6 +49,23 @@ function createQuestionSet(overrides: Partial<PlannerQuestionSet> = {}): Planner
   };
 }
 
+function createRunProgress(items: RunProgressState['items']): RunProgressState {
+  return {
+    runId: 'run-1',
+    threadId: 'thread-1',
+    title: 'Approved plan',
+    items,
+    updatedAt: '2026-03-30T10:01:00.000Z',
+    diffStats: null,
+    reviewAvailable: false,
+    changeArtifact: null,
+    delegation: null,
+    contextPressure: null,
+    checkpointReminder: null,
+    queueSummary: null
+  };
+}
+
 describe('PlannerArtifacts', () => {
   it('sanitizes leaked prompt text in the visible plan title', () => {
     const plan = createPlan('**Title:** Silent Build Queue Autonomy Target outcome: Remove stale review noise');
@@ -73,8 +90,8 @@ describe('PlannerArtifacts', () => {
     expect(statusHtml).not.toContain('Target outcome: Remove stale review noise');
   });
 
-  it('supports build-control specific approval copy', () => {
-    const plan = createPlan('Autonomous Vitest 3 Repair');
+  it('supports custom approval copy for focused planner handoffs', () => {
+    const plan = createPlan('Focused Vitest 3 Repair');
 
     const cardHtml = renderToStaticMarkup(
       React.createElement(PlannerPlanCard, {
@@ -83,8 +100,8 @@ describe('PlannerArtifacts', () => {
         renderedMarkdown: '',
         approving: false,
         submitting: false,
-        approveLabel: 'Accept and start Build Control',
-        approvedCardText: 'This plan was approved and handed off into Build Control.',
+        approveLabel: 'Accept plan',
+        approvedCardText: 'This plan was approved and queued for the next step.',
         onApprove: async () => undefined,
         onRequestChanges: async () => undefined,
         onCancelPlan: async () => undefined
@@ -93,12 +110,12 @@ describe('PlannerArtifacts', () => {
     const statusHtml = renderToStaticMarkup(
       React.createElement(PlannerPlanStatusRow, {
         plan: { ...plan, status: 'approved' },
-        approvedStatusText: 'Approved. Build Control handoff started from this setup thread.'
+        approvedStatusText: 'Approved. Next step queued from this setup thread.'
       })
     );
 
-    expect(cardHtml).toContain('Accept and start Build Control');
-    expect(statusHtml).toContain('Approved. Build Control handoff started from this setup thread.');
+    expect(cardHtml).toContain('Accept plan');
+    expect(statusHtml).toContain('Approved. Next step queued from this setup thread.');
   });
 
   it('renders a compact task preview instead of the old sectioned artifact layout', () => {
@@ -125,13 +142,52 @@ describe('PlannerArtifacts', () => {
       })
     );
 
-    expect(cardHtml).toContain('0 out of 4 tasks completed');
+    expect(cardHtml).toContain('Execution checklist');
+    expect(cardHtml).toContain('4 planned items');
     expect(cardHtml).toContain('1. Tighten planner card spacing');
     expect(cardHtml).toContain('2. Keep the composer visible on short windows');
     expect(cardHtml).toContain('planner-primary-action');
     expect(cardHtml).toContain('Cancel plan');
+    expect(cardHtml).toContain('The agent will work through each item and run verification before the final response.');
     expect(cardHtml).not.toContain('Key changes');
+    expect(cardHtml).not.toContain('ui-surface-card');
+    expect(cardHtml).not.toContain('ui-status-pill');
+    expect(cardHtml).not.toContain('bg-[image:var(--ui-panel-gradient)]');
     expect(cardHtml).toContain('Assumptions: The active window height can be smaller than the full plan');
+  });
+
+  it('shows approved plan steps with live completion state in the status row', () => {
+    const plan = createPlan('Landing Page Execution', {
+      status: 'approved',
+      structuredPlan: {
+        title: 'Landing Page Execution',
+        summary: ['Confirm the approved plan finished'],
+        keyChanges: ['Search the web for a hero image', 'Create index.html', 'Create styles.css'],
+        testPlan: ['Run npm test'],
+        assumptions: []
+      }
+    });
+    const progress = createRunProgress([
+      { id: 'run-1:0', label: 'Search the web for a hero image', status: 'completed', order: 0 },
+      { id: 'run-1:1', label: 'Create index.html', status: 'completed', order: 1 },
+      { id: 'run-1:2', label: 'Create styles.css', status: 'in_progress', order: 2 },
+      { id: 'run-1:3', label: 'Run npm test', status: 'pending', order: 3 },
+      { id: 'run-1:4', label: 'Confirm the approved plan finished', status: 'pending', order: 4 }
+    ]);
+
+    const statusHtml = renderToStaticMarkup(
+      React.createElement(PlannerPlanStatusRow, {
+        plan,
+        runProgress: progress
+      })
+    );
+
+    expect(statusHtml).toContain('2/5 complete');
+    expect(statusHtml).toContain('planner-plan-preview-list');
+    expect(statusHtml).toContain('data-task-status="completed"');
+    expect(statusHtml).toContain('data-task-status="in_progress"');
+    expect(statusHtml).toContain('1. Search the web for a hero image');
+    expect(statusHtml).toContain('3. Create styles.css');
   });
 
   it('renders planner questions as three paths plus a custom fourth lane', () => {

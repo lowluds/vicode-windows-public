@@ -78,6 +78,19 @@ export class ProviderSummaryTextService {
     return normalizeSubagentTerminalSummary(output ?? '', fallback);
   }
 
+  async generateThreadContextCompactionSummary(thread: SummaryThreadRecord, prompt: string) {
+    return await runUtilityTextGeneration(
+      {
+        providerId: thread.providerId,
+        modelId: thread.modelId,
+        prompt,
+        fallback: null,
+        timeoutMs: 8_000
+      },
+      this.createUtilityDependencies()
+    );
+  }
+
   private createUtilityDependencies(): UtilityTextGenerationDependencies {
     return {
       adapters: this.host.adapters,

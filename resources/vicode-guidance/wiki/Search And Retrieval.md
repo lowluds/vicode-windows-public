@@ -4,11 +4,12 @@
 ---
 type: tool
 status: active
-updated: 2026-04-24
+updated: 2026-05-30
 aliases:
   - retrieval order
   - tiered retrieval
   - context budget
+  - wiki context cost
 ---
 
 # Search And Retrieval
@@ -52,6 +53,8 @@ When looking for an answer in this vault:
 The goal is to retrieve the right page, not to search the whole vault every time.
 
 Default retrieval scope is `AGENTS.md`, `README.md`, `wiki/`, and `raw/` source notes. Treat `tmp/` as scratch/reference material and exclude it from normal search unless a maintained page explicitly points there.
+
+When a run needs usage evidence, report the pages used, retrieval tier, estimated wiki tokens, route hit, and context economy through [[Wiki Context Reporting]].
 
 ## Query Discipline
 
@@ -142,3 +145,4 @@ Do not add a heavier retrieval layer until the simpler linked-markdown workflow 
 - [[Source - Documentation Quality And Maintenance]]
 - [[Source - RAG And Knowledge Base Retrieval Patterns]]
 - [[Markdown KB Retrieval Design]]
+- [[Wiki Context Reporting]]

@@ -61,9 +61,66 @@ describe('SkillContextService', () => {
     });
 
     expect(resolved.selectedSkillIds).toEqual(['skill-1', 'skill-2']);
+    expect(resolved.autoSelectedSkillIds).toEqual([]);
     expect(resolved.mentionedSkillIds).toEqual(['skill-1', 'skill-2']);
     expect(resolved.promptSkills.map((skill) => skill.id)).toEqual(['skill-1']);
     expect(resolved.runtimeSkills.map((skill) => skill.id)).toEqual(['skill-2']);
+  });
+
+  it('auto-selects strongly matched enabled prompt skills from descriptions', () => {
+    const reviewer = createSkill({
+      description: 'Performs engineering review when the task is to find bugs, regressions, weak assumptions, or missing validation.'
+    });
+    const uxWriting = createSkill({
+      id: 'skill-2',
+      name: 'UX Writing',
+      description: 'Improves interface copy when the user asks for clearer labels, error messages, empty states, onboarding copy, or product voice.',
+      instructions: 'Rewrite interface copy clearly.',
+      metadata: { slug: 'ux-writing', attachMode: 'prompt', kind: 'skill', category: 'design' }
+    });
+    const deployment = createSkill({
+      id: 'skill-3',
+      name: 'Deployment',
+      description: 'Helps with deployment, release, hosting, and production rollout tasks.',
+      instructions: 'Check deployment safety.',
+      metadata: { slug: 'deployment', attachMode: 'prompt', kind: 'skill', category: 'release' }
+    });
+    const db = {
+      listSkills: vi.fn(() => [reviewer, uxWriting, deployment])
+    };
+    const service = new SkillContextService(db as never);
+
+    const resolved = service.resolve({
+      projectId: 'project-1',
+      providerId: 'openai',
+      prompt: 'Please review this patch for bugs and missing validation.',
+      explicitSkillIds: []
+    });
+
+    expect(resolved.selectedSkillIds).toEqual(['skill-1']);
+    expect(resolved.autoSelectedSkillIds).toEqual(['skill-1']);
+    expect(resolved.promptSkills.map((skill) => skill.name)).toEqual(['Reviewer']);
+  });
+
+  it('avoids auto-selecting weak generic matches', () => {
+    const reviewer = createSkill({
+      description: 'Performs engineering review when the task is to find bugs, regressions, weak assumptions, or missing validation.'
+    });
+    const db = {
+      listSkills: vi.fn(() => [reviewer])
+    };
+    const service = new SkillContextService(db as never);
+
+    const resolved = service.resolve({
+      projectId: 'project-1',
+      providerId: 'openai',
+      prompt: 'Build the next feature.',
+      explicitSkillIds: []
+    });
+
+    expect(resolved.selectedSkillIds).toEqual([]);
+    expect(resolved.autoSelectedSkillIds).toEqual([]);
+    expect(resolved.promptSkills).toEqual([]);
   });
 
   it('formats and resolves provider-native runtime skill resources', () => {

@@ -53,6 +53,17 @@ export async function refreshArchivedThreads(
   host.setArchivedThreads(await host.listArchivedThreads(projectId));
 }
 
+export function selectRestorableProjectThread(
+  threads: readonly Pick<ThreadSummary, 'id'>[],
+  preferredThreadId: string | null | undefined
+) {
+  if (preferredThreadId && threads.some((thread) => thread.id === preferredThreadId)) {
+    return preferredThreadId;
+  }
+
+  return threads[0]?.id ?? null;
+}
+
 export async function openThreadInShell(host: AppShellThreadSelectionHost, threadId: string) {
   try {
     const targetThreadId = host.findParentThreadId(threadId) ?? threadId;

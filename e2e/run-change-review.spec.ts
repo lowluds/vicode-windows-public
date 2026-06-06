@@ -54,8 +54,8 @@ test('completed runs render expandable inline change review cards', async () => 
       });
       const thread = await window.vicode.threads.create({
         projectId: project.id,
-        providerId: 'openai',
-        modelId: 'gpt-5.4',
+        providerId: 'ollama',
+        modelId: 'qwen2.5-coder:14b-instruct-q6_K',
         executionPermission: 'default'
       });
       await window.vicode.settings.save({

@@ -20,26 +20,26 @@ import type {
   CollabRoomTerminalState,
   CollabSharedRun,
   CollabSharedThread,
+  CustomProviderSettings,
+  CustomProviderSettingsSaveInput,
   ExecutionPermission,
   JobDefinition,
+  LibrarySourcesSnapshot,
   McpCatalogSnapshot,
   McpRecommendedSetupInput,
   McpServerSaveInput,
   McpServerView,
-  PersonalizationSettings,
   Preferences,
+  ProjectKnowledgeIndexStatus,
+  ProjectKnowledgeSuggestedIndexDraftFile,
+  ProjectKnowledgeSuggestedIndexDraft,
   ProviderDescriptor,
   ProviderId,
   ReviewItem,
   SkillDetail,
   SkillDefinition,
   SkillInstallResult,
-  SkillSaveInput,
-  VicodeBuildLaneId,
-  VicodeBuildPlanDraft,
-  VicodeBuildSnapshot,
-  VicodeBuildTeamId,
-  VicodeBuildVerificationResult
+  SkillSaveInput
 } from './domain';
 import type {
   CollabBootstrapPayload,
@@ -57,6 +57,9 @@ export interface FeatureDomainApi {
     clearAuth(providerId: ProviderId): Promise<ProviderDescriptor>;
     saveApiKey(providerId: ProviderId, apiKey: string): Promise<ProviderDescriptor>;
     refresh(providerId: ProviderId): Promise<ProviderDescriptor>;
+    listCustom(): Promise<CustomProviderSettings[]>;
+    saveCustom(input: CustomProviderSettingsSaveInput): Promise<CustomProviderSettings>;
+    removeCustom(providerId: string): Promise<void>;
   };
   ollamaRuntime: {
     getStatus(): Promise<OllamaRuntimeSnapshot>;
@@ -71,13 +74,10 @@ export interface FeatureDomainApi {
     detail(skillId: string): Promise<SkillDetail>;
     save(input: SkillSaveInput): Promise<SkillDefinition>;
     toggle(skillId: string, enabled: boolean): Promise<SkillDefinition>;
-    sync(skillId: string, providerId: ProviderId, enabled: boolean): Promise<SkillDefinition>;
     installSuggested(input: {
-      installKind: 'provider_native' | 'github_folder';
-      providerId?: ProviderId | null;
+      installKind: 'github_folder';
       providerTargets?: ProviderId[];
       token: string;
-      installTarget?: string | null;
       owner?: string | null;
       repo?: string | null;
       path?: string | null;
@@ -86,7 +86,17 @@ export interface FeatureDomainApi {
       browseUrl?: string | null;
       category?: 'frontend' | 'backend' | 'engineering' | 'documents' | 'design' | 'testing' | 'automation' | 'mcp' | 'templates' | 'provider' | null;
     }): Promise<SkillInstallResult>;
+    rescanLibrary(): Promise<SkillDefinition[]>;
     remove(skillId: string): Promise<void>;
+  };
+  library: {
+    getSources(): Promise<LibrarySourcesSnapshot>;
+  };
+  projectKnowledge: {
+    getIndexStatus(): Promise<ProjectKnowledgeIndexStatus>;
+    refreshIndex(): Promise<ProjectKnowledgeIndexStatus>;
+    suggestIndex(): Promise<ProjectKnowledgeSuggestedIndexDraft>;
+    openSuggestedIndexDraft(): Promise<ProjectKnowledgeSuggestedIndexDraftFile>;
   };
   automations: {
     list(): Promise<AutomationDefinition[]>;
@@ -95,17 +105,6 @@ export interface FeatureDomainApi {
     toggle(automationId: string, enabled: boolean): Promise<AutomationDefinition>;
     remove(automationId: string): Promise<void>;
     runNow(automationId: string): Promise<{ job: JobDefinition; reviewItem: ReviewItem; alreadyPending: boolean }>;
-  };
-  vicodeBuild: {
-    getSnapshot(projectId: string | null): Promise<VicodeBuildSnapshot>;
-    generatePlanDraft(input: { projectId: string; goal: string }): Promise<VicodeBuildPlanDraft>;
-    createPlan(input: { projectId: string; goal: string; name?: string; worktreePath?: string }): Promise<VicodeBuildSnapshot>;
-    createPlanFromThread(threadId: string): Promise<VicodeBuildSnapshot>;
-    setTeamPaused(input: { projectId: string; teamId: VicodeBuildTeamId; paused: boolean }): Promise<VicodeBuildSnapshot>;
-    wakeLane(input: { projectId: string; teamId: VicodeBuildTeamId; laneId: VicodeBuildLaneId }): Promise<VicodeBuildSnapshot>;
-    retryLane(input: { projectId: string; teamId: VicodeBuildTeamId; laneId: VicodeBuildLaneId }): Promise<VicodeBuildSnapshot>;
-    clearInactivePlans(projectId: string): Promise<VicodeBuildSnapshot>;
-    runVerification(projectId: string): Promise<VicodeBuildVerificationResult>;
   };
   jobs: {
     list(): Promise<JobDefinition[]>;
@@ -128,12 +127,11 @@ export interface FeatureDomainApi {
   settings: {
     get(): Promise<Preferences>;
     save(input: Partial<Preferences>): Promise<Preferences>;
-    getPersonalization(): Promise<PersonalizationSettings>;
-    savePersonalization(input: Partial<PersonalizationSettings>): Promise<PersonalizationSettings>;
   };
   diagnostics: {
     export(): Promise<string>;
     exportThread(threadId: string): Promise<string>;
+    exportThreadReport(threadId: string): Promise<string>;
     getStorage(): Promise<StorageDiagnostics>;
     compactRunEvents(): Promise<StorageMaintenanceResult>;
     maintainStorage(input?: { vacuum?: boolean }): Promise<StorageMaintenanceResult>;

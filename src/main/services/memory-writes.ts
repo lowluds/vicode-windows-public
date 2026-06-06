@@ -256,7 +256,7 @@ export class MemoryWritesService {
     const normalizedThreadTitle = normalizeDisplayText(thread.title);
     const project = this.db.getProject(thread.projectId);
     if (!project.folderPath) {
-      throw new Error('Daily note capture requires a project with a real workspace folder.');
+      throw new Error('Project checkpoint capture requires a project with a real workspace folder.');
     }
 
     const sourceId = `daily-note:${thread.id}`;
@@ -266,7 +266,7 @@ export class MemoryWritesService {
       if (review) {
         return { job: existing, reviewItem: review, alreadyPending: true };
       }
-      throw new Error(`Thread "${normalizedThreadTitle}" already has an active daily note review.`);
+      throw new Error(`Thread "${normalizedThreadTitle}" already has an active project checkpoint review.`);
     }
 
     const draft = this.buildDailyNoteDraft(project.folderPath, thread);
@@ -274,7 +274,7 @@ export class MemoryWritesService {
       projectId: project.id,
       sourceType: 'manual',
       sourceId,
-      title: `Capture daily note for "${normalizedThreadTitle}"`,
+      title: `Capture project checkpoint for "${normalizedThreadTitle}"`,
       status: 'waiting_for_review',
       threadId: thread.id
     });
@@ -300,7 +300,7 @@ export class MemoryWritesService {
     const normalizedThreadTitle = normalizeDisplayText(thread.title);
     const project = this.db.getProject(thread.projectId);
     if (!project.folderPath) {
-      throw new Error('Daily note capture requires a project with a real workspace folder.');
+      throw new Error('Project checkpoint capture requires a project with a real workspace folder.');
     }
 
     const sourceId = sourceKey ? `daily-note:${thread.id}:${sourceKey}` : `daily-note:${thread.id}`;
@@ -314,7 +314,7 @@ export class MemoryWritesService {
       projectId: project.id,
       sourceType: 'manual',
       sourceId,
-      title: `Auto-captured daily note for "${normalizedThreadTitle}"`,
+      title: `Auto-saved project checkpoint for "${normalizedThreadTitle}"`,
       status: 'completed',
       threadId: thread.id
     });
@@ -349,7 +349,7 @@ export class MemoryWritesService {
       projectId: project.id,
       sourceType: 'manual',
       sourceId,
-      title: `Promote durable memory for "${normalizedThreadTitle}"`,
+      title: `Save project memory for "${normalizedThreadTitle}"`,
       status: 'waiting_for_review',
       threadId: thread.id
     });
@@ -406,7 +406,7 @@ export class MemoryWritesService {
     const normalizedThreadTitle = normalizeDisplayText(thread.title);
     const project = this.db.getProject(thread.projectId);
     if (!project.folderPath) {
-      throw new Error('USER.md updates require a project with a real workspace folder.');
+      throw new Error('Preference capture requires a project with a real workspace folder.');
     }
 
     const sourceId = `user-preference:${thread.id}`;
@@ -416,7 +416,7 @@ export class MemoryWritesService {
       if (review) {
         return { job: existing, reviewItem: review, alreadyPending: true };
       }
-      throw new Error(`Thread "${normalizedThreadTitle}" already has an active USER.md review.`);
+      throw new Error(`Thread "${normalizedThreadTitle}" already has an active preference review.`);
     }
 
     const draft = this.buildUserPreferenceDraft(project.folderPath, thread);
@@ -424,7 +424,7 @@ export class MemoryWritesService {
       projectId: project.id,
       sourceType: 'manual',
       sourceId,
-      title: `Suggest USER.md update for "${normalizedThreadTitle}"`,
+      title: `Save project preference for "${normalizedThreadTitle}"`,
       status: 'waiting_for_review',
       threadId: thread.id
     });
@@ -450,7 +450,7 @@ export class MemoryWritesService {
     const normalizedThreadTitle = normalizeDisplayText(thread.title);
     const project = this.db.getProject(thread.projectId);
     if (!project.folderPath) {
-      throw new Error('USER.md updates require a project with a real workspace folder.');
+      throw new Error('Preference capture requires a project with a real workspace folder.');
     }
 
     const sourceId = `user-preference:${thread.id}`;
@@ -464,7 +464,7 @@ export class MemoryWritesService {
       projectId: project.id,
       sourceType: 'manual',
       sourceId,
-      title: `Auto-updated USER.md for "${normalizedThreadTitle}"`,
+      title: `Auto-saved project preference for "${normalizedThreadTitle}"`,
       status: 'completed',
       threadId: thread.id
     });
@@ -517,7 +517,7 @@ export class MemoryWritesService {
       relativePath,
       targetPath,
       content,
-      summary: `Review daily note update for "${normalizeDisplayText(thread.title)}"`
+      summary: `Review project checkpoint for "${normalizeDisplayText(thread.title)}"`
     };
   }
 
@@ -534,7 +534,7 @@ export class MemoryWritesService {
       relativePath,
       targetPath,
       content,
-      summary: `Review durable memory promotion for "${normalizeDisplayText(thread.title)}"`
+      summary: `Review project memory for "${normalizeDisplayText(thread.title)}"`
     };
   }
 
@@ -557,7 +557,7 @@ export class MemoryWritesService {
       relativePath,
       targetPath,
       content,
-      summary: `Review USER.md update for "${normalizeDisplayText(thread.title)}"`
+      summary: `Review project preference for "${normalizeDisplayText(thread.title)}"`
     };
   }
 }

@@ -5,7 +5,7 @@ import type {
   RunTranscriptChangeArtifactItem,
   RunTranscriptItem,
   RunTranscriptResolutionSummaryItem
-} from './run-activity';
+} from './run-activity/types';
 
 function clean(value: string) {
   return value.replace(/\s+/g, ' ').trim();
@@ -167,9 +167,11 @@ function collectResolutionToolsUsed(items: RunTranscriptItem[]) {
       continue;
     }
 
-    const mcpToolMatch = /^(?:Calling|Completed)\s+MCP tool\s+(.+)$/iu.exec(
-      item.label.trim()
-    );
+    const mcpToolMatch =
+      /^(?:Calling|Completed)\s+MCP tool\s+(.+)$/iu.exec(item.label.trim()) ??
+      (item.toolName === 'use_mcp_tool'
+        ? /^Tool:\s*(.+)$/imu.exec(item.text.trim())
+        : null);
     if (!mcpToolMatch) {
       continue;
     }
@@ -178,6 +180,18 @@ function collectResolutionToolsUsed(items: RunTranscriptItem[]) {
   }
 
   return tools.filter(Boolean);
+}
+
+function hasFileContentWrite(items: RunTranscriptItem[]) {
+  return items.some(
+    (item) => item.kind === 'activity_line' && item.activityKind === 'file_write'
+  );
+}
+
+function shouldSummarizeFailedRun(message: string) {
+  return /\bNo page files were written\b|\bfile-content writes?\b|\bwithout making the requested workspace changes\b/iu.test(
+    message
+  );
 }
 
 function matchesRemainingRiskPattern(text: string) {
@@ -283,8 +297,24 @@ function shouldKeepResolutionDetailParagraph(
 export function deriveResolutionSummaryItem(
   items: RunTranscriptItem[],
   changeArtifacts: RunTranscriptChangeArtifactItem[],
-  runState: 'completed' | 'failed' | 'aborted' | null
+  runState: 'completed' | 'failed' | 'aborted' | null,
+  failureMessage: string | null = null
 ) {
+  if (runState === 'failed' && failureMessage?.trim() && shouldSummarizeFailedRun(failureMessage)) {
+    const filesChanged = collectResolutionFiles(items, changeArtifacts);
+    return {
+      id: `resolution-summary:${items.length}`,
+      kind: 'resolution_summary' as const,
+      outcome: failureMessage.trim(),
+      filesChanged,
+      toolsUsed: collectResolutionToolsUsed(items),
+      verificationCommands: collectResolutionVerificationCommands(items),
+      remainingRisk: hasFileContentWrite(items)
+        ? null
+        : 'No file-content writes were recorded before failure.'
+    };
+  }
+
   if (runState !== 'completed') {
     return null;
   }

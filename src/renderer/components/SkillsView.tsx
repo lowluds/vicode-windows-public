@@ -1,9 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import DOMPurify from 'dompurify';
-import { marked } from 'marked';
 import {
   ActionButton,
-  DangerButton,
   IconButton,
   Menu,
   MenuContent,
@@ -17,23 +14,11 @@ import {
   TextArea,
   TextInput
 } from './ui';
-import type { McpCatalogSnapshot, McpServerView, Project, ProviderId, SkillCategory, SkillDefinition, SkillDetail, SkillSaveInput } from '../../shared/domain';
-import type { CuratedSkillCatalogEntry } from '../../shared/curatedCatalog';
-import { curatedSkillCatalog, officialMcpCatalog, officialSkillPack } from '../../shared/curatedCatalog';
-import {
-  buildSkillDocument,
-  getSkillAttachMode,
-  getSkillCategory,
-  getSkillCommandToken,
-  getSkillKind,
-  getSkillProviderOrigin,
-  getSkillSyncState,
-  getSkillSyncTargets
-} from '../../shared/skills';
+import type { McpCatalogSnapshot, McpServerView, Project, ProviderId, SkillDefinition, SkillDetail, SkillSaveInput } from '../../shared/domain';
+import { officialMcpCatalog } from '../../shared/curatedCatalog';
 import {
   installCatalogSkill as installCatalogSkillFlow,
   installSuggestedSkill as installSuggestedSkillFlow,
-  refreshCurrentCatalogTab as refreshCurrentCatalogTabFlow,
   refreshPluginsCatalog as refreshPluginsCatalogFlow,
   type SkillsCatalogSyncHost
 } from '../lib/skills-catalog-sync';
@@ -46,360 +31,59 @@ import {
   type SkillsMcpServerActionsHost
 } from '../lib/skills-mcp-server-actions';
 import {
-  AutomationIcon,
-  BrushIcon,
+  SUGGESTED_SKILLS,
+  buildSuggestedSkillDocument,
+  canInstallSuggestedSkill,
+  type SuggestedSkill
+} from './SkillsView.suggested';
+import {
+  PROVIDER_OPTIONS,
+  compatibilityLabel,
+  providerLabel
+} from './SkillsView.labels';
+import {
+  buildSkillSaveInput,
+  canSaveSkillDraft,
+  createDraftFromSkill,
+  emptyDraft,
+  isSkillAttachable,
+  skillDraftScopeHelp,
+  toggleDraftProviderTargets,
+  type SkillDraft
+} from './SkillsView.activeSkills';
+import {
+  buildSkillCatalogSections,
+  filterActiveSkillsForQuery,
+  filterSuggestedSkillsForQuery
+} from './SkillsView.catalog';
+import {
+  buildPluginCatalogSections,
+  filterConfiguredMcpServersForQuery,
+  filterOfficialMcpCatalogForQuery,
+  findConfiguredMcpServer as findConfiguredMcpServerForEntry,
+  findOfficialEntryForServer as findOfficialMcpEntryForServer,
+  formatMcpServerConnectionDiagnostic
+} from './SkillsView.plugins';
+import {
+  suggestedSkillAvatarClass
+} from './SkillsView.detail';
+import { SkillAvatar } from './SkillsView.avatar';
+import { SkillDetailDialog } from './SkillsView.detailDialog';
+import {
   ChevronDownIcon,
   CheckIcon,
   CloseIcon,
-  CopyIcon,
-  CpuIcon,
-  DocumentIcon,
-  FolderIcon,
   GlobeIcon,
   LoadingIcon,
-  MonitorIcon,
   PlayIcon,
   PlusIcon,
   RefreshIcon,
   SaveIcon,
-  SettingsIcon,
-  ShieldIcon,
-  SkillsIcon,
   TaskIcon,
   TrashIcon
 } from './icons';
-import { resolveSkillIcon } from './skillIcons';
-
-type SkillDraft = {
-  id?: string;
-  name: string;
-  description: string;
-  instructions: string;
-  scope: 'global' | 'project';
-  providerTargets: ProviderId[];
-  syncTargets: ProviderId[];
-  enabled: boolean;
-};
 
 type CatalogTab = 'plugins' | 'skills';
-
-type SuggestedSkill = {
-  id: string;
-  name: string;
-  publisher?: string;
-  official?: boolean;
-  description: string;
-  installKind: 'provider_native' | 'github_folder';
-  providerId?: ProviderId;
-  providerTargets: ProviderId[];
-  browseUrl: string;
-  installTarget?: string;
-  owner?: string;
-  repo?: string;
-  path?: string;
-  token: string;
-  category: SkillCategory;
-  icon: typeof SkillsIcon;
-  status: CuratedSkillCatalogEntry['status'];
-  verification: CuratedSkillCatalogEntry['verification'];
-  notes: string[];
-  starterPack?: boolean;
-  featured?: boolean;
-};
-
-const PROVIDER_OPTIONS: ProviderId[] = ['openai', 'gemini', 'qwen'];
-
-const CATEGORY_LABELS: Record<SkillCategory, string> = {
-  frontend: 'Frontend',
-  backend: 'Backend',
-  engineering: 'Engineering',
-  documents: 'Documents',
-  design: 'Design',
-  testing: 'Testing',
-  automation: 'Automation',
-  mcp: 'MCP & Plugins',
-  templates: 'Templates',
-  provider: 'Provider Runtime'
-};
-
-const BUILT_IN_SKILL_CATEGORIES: Partial<Record<string, SkillCategory>> = {
-  'doc-writer': 'documents',
-  'pdf-toolkit': 'documents',
-  'slide-writer': 'documents',
-  'spreadsheet-analyst': 'documents',
-  'cloudflare-deploy': 'automation',
-  'openai-docs': 'engineering',
-  'playwright-interactive': 'testing',
-  'premium-frontend-build': 'frontend',
-  'premium-reference-frontend': 'design',
-  'reference-to-system': 'design',
-  'ui-polish-pass': 'design',
-  'vercel-deploy': 'automation',
-  'web-ship-review': 'testing',
-  imagegen: 'design',
-  screenshot: 'testing',
-  sora: 'design',
-  'skill-creator': 'templates'
-};
-
-function resolveSuggestedSkillIcon(skill: Pick<SuggestedSkill, 'category'>) {
-  switch (skill.category) {
-    case 'frontend':
-      return MonitorIcon;
-    case 'backend':
-      return CpuIcon;
-    case 'engineering':
-      return SkillsIcon;
-    case 'documents':
-      return DocumentIcon;
-    case 'design':
-      return BrushIcon;
-    case 'testing':
-      return PlayIcon;
-    case 'automation':
-      return AutomationIcon;
-    case 'mcp':
-      return GlobeIcon;
-    case 'templates':
-      return CopyIcon;
-    case 'provider':
-      return ShieldIcon;
-    default:
-      return SkillsIcon;
-  }
-}
-
-function createSuggestedSkill(seed: CuratedSkillCatalogEntry): SuggestedSkill {
-  return {
-    ...seed,
-    icon: resolveSuggestedSkillIcon(seed),
-    featured: seed.featured,
-    official: seed.official
-  };
-}
-
-const SUGGESTED_SKILLS: SuggestedSkill[] = [
-  ...curatedSkillCatalog.map(createSuggestedSkill)
-];
-
-function buildSuggestedSkillDocument(skill: SuggestedSkill) {
-  const installText =
-    skill.installKind === 'provider_native'
-      ? 'Install this provider-managed skill or extension to make it available inside the provider runtime.'
-      : 'Import this skill into Vicode to attach it in the composer and use its instructions during runs.';
-  const statusLabel = skill.status === 'keep' ? 'Curated for Vicode' : 'Experimental in Vicode';
-  const notes = skill.notes.map((note) => `- ${note}`).join('\n');
-
-  return `# ${skill.name}
-
-${skill.description}
-
-## Publisher
-${skill.publisher ?? 'External'}
-
-## Compatibility
-${compatibilityLabel(skill.providerTargets)}
-
-## Vicode Status
-${statusLabel}
-
-## Verification
-${skill.verification}
-
-## Install
-${installText}
-
-## Token
-\`${skill.token}\`
-
-## Notes
-${notes}
-`;
-}
-
-function providerLabel(providerId: ProviderId) {
-  switch (providerId) {
-    case 'openai':
-      return 'Codex';
-    case 'gemini':
-      return 'Gemini';
-    case 'ollama':
-      return 'Ollama';
-    case 'kimi':
-      return 'Kimi';
-    case 'qwen':
-    default:
-      return 'Qwen';
-  }
-}
-
-function skillCategoryLabel(category: SkillCategory) {
-  return CATEGORY_LABELS[category];
-}
-
-function compatibilityLabel(providerTargets: ProviderId[]) {
-  if (providerTargets.length > 1) {
-    return providerTargets.map((providerId) => providerLabel(providerId)).join(' + ');
-  }
-  return providerTargets[0] ? providerLabel(providerTargets[0]) : 'Provider';
-}
-
-function pluginCategoryLabel(category: (typeof officialMcpCatalog)[number]['category']) {
-  switch (category) {
-    case 'ui':
-      return 'Coding';
-    case 'design':
-    case 'component-system':
-      return 'Design';
-    case 'deploy':
-    case 'backend':
-      return 'Engineering';
-    case 'collaboration':
-      return 'Collaboration';
-    default:
-      return 'Plugins';
-  }
-}
-
-function isSystemSkill(skill: SkillDefinition) {
-  const token = getSkillCommandToken(skill);
-  return token === 'skill-creator' || token === 'plugin-creator' || token === 'skill-installer';
-}
-
-function resolveSkillCategoryLabel(skill: SkillDefinition) {
-  const explicitCategory = getSkillCategory(skill);
-  if (explicitCategory) {
-    return skillCategoryLabel(explicitCategory);
-  }
-
-  const tokenCategory = BUILT_IN_SKILL_CATEGORIES[getSkillCommandToken(skill)];
-  if (tokenCategory) {
-    return skillCategoryLabel(tokenCategory);
-  }
-
-  if (getSkillKind(skill) === 'extension') {
-    return skillCategoryLabel('provider');
-  }
-
-  return skillCategoryLabel('engineering');
-}
-
-function emptyDraft(selectedProject: Project | null = null): SkillDraft {
-  return {
-    name: '',
-    description: '',
-    instructions: '',
-    scope: selectedProject ? 'project' : 'global',
-    providerTargets: ['openai', 'gemini', 'qwen'],
-    syncTargets: [],
-    enabled: true
-  };
-}
-
-function createDraftFromSkill(skill: SkillDefinition): SkillDraft {
-  return {
-    id: skill.id,
-    name: skill.name,
-    description: skill.description,
-    instructions: skill.instructions,
-    scope: skill.scope,
-    providerTargets: [...skill.providerTargets],
-    syncTargets: getSkillSyncTargets(skill),
-    enabled: skill.enabled
-  };
-}
-
-function renderMarkdown(markdown: string) {
-  return DOMPurify.sanitize(marked.parse(markdown) as string);
-}
-
-function skillScopeLabel(skill: SkillDefinition) {
-  return skill.scope === 'project' ? 'Project' : 'Global';
-}
-
-function skillOriginLabel(skill: SkillDefinition) {
-  if (skill.origin === 'built_in_style') {
-    return 'Built-in';
-  }
-
-  if (skill.origin === 'custom_local') {
-    return 'Custom';
-  }
-
-  const providerOrigin = getSkillProviderOrigin(skill);
-  return `${providerOrigin ? providerLabel(providerOrigin) : 'Provider'} ${getSkillKind(skill) === 'extension' ? 'extension' : 'skill'}`;
-}
-
-function skillAvatarClass(skill: SkillDefinition) {
-  let providerClass = 'is-vicode';
-  const providerOrigin = getSkillProviderOrigin(skill);
-
-  if (skill.scope === 'project') {
-    providerClass = 'is-project';
-  } else if (providerOrigin === 'openai' || (skill.providerTargets.length === 1 && skill.providerTargets[0] === 'openai')) {
-    providerClass = 'is-openai';
-  } else if (providerOrigin === 'gemini' || (skill.providerTargets.length === 1 && skill.providerTargets[0] === 'gemini')) {
-    providerClass = 'is-gemini';
-  } else if (providerOrigin === 'qwen' || (skill.providerTargets.length === 1 && skill.providerTargets[0] === 'qwen')) {
-    providerClass = 'is-vicode';
-  } else if (skill.origin === 'custom_local') {
-    providerClass = 'is-custom';
-  } else if (skill.origin === 'built_in_style') {
-    providerClass = 'is-built-in';
-  }
-
-  return `skills-avatar ${providerClass} ${skill.enabled ? 'is-installed' : 'is-available'}`;
-}
-
-function SkillAvatar({ skill, size = 'default' }: { skill: SkillDefinition; size?: 'default' | 'large' }) {
-  const Icon = resolveSkillIcon(skill);
-
-  return (
-    <span className={`${skillAvatarClass(skill)} ${size === 'large' ? 'is-large' : ''}`} aria-hidden="true">
-      <Icon size={size === 'large' ? 24 : 20} />
-    </span>
-  );
-}
-
-function sortSkills(items: SkillDefinition[]) {
-  const providerRank = (skill: SkillDefinition) => {
-    if (skill.origin === 'built_in_style') {
-      return 0;
-    }
-    const providerOrigin = getSkillProviderOrigin(skill);
-    if (providerOrigin === 'openai') {
-      return 1;
-    }
-    if (providerOrigin === 'gemini') {
-      return 2;
-    }
-    if (skill.providerTargets.length === 1 && skill.providerTargets[0] === 'openai') {
-      return 1;
-    }
-    if (skill.providerTargets.length === 1 && skill.providerTargets[0] === 'gemini') {
-      return 2;
-    }
-    return 3;
-  };
-
-  return [...items].sort((left, right) => {
-    const providerDelta = providerRank(left) - providerRank(right);
-    if (providerDelta !== 0) {
-      return providerDelta;
-    }
-    return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' });
-  });
-}
-
-function hasMatchingInstalledSkill(skill: SuggestedSkill, installedSkills: SkillDefinition[]) {
-  const expectedTargets = [...skill.providerTargets].sort();
-  return installedSkills.some((item) => {
-    const token = getSkillCommandToken(item);
-    const sameTargets =
-      [...item.providerTargets].sort().join('|') === expectedTargets.join('|');
-    return sameTargets && (token === skill.token || item.name.localeCompare(skill.name, undefined, { sensitivity: 'base' }) === 0);
-  });
-}
 
 interface SkillsViewProps {
   skills: SkillDefinition[];
@@ -412,7 +96,6 @@ interface SkillsViewProps {
   onCreatePlugin: () => void;
   onBack: () => void;
   toggleSkill: (skillId: string, enabled: boolean) => Promise<SkillDefinition>;
-  syncSkill: (skillId: string, providerId: ProviderId, enabled: boolean) => Promise<SkillDefinition>;
   removeSkill: (skillId: string) => Promise<void>;
   toggleAttachedSkill: (skillId: string) => void;
   showToast: (level: 'info' | 'warning' | 'error', message: string) => void;
@@ -429,7 +112,6 @@ export function SkillsView({
   onCreatePlugin,
   onBack,
   toggleSkill,
-  syncSkill,
   removeSkill,
   toggleAttachedSkill,
   showToast
@@ -478,120 +160,23 @@ export function SkillsView({
   };
 
   const filteredSkills = useMemo(() => {
-    const needle = deferredQuery.trim().toLowerCase();
-    if (!needle) {
-      return skills;
-    }
-
-    return skills.filter((skill) =>
-      [
-        skill.name,
-        skill.description,
-        skill.instructions,
-        getSkillCommandToken(skill),
-        skillOriginLabel(skill),
-        resolveSkillCategoryLabel(skill),
-        compatibilityLabel(skill.providerTargets)
-      ].some((value) => value.toLowerCase().includes(needle))
-    );
+    return filterActiveSkillsForQuery(skills, deferredQuery);
   }, [deferredQuery, skills]);
 
   const filteredSuggestedSkills = useMemo(() => {
-    const needle = deferredQuery.trim().toLowerCase();
-    const all = SUGGESTED_SKILLS;
-    if (!needle) {
-      return [...all].sort((left, right) => {
-        const featuredDelta = Number(Boolean(right.featured)) - Number(Boolean(left.featured));
-        if (featuredDelta !== 0) {
-          return featuredDelta;
-        }
-        return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' });
-      });
-    }
-
-    return all
-      .filter((skill) =>
-        `${skill.name} ${skill.description} ${skill.token} ${skill.publisher ?? ''} ${skillCategoryLabel(skill.category)} ${compatibilityLabel(skill.providerTargets)}`
-        .toLowerCase()
-        .includes(needle)
-      )
-      .sort((left, right) => {
-        const featuredDelta = Number(Boolean(right.featured)) - Number(Boolean(left.featured));
-        if (featuredDelta !== 0) {
-          return featuredDelta;
-        }
-        return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' });
-      });
+    return filterSuggestedSkillsForQuery(SUGGESTED_SKILLS, deferredQuery);
   }, [deferredQuery]);
 
   const filteredPluginEntries = useMemo(() => {
-    const needle = deferredQuery.trim().toLowerCase();
-    if (!needle) {
-      return officialMcpCatalog;
-    }
-
-    return officialMcpCatalog.filter((entry) =>
-      `${entry.name} ${entry.description} ${entry.category} ${entry.publisher} ${entry.command ?? ''} ${(entry.args ?? []).join(' ')}`
-        .toLowerCase()
-        .includes(needle)
-    );
+    return filterOfficialMcpCatalogForQuery(officialMcpCatalog, deferredQuery);
   }, [deferredQuery]);
 
   const filteredConfiguredServers = useMemo(() => {
-    const sortedServers = [...mcpServers].sort((left, right) =>
-      left.name.localeCompare(right.name, undefined, { sensitivity: 'base' })
-    );
-    const needle = deferredQuery.trim().toLowerCase();
-    if (!needle) {
-      return sortedServers;
-    }
-
-    return sortedServers.filter((server) => {
-      const officialEntry = officialMcpCatalog.find((entry) => {
-        if (server.args.includes('--vicode-internal-analysis-server')) {
-          return entry.id === 'internal-analysis';
-        }
-        return entry.command
-          ? server.command.toLowerCase() === entry.command.toLowerCase() &&
-              JSON.stringify(server.args) === JSON.stringify(entry.args ?? [])
-          : false;
-      });
-      const serverCatalog = [
-        ...(mcpCatalog?.tools ?? []).filter((tool) => tool.serverId === server.id).map((tool) => tool.name),
-        ...(mcpCatalog?.resources ?? []).filter((resource) => resource.serverId === server.id).map((resource) => resource.name || resource.uri),
-        ...(mcpCatalog?.prompts ?? []).filter((prompt) => prompt.serverId === server.id).map((prompt) => prompt.name)
-      ];
-      return `${server.name} ${server.command} ${server.args.join(' ')} ${officialEntry?.description ?? ''} ${officialEntry?.category ?? 'custom'} ${server.toolInvocationMode} ${serverCatalog.join(' ')}`
-        .toLowerCase()
-        .includes(needle);
-    });
+    return filterConfiguredMcpServersForQuery(mcpServers, officialMcpCatalog, mcpCatalog, deferredQuery);
   }, [deferredQuery, mcpCatalog, mcpServers]);
 
   const sectionedSkills = useMemo(() => {
-    const installed = sortSkills(filteredSkills.filter((skill) => skill.enabled));
-    const available = filteredSkills.filter((skill) => !skill.enabled);
-    const officialSuggestions = filteredSuggestedSkills.filter(
-      (skill) => officialSkillPack.some((entry) => entry.id === skill.id && entry.starterPack) && !hasMatchingInstalledSkill(skill, installed)
-    );
-    const officialSuggestionIds = new Set(officialSuggestions.map((skill) => skill.id));
-    const categoryOrder: SkillCategory[] = ['frontend', 'backend', 'engineering', 'documents', 'design', 'testing', 'automation', 'mcp', 'templates', 'provider'];
-    const categories = categoryOrder.map((category) => ({
-      category,
-      title: skillCategoryLabel(category),
-      installed: sortSkills(available.filter((skill) => resolveSkillCategoryLabel(skill) === skillCategoryLabel(category))),
-      suggested: filteredSuggestedSkills.filter(
-        (skill) =>
-          skill.category === category &&
-          !officialSuggestionIds.has(skill.id) &&
-          !hasMatchingInstalledSkill(skill, installed)
-      )
-    }));
-
-    return {
-      installed,
-      officialSuggestions,
-      categories
-    };
+    return buildSkillCatalogSections(filteredSkills, filteredSuggestedSkills);
   }, [filteredSkills, filteredSuggestedSkills]);
 
   const selectedSkill = useMemo(
@@ -665,24 +250,11 @@ export function SkillsView({
 
   function toggleDraftProvider(providerId: ProviderId) {
     setDraft((current) => {
-      const providerTargets = current.providerTargets.includes(providerId)
-        ? current.providerTargets.filter((target) => target !== providerId)
-        : [...current.providerTargets, providerId];
       return {
         ...current,
-        providerTargets,
-        syncTargets: current.syncTargets.filter((target) => providerTargets.includes(target))
+        providerTargets: toggleDraftProviderTargets(current.providerTargets, providerId)
       };
     });
-  }
-
-  function toggleDraftSync(providerId: ProviderId) {
-    setDraft((current) => ({
-      ...current,
-      syncTargets: current.syncTargets.includes(providerId)
-        ? current.syncTargets.filter((target) => target !== providerId)
-        : [...current.syncTargets, providerId]
-    }));
   }
 
   async function openSkill(skill: SkillDefinition) {
@@ -708,8 +280,8 @@ export function SkillsView({
       iconPath: null,
       folderPath: null,
       browseUrl: skill.browseUrl,
-      attachMode: skill.installKind === 'provider_native' ? 'runtime' : 'prompt',
-      kind: skill.installKind === 'provider_native' ? 'extension' : 'skill'
+      attachMode: skill.installKind === 'provider_reference' ? 'runtime' : 'prompt',
+      kind: skill.installKind === 'provider_reference' ? 'extension' : 'skill'
     });
     setDetailLoading(false);
     setDetailOpen(true);
@@ -721,7 +293,7 @@ export function SkillsView({
   }
 
   async function handleSave() {
-    if (!draft.name.trim() || !draft.description.trim() || !draft.instructions.trim() || draft.providerTargets.length === 0) {
+    if (!canSaveSkillDraft(draft)) {
       return;
     }
     if (draft.scope === 'project' && !selectedProject) {
@@ -729,17 +301,7 @@ export function SkillsView({
       return;
     }
 
-    const saved = await saveSkill({
-      id: draft.id,
-      name: draft.name,
-      description: draft.description,
-      instructions: draft.instructions,
-      scope: draft.scope,
-      providerTargets: draft.providerTargets,
-      syncTargets: draft.scope === 'global' ? draft.syncTargets : [],
-      enabled: draft.enabled,
-      projectId: draft.scope === 'project' ? selectedProject?.id ?? null : null
-    });
+    const saved = await saveSkill(buildSkillSaveInput(draft, selectedProject));
 
     setEditorOpen(false);
     await openSkill(saved);
@@ -750,8 +312,7 @@ export function SkillsView({
       return;
     }
 
-    const actionLabel = skill.origin === 'provider_native' ? 'Uninstall' : 'Remove';
-    if (!window.confirm(`${actionLabel} "${skill.name}"?`)) {
+    if (!window.confirm(`Delete "${skill.name}"?`)) {
       return;
     }
     await removeSkill(skill.id);
@@ -777,6 +338,11 @@ export function SkillsView({
   }
 
   async function handleInstallSuggested(skill: SuggestedSkill) {
+    if (!canInstallSuggestedSkill(skill)) {
+      showToast('info', 'Provider-managed resources are installed in the provider app. Use Browse to inspect the source.');
+      return;
+    }
+
     await installSuggestedSkillFlow(catalogSyncHost, skill);
   }
 
@@ -788,55 +354,16 @@ export function SkillsView({
     await refreshPluginsCatalogFlow(catalogSyncHost, showMessage);
   }
 
-  async function handleRefreshCurrentTab() {
-    await refreshCurrentCatalogTabFlow(catalogSyncHost, catalogTab);
-  }
-
   function isAttachable(skill: SkillDefinition) {
-    return skill.enabled && skill.providerTargets.includes(composerProviderId) && (skill.scope === 'global' || skill.projectId === selectedProject?.id);
+    return isSkillAttachable(skill, composerProviderId, selectedProject?.id ?? null);
   }
 
   function findConfiguredMcpServer(entryId: string) {
-    const entry = officialMcpCatalog.find((candidate) => candidate.id === entryId);
-    if (!entry) {
-      return null;
-    }
-
-    if (entry.id === 'internal-analysis') {
-      return (
-        mcpServers.find((server) =>
-          server.projectId === selectedProject?.id && server.args.includes('--vicode-internal-analysis-server')
-        ) ?? null
-      );
-    }
-
-    if (!entry.command) {
-      return null;
-    }
-
-    return (
-      mcpServers.find((server) => {
-        return (
-          server.command.toLowerCase() === entry.command.toLowerCase() &&
-          JSON.stringify(server.args) === JSON.stringify(entry.args ?? [])
-        );
-      }) ?? null
-    );
+    return findConfiguredMcpServerForEntry(officialMcpCatalog, mcpServers, entryId, selectedProject?.id ?? null);
   }
 
   function findOfficialEntryForServer(server: McpServerView) {
-    if (server.args.includes('--vicode-internal-analysis-server')) {
-      return officialMcpCatalog.find((entry) => entry.id === 'internal-analysis') ?? null;
-    }
-
-    return (
-      officialMcpCatalog.find((entry) => {
-        return entry.command
-          ? server.command.toLowerCase() === entry.command.toLowerCase() &&
-              JSON.stringify(server.args) === JSON.stringify(entry.args ?? [])
-          : false;
-      }) ?? null
-    );
+    return findOfficialMcpEntryForServer(officialMcpCatalog, server);
   }
 
   async function handleSetupRecommendedMcp(entryId: string) {
@@ -925,7 +452,7 @@ export function SkillsView({
               onPress={() => openSuggestedSkill(skill)}
             >
               <div className={listLeadingClass}>
-                <span className={`skills-avatar ${skill.providerTargets.length > 1 ? 'is-vicode' : skill.providerTargets[0] === 'openai' ? 'is-openai' : skill.providerTargets[0] === 'gemini' ? 'is-gemini' : 'is-vicode'} is-available`} aria-hidden="true">
+                <span className={suggestedSkillAvatarClass(skill)} aria-hidden="true">
                   <skill.icon size={20} />
                 </span>
                 <div className={listCopyClass}>
@@ -936,18 +463,22 @@ export function SkillsView({
                 </div>
               </div>
               <div className={listTrailingClass}>
-                <IconButton
-                  size="compact"
-                  className="skills-row-action"
-                  label={`Install ${skill.name}`}
-                  disabled={installingSkillId === skill.id}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void handleInstallSuggested(skill);
-                  }}
-                >
-                  {installingSkillId === skill.id ? <LoadingIcon /> : <PlusIcon />}
-                </IconButton>
+                {canInstallSuggestedSkill(skill) ? (
+                  <IconButton
+                    size="compact"
+                    className="skills-row-action"
+                    label={`Install ${skill.name}`}
+                    disabled={installingSkillId === skill.id}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void handleInstallSuggested(skill);
+                    }}
+                  >
+                    {installingSkillId === skill.id ? <LoadingIcon /> : <PlusIcon />}
+                  </IconButton>
+                ) : (
+                  <span className="skills-card-state">Browse</span>
+                )}
               </div>
             </SelectableSurface>
           ))}
@@ -958,14 +489,7 @@ export function SkillsView({
 
   function renderPluginsSection() {
     const configuredServers = filteredConfiguredServers;
-    const featuredEntries = filteredPluginEntries.filter((entry) => entry.supportState === 'supported');
-    const categorizedEntries = filteredPluginEntries.filter((entry) => entry.supportState !== 'supported');
-    const pluginSections = ['Design', 'Engineering', 'Collaboration', 'Plugins']
-      .map((title) => ({
-        title,
-        entries: categorizedEntries.filter((entry) => pluginCategoryLabel(entry.category) === title)
-      }))
-      .filter((section) => section.entries.length > 0);
+    const { featuredEntries, sections: pluginSections } = buildPluginCatalogSections(filteredPluginEntries);
 
     function renderPluginEntry(entry: (typeof officialMcpCatalog)[number]) {
       const configuredServer = findConfiguredMcpServer(entry.id);
@@ -980,7 +504,6 @@ export function SkillsView({
           data-testid={`mcp-official-entry-${entry.id}`}
           onPress={() => {
             setSelectedMcpId(entry.id);
-            void handleBrowse(entry.docsUrl);
           }}
         >
           <div className={listLeadingClass}>
@@ -995,6 +518,19 @@ export function SkillsView({
             </div>
           </div>
           <div className={listTrailingClass}>
+            {entry.docsUrl ? (
+              <IconButton
+                size="compact"
+                className="skills-row-action"
+                label={`Open ${entry.name} docs`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleBrowse(entry.docsUrl!);
+                }}
+              >
+                <GlobeIcon />
+              </IconButton>
+            ) : null}
             {needsApproval && configuredServer ? (
               <IconButton
                 size="compact"
@@ -1049,6 +585,7 @@ export function SkillsView({
       const officialEntry = findOfficialEntryForServer(server);
       const isBusy = settingUpMcpId === server.id;
       const status = server.state?.status ?? 'unknown';
+      const diagnostic = formatMcpServerConnectionDiagnostic(server);
 
       return (
         <div key={server.id} className="skills-list-item skills-integration-item" data-testid={`mcp-configured-card-${server.id}`}>
@@ -1067,6 +604,11 @@ export function SkillsView({
                 </span>
               </div>
               <p>{officialEntry?.description ?? `${server.transportType} integration managed by Vicode.`}</p>
+              {diagnostic ? (
+                <p className="skills-integration-diagnostic" data-testid={`mcp-configured-diagnostic-${server.id}`}>
+                  {diagnostic}
+                </p>
+              ) : null}
             </div>
           </div>
           <div className={listTrailingClass}>
@@ -1174,16 +716,12 @@ export function SkillsView({
   const detailSuggestedSkill = selectedSuggestedSkill;
   const attachable = detailSkill ? isAttachable(detailSkill) : false;
   const attached = detailSkill ? attachedSkillIds.includes(detailSkill.id) : false;
-  const detailSyncTargets = detailSkill ? getSkillSyncTargets(detailSkill) : [];
-  const detailIsProviderNative = detailSkill?.origin === 'provider_native';
-  const detailIsCustom = detailSkill?.origin === 'custom_local';
-  const detailIsBuiltIn = detailSkill?.origin === 'built_in_style';
 
   return (
     <section className="catalog-view skills-view">
       <div className={pageShellClass}>
         <header className="skills-topbar">
-          <div className={subnavClass} role="tablist" aria-label="Plugin and skill catalog sections">
+          <div className={subnavClass} role="tablist" aria-label="Catalog sections">
             <ActionButton
               size="compact"
               tone={catalogTab === 'plugins' ? 'default' : 'quiet'}
@@ -1208,14 +746,6 @@ export function SkillsView({
             </ActionButton>
           </div>
           <div className={headerActionsClass}>
-            <ActionButton
-              className="skills-toolbar-button"
-              onClick={() => void handleRefreshCurrentTab()}
-              size="compact"
-              leadingIcon={<SettingsIcon />}
-            >
-              Manage
-            </ActionButton>
             <Menu>
               <MenuTrigger asChild>
                 <ActionButton
@@ -1238,7 +768,7 @@ export function SkillsView({
             {onBack ? (
               <IconButton
                 className="skills-toolbar-close"
-                label="Close plugins and skills"
+                label="Close catalog"
                 size="compact"
                 onClick={onBack}
               >
@@ -1249,10 +779,6 @@ export function SkillsView({
         </header>
 
         <main className="skills-catalog-stage">
-          <div className="skills-hero">
-            <h2>Make Vicode work your way</h2>
-          </div>
-
           <div className={controlsRowClass}>
             <div className={catalogControlsClass}>
               <TextInput
@@ -1270,8 +796,10 @@ export function SkillsView({
             ) : (
               <>
                 {renderSection('Recommended', [], sectionedSkills.officialSuggestions)}
-                {renderSection('System', sectionedSkills.installed.filter(isSystemSkill))}
-                {renderSection('Personal', sectionedSkills.installed.filter((skill) => !isSystemSkill(skill)))}
+                {renderSection('System', sectionedSkills.installedSystem)}
+                {renderSection('Built-in', sectionedSkills.installedBuiltIn)}
+                {renderSection('Project skills', sectionedSkills.installedProject)}
+                {renderSection('User skills', sectionedSkills.installedUser)}
                 {sectionedSkills.categories.map((section) => renderSection(section.title, section.installed, section.suggested))}
                 {filteredSkills.length === 0 && filteredSuggestedSkills.length === 0 ? (
                   <div className="empty-state compact">
@@ -1284,206 +812,34 @@ export function SkillsView({
         </main>
       </div>
 
-      <ModalDialog open={detailOpen} onOpenChange={setDetailOpen} className="skills-dialog-content w-[min(980px,calc(100vw-32px))]">
-        {detailSkill || detailSuggestedSkill ? (
-          <div className="skills-dialog-body">
-            <div className="skills-dialog-top">
-              <div className="skills-dialog-heading">
-                {detailSkill ? (
-                  <SkillAvatar skill={detailSkill} size="large" />
-                ) : detailSuggestedSkill ? (
-                  <span
-                    className={`skills-avatar ${detailSuggestedSkill.providerTargets.length > 1 ? 'is-vicode' : detailSuggestedSkill.providerTargets[0] === 'openai' ? 'is-openai' : detailSuggestedSkill.providerTargets[0] === 'gemini' ? 'is-gemini' : 'is-vicode'} is-available is-large`}
-                    aria-hidden="true"
-                  >
-                    <detailSuggestedSkill.icon size={24} />
-                  </span>
-                ) : null}
-                <div className="skills-dialog-title-group">
-                  <div className="skills-dialog-title-row">
-                    <h3>{detailSkill?.name ?? detailSuggestedSkill?.name}</h3>
-                    <IconButton
-                      className="skills-dialog-close-button"
-                      label="Close"
-                      size="compact"
-                      onClick={() => setDetailOpen(false)}
-                    >
-                      <CloseIcon />
-                    </IconButton>
-                  </div>
-                  <p>{detailSkill?.description ?? detailSuggestedSkill?.description}</p>
-                  {detailSkill ? (
-                    <div className="skills-detail-meta">
-                      <span>{skillScopeLabel(detailSkill)}</span>
-                      <span>{skillOriginLabel(detailSkill)}</span>
-                      <span>{resolveSkillCategoryLabel(detailSkill)}</span>
-                      <span>${getSkillCommandToken(detailSkill)}</span>
-                      {detailSkill.providerTargets.map((providerId) => (
-                        <span key={`${detailSkill.id}-${providerId}`}>{providerLabel(providerId)}</span>
-                      ))}
-                    </div>
-                  ) : detailSuggestedSkill ? (
-                    <div className="skills-detail-meta">
-                      <span>{skillCategoryLabel(detailSuggestedSkill.category)}</span>
-                      <span>{detailSuggestedSkill.installKind === 'provider_native' ? 'Available to install' : 'Importable skill'}</span>
-                      <span>{detailSuggestedSkill.status === 'keep' ? 'Curated for Vicode' : 'Experimental in Vicode'}</span>
-                      <span>${detailSuggestedSkill.token}</span>
-                      {detailSuggestedSkill.providerTargets.map((providerId) => (
-                        <span key={`${detailSuggestedSkill.id}-${providerId}`}>{providerLabel(providerId)}</span>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-              <div className="skills-dialog-header-actions">
-                {detail?.browseUrl ? (
-                  <ActionButton size="compact" tone="quiet" leadingIcon={<GlobeIcon />} onClick={() => void handleBrowse(detail.browseUrl!)}>
-                    Browse
-                  </ActionButton>
-                ) : null}
-                {detail?.folderPath ? (
-                  <ActionButton size="compact" tone="quiet" leadingIcon={<FolderIcon />} onClick={() => void handleRevealPath(detail.folderPath!)}>
-                    Open folder
-                  </ActionButton>
-                ) : null}
-              </div>
-            </div>
-
-            {detailLoading ? (
-              <div className="skills-dialog-loading">Loading skill details…</div>
-            ) : (
-              <>
-                {detail?.examplePrompt ? (
-                  <div className="skills-example-card">
-                    <div className="skills-example-header">
-                      <span>Example prompt</span>
-                      <ActionButton size="compact" tone="quiet" leadingIcon={<CopyIcon />} onClick={() => void copyExamplePrompt()}>
-                        Copy
-                      </ActionButton>
-                    </div>
-                    <pre>{detail.examplePrompt}</pre>
-                  </div>
-                ) : null}
-
-                {detailIsProviderNative ? (
-                  <div className="skills-runtime-note">
-                    {getSkillKind(detailSkill) === 'extension'
-                      ? `${providerLabel(detailSkill.providerTargets[0] ?? composerProviderId)} loads this extension through its own runtime. Vicode detected it in the provider folder and will include it in Gemini runs while it stays enabled here. You can disable it for Vicode or uninstall it from the provider folder here.`
-                      : `${providerLabel(detailSkill.providerTargets[0] ?? composerProviderId)} already manages this skill on disk. You can disable it for Vicode or uninstall it from the provider folder here.`}
-                  </div>
-                ) : null}
-
-                {detailSuggestedSkill ? (
-                  <div className="skills-runtime-note">
-                    {detailSuggestedSkill.status === 'experimental'
-                      ? 'This skill is source-reviewed but still experimental in Vicode. Review the notes here before installing it.'
-                      : 'Review what this skill does here first. Use Browse only if you want to inspect the source repository directly.'}
-                  </div>
-                ) : null}
-
-                <div
-                  className="skills-markdown"
-                  dangerouslySetInnerHTML={{
-                    __html: renderMarkdown(detail?.markdown ?? buildSkillDocument(detailSkill))
-                  }}
-                />
-
-                {detailIsCustom && detailSkill.scope === 'global' ? (
-                  <div className="skills-sync-panel">
-                    <h4>Optional export</h4>
-                    <div className="skills-sync-grid">
-                      {PROVIDER_OPTIONS
-                        .filter((providerId) => detailSkill.providerTargets.includes(providerId))
-                        .map((providerId) => {
-                          const syncState = getSkillSyncState(detailSkill, providerId);
-                          const exported = detailSyncTargets.includes(providerId) && syncState?.exported;
-                          return (
-                            <div key={`${detailSkill.id}-${providerId}-sync`} className="skills-sync-item">
-                              <div>
-                                <strong>{providerLabel(providerId)}</strong>
-                                <p>{exported ? syncState?.path ?? 'Exported' : 'Not exported'}</p>
-                              </div>
-                              <ActionButton
-                                size="compact"
-                                onClick={() => void syncSkill(detailSkill.id, providerId, !detailSyncTargets.includes(providerId))}
-                              >
-                                {detailSyncTargets.includes(providerId) ? 'Stop export' : 'Export'}
-                              </ActionButton>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  </div>
-                ) : null}
-              </>
-            )}
-
-            <div className="skills-dialog-actions">
-              <div className="skills-dialog-actions-left">
-                {detailIsCustom ? (
-                  <ActionButton size="compact" tone="quiet" leadingIcon={<SaveIcon />} onClick={() => openEditSkill(detailSkill)}>
-                    Edit
-                  </ActionButton>
-                ) : null}
-                {!detailSuggestedSkill && !detailIsBuiltIn ? (
-                  <ActionButton
-                    size="compact"
-                    tone="quiet"
-                    leadingIcon={detailSkill.enabled ? <CloseIcon /> : <PlusIcon />}
-                    onClick={() => void toggleSkill(detailSkill.id, !detailSkill.enabled)}
-                  >
-                    {detailSkill.enabled ? 'Disable' : 'Enable'}
-                  </ActionButton>
-                ) : null}
-                {!detailSuggestedSkill && !detailIsBuiltIn ? (
-                  <DangerButton size="compact" leadingIcon={<TrashIcon />} onClick={() => void handleRemove(detailSkill)}>
-                    {detailIsProviderNative ? 'Uninstall' : 'Remove'}
-                  </DangerButton>
-                ) : null}
-                {detailSuggestedSkill ? (
-                  <ActionButton
-                    size="compact"
-                    tone="quiet"
-                    leadingIcon={<PlusIcon />}
-                    disabled={installingSkillId === detailSuggestedSkill.id}
-                    onClick={() => void handleInstallSuggested(detailSuggestedSkill)}
-                  >
-                    {installingSkillId === detailSuggestedSkill.id ? 'Installing…' : 'Install'}
-                  </ActionButton>
-                ) : null}
-              </div>
-              {!detailSuggestedSkill ? (
-                <PrimaryButton
-                  size="compact"
-                  leadingIcon={attached ? <CheckIcon /> : <PlayIcon />}
-                  onClick={() => toggleAttachedSkill(detailSkill.id)}
-                  disabled={!attachable}
-                >
-                  {attached ? 'Attached' : detail?.attachMode === 'runtime' ? 'Try in composer' : 'Attach to composer'}
-                </PrimaryButton>
-              ) : null}
-            </div>
-
-            {!detailSuggestedSkill && !attachable ? (
-              <p className="skills-dialog-footnote">
-                {detailSkill.scope === 'project' && detailSkill.projectId !== selectedProject?.id
-                  ? 'Switch to the matching project before attaching this project skill.'
-                  : `This skill is not available for the current ${providerLabel(composerProviderId)} composer.`}
-              </p>
-            ) : null}
-            {detailIsBuiltIn ? (
-              <p className="skills-dialog-footnote">Vicode skills are optional. Install them here, then attach them from the composer when needed.</p>
-            ) : null}
-          </div>
-        ) : null}
-      </ModalDialog>
+      <SkillDetailDialog
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        detailSkill={detailSkill}
+        detailSuggestedSkill={detailSuggestedSkill}
+        detail={detail}
+        detailLoading={detailLoading}
+        composerProviderId={composerProviderId}
+        selectedProjectId={selectedProject?.id ?? null}
+        installingSkillId={installingSkillId}
+        attached={attached}
+        attachable={attachable}
+        onBrowse={(url) => void handleBrowse(url)}
+        onRevealPath={(path) => void handleRevealPath(path)}
+        onCopyExamplePrompt={() => void copyExamplePrompt()}
+        onEditSkill={openEditSkill}
+        onToggleSkill={(skillId, enabled) => void toggleSkill(skillId, enabled)}
+        onRemoveSkill={(skill) => void handleRemove(skill)}
+        onInstallSuggested={(skill) => void handleInstallSuggested(skill)}
+        onToggleAttachedSkill={toggleAttachedSkill}
+      />
 
       <ModalDialog
         open={editorOpen}
         onOpenChange={setEditorOpen}
         className="skills-editor-dialog w-[min(760px,calc(100vw-32px))]"
         title={draft.id ? 'Edit skill' : 'New skill'}
-        description="Create a Vicode-managed skill. It can be attached in the composer and optionally exported to provider folders."
+        description="Create a Vicode-managed skill. It can be attached in the composer without writing to provider-owned skill folders."
         actions={
           <>
             <ActionButton tone="quiet" onClick={() => setEditorOpen(false)}>
@@ -1515,8 +871,7 @@ export function SkillsView({
               value={draft.scope}
               onChange={(event) =>
                 updateDraft({
-                  scope: event.target.value as 'global' | 'project',
-                  syncTargets: event.target.value === 'global' ? draft.syncTargets : []
+                  scope: event.target.value as 'global' | 'project'
                 })
               }
             >
@@ -1526,11 +881,7 @@ export function SkillsView({
               <option value="global">Personal across all projects</option>
             </SelectField>
             <p className="skills-form-help">
-              {draft.scope === 'project'
-                ? selectedProject
-                  ? `Only available in ${selectedProject.name}. This is the safer default for new skills.`
-                  : 'Project skills require an active project.'
-                : 'Available in every project and thread on this device. Use this only for stable personal workflows.'}
+              {skillDraftScopeHelp(draft, selectedProject)}
             </p>
           </div>
 
@@ -1548,30 +899,6 @@ export function SkillsView({
                   {providerLabel(providerId)}
                 </ActionButton>
               ))}
-            </div>
-          </div>
-
-          <div className="skills-form-group">
-            <span className="skills-form-label">Optional export</span>
-            <p className="skills-form-help">
-              Export is only available for personal skills that live across all projects.
-            </p>
-            <div className="skills-toggle-row">
-              {PROVIDER_OPTIONS.map((providerId) => {
-                const disabled = draft.scope !== 'global' || !draft.providerTargets.includes(providerId);
-                return (
-                  <ActionButton
-                    key={`provider-sync-${providerId}`}
-                    size="compact"
-                    className={draft.syncTargets.includes(providerId) ? 'skills-toggle-button is-active' : 'skills-toggle-button'}
-                    aria-pressed={draft.syncTargets.includes(providerId)}
-                    onClick={() => toggleDraftSync(providerId)}
-                    disabled={disabled}
-                  >
-                    Export to {providerLabel(providerId)}
-                  </ActionButton>
-                );
-              })}
             </div>
           </div>
 

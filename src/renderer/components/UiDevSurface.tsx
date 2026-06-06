@@ -71,9 +71,9 @@ export function UiDevSurface() {
           <h3>Inputs</h3>
           <div className="ui-dev-stack">
             <TextInput placeholder="Text input" />
-            <SelectField defaultValue="codex">
-              <option value="codex">Codex</option>
-              <option value="gemini">Gemini</option>
+            <SelectField defaultValue="ollama">
+              <option value="ollama">Ollama</option>
+              <option value="custom-api">Custom API</option>
             </SelectField>
             <TextArea className="tall" placeholder="Text area" />
           </div>
@@ -88,18 +88,18 @@ export function UiDevSurface() {
               </MenuTrigger>
               <MenuContent>
                 <MenuGroup>
-                  <MenuLabel>Codex</MenuLabel>
+                  <MenuLabel>Ollama</MenuLabel>
                   <MenuCheckboxItem checked>
-                    <MenuItemLabel>GPT-5</MenuItemLabel>
+                    <MenuItemLabel>Qwen 2.5 Coder</MenuItemLabel>
                     <CheckIcon />
                   </MenuCheckboxItem>
                   <MenuItem>
-                    <MenuItemLabel>GPT-5 Mini</MenuItemLabel>
+                    <MenuItemLabel>Qwen 3</MenuItemLabel>
                   </MenuItem>
                   <MenuSeparator />
-                  <MenuLabel>Gemini</MenuLabel>
+                  <MenuLabel>Custom API</MenuLabel>
                   <MenuItem>
-                    <MenuItemLabel>Gemini 2.5 Pro</MenuItemLabel>
+                    <MenuItemLabel>GPT-5.4 Nano</MenuItemLabel>
                   </MenuItem>
                 </MenuGroup>
               </MenuContent>
@@ -142,8 +142,8 @@ export function UiDevSurface() {
         <SurfaceCard>
           <h3>Composer Controls</h3>
           <div className="ui-dev-inline ui-dev-wrap">
-            <ActionButton tone="quiet" size="compact" leadingIcon={<AccountIcon />}>Codex</ActionButton>
-            <ActionButton tone="quiet" size="compact" trailingIcon={<ChevronDownIcon />}>GPT-5</ActionButton>
+            <ActionButton tone="quiet" size="compact" leadingIcon={<AccountIcon />}>Ollama</ActionButton>
+            <ActionButton tone="quiet" size="compact" trailingIcon={<ChevronDownIcon />}>Qwen 2.5</ActionButton>
             <ActionButton tone="quiet" size="compact" trailingIcon={<ChevronDownIcon />}>High</ActionButton>
             <IconButton label="Mic" tone="quiet"><AccountIcon /></IconButton>
             <IconButton label="Send"><SendIcon /></IconButton>

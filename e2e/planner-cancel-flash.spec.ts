@@ -14,8 +14,7 @@ async function createPlannerCancelFixture(window: Page, workspaceDir: string) {
 
     let provider =
       providerCandidates.find((candidate) => candidate.id === 'ollama') ??
-      providerCandidates.find((candidate) => candidate.id === 'openai') ??
-      providerCandidates.find((candidate) => candidate.id === 'gemini') ??
+      providerCandidates.find((candidate) => candidate.id === 'openai_compatible') ??
       providerCandidates[0];
 
     if (provider.authState === 'detected') {
@@ -31,7 +30,7 @@ async function createPlannerCancelFixture(window: Page, workspaceDir: string) {
       project.defaultModelByProvider[provider.id] ??
       bootstrap.preferences.defaultModelByProvider[provider.id] ??
       provider.models[0]?.id ??
-      'gpt-5';
+      'qwen2.5-coder:14b-instruct-q6_K';
     const thread = await window.vicode.threads.create({
       projectId: project.id,
       providerId: provider.id,

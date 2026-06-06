@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-04-24T03:37:09.282Z",
+  "generatedAt": "2026-06-04T15:01:42.026Z",
   "source": "<curated-local-guidance-source>/wiki",
   "entrypoint": "VICODE.md",
   "vaultRoot": "wiki",
@@ -32,15 +32,31 @@
     "wiki/UI Review Rubric.md",
     "wiki/UX Writing Standards.md",
     "wiki/Verification Standards.md",
-    "wiki/Writing Anti-Patterns.md"
+    "wiki/Writing Anti-Patterns.md",
+    "wiki/Ollama And Local Models.md",
+    "wiki/Retrieval For Coding Projects.md",
+    "wiki/Source Quality And Grounding.md",
+    "wiki/Tool Use And Trust.md",
+    "wiki/Coding Agent Workflows.md",
+    "wiki/Structured Outputs And Evals.md"
   ],
   "pages": [
     {
       "title": "Agent Runtime Patterns",
       "path": "wiki/Agent Runtime Patterns.md",
       "obsidianRoute": "[[Agent Runtime Patterns]]",
-      "aliases": [],
-      "aliasRoutes": []
+      "aliases": [
+        "agent runtime",
+        "agent tooling runtime",
+        "agent memory and tools",
+        "tool runtime patterns"
+      ],
+      "aliasRoutes": [
+        "[[agent runtime]]",
+        "[[agent tooling runtime]]",
+        "[[agent memory and tools]]",
+        "[[tool runtime patterns]]"
+      ]
     },
     {
       "title": "Capability Routing Standard",
@@ -53,8 +69,18 @@
       "title": "Cleanup And Stale Artifact Discipline",
       "path": "wiki/Cleanup And Stale Artifact Discipline.md",
       "obsidianRoute": "[[Cleanup And Stale Artifact Discipline]]",
-      "aliases": [],
-      "aliasRoutes": []
+      "aliases": [
+        "cleanup discipline",
+        "stale artifact cleanup",
+        "stale docs cleanup",
+        "safe deletion"
+      ],
+      "aliasRoutes": [
+        "[[cleanup discipline]]",
+        "[[stale artifact cleanup]]",
+        "[[stale docs cleanup]]",
+        "[[safe deletion]]"
+      ]
     },
     {
       "title": "Code Organization Standard",
@@ -102,8 +128,18 @@
       "title": "Frontend Standards",
       "path": "wiki/Frontend Standards.md",
       "obsidianRoute": "[[Frontend Standards]]",
-      "aliases": [],
-      "aliasRoutes": []
+      "aliases": [
+        "frontend quality",
+        "UI quality",
+        "frontend design standards",
+        "visual implementation standards"
+      ],
+      "aliasRoutes": [
+        "[[frontend quality]]",
+        "[[UI quality]]",
+        "[[frontend design standards]]",
+        "[[visual implementation standards]]"
+      ]
     },
     {
       "title": "Markdown KB Retrieval Design",
@@ -141,12 +177,14 @@
       "aliases": [
         "retrieval order",
         "tiered retrieval",
-        "context budget"
+        "context budget",
+        "wiki context cost"
       ],
       "aliasRoutes": [
         "[[retrieval order]]",
         "[[tiered retrieval]]",
-        "[[context budget]]"
+        "[[context budget]]",
+        "[[wiki context cost]]"
       ]
     },
     {
@@ -205,6 +243,120 @@
       "obsidianRoute": "[[Writing Anti-Patterns]]",
       "aliases": [],
       "aliasRoutes": []
+    },
+    {
+      "title": "Ollama And Local Models",
+      "path": "wiki/Ollama And Local Models.md",
+      "obsidianRoute": "[[Ollama And Local Models]]",
+      "aliases": [
+        "Ollama",
+        "local models",
+        "local LLMs",
+        "model freshness",
+        "Ollama context"
+      ],
+      "aliasRoutes": [
+        "[[Ollama]]",
+        "[[local models]]",
+        "[[local LLMs]]",
+        "[[model freshness]]",
+        "[[Ollama context]]"
+      ]
+    },
+    {
+      "title": "Retrieval For Coding Projects",
+      "path": "wiki/Retrieval For Coding Projects.md",
+      "obsidianRoute": "[[Retrieval For Coding Projects]]",
+      "aliases": [
+        "project retrieval",
+        "coding knowledge base",
+        "AGENTS.md guidance",
+        "MEMORY.md guidance",
+        "Project Knowledge structure"
+      ],
+      "aliasRoutes": [
+        "[[project retrieval]]",
+        "[[coding knowledge base]]",
+        "[[AGENTS.md guidance]]",
+        "[[MEMORY.md guidance]]",
+        "[[Project Knowledge structure]]"
+      ]
+    },
+    {
+      "title": "Source Quality And Grounding",
+      "path": "wiki/Source Quality And Grounding.md",
+      "obsidianRoute": "[[Source Quality And Grounding]]",
+      "aliases": [
+        "source quality",
+        "grounding",
+        "source-backed answers",
+        "provenance",
+        "citations"
+      ],
+      "aliasRoutes": [
+        "[[source quality]]",
+        "[[grounding]]",
+        "[[source-backed answers]]",
+        "[[provenance]]",
+        "[[citations]]"
+      ]
+    },
+    {
+      "title": "Tool Use And Trust",
+      "path": "wiki/Tool Use And Trust.md",
+      "obsidianRoute": "[[Tool Use And Trust]]",
+      "aliases": [
+        "tool trust",
+        "permission boundaries",
+        "prompt injection",
+        "MCP trust",
+        "tool safety"
+      ],
+      "aliasRoutes": [
+        "[[tool trust]]",
+        "[[permission boundaries]]",
+        "[[prompt injection]]",
+        "[[MCP trust]]",
+        "[[tool safety]]"
+      ]
+    },
+    {
+      "title": "Coding Agent Workflows",
+      "path": "wiki/Coding Agent Workflows.md",
+      "obsidianRoute": "[[Coding Agent Workflows]]",
+      "aliases": [
+        "coding agent loop",
+        "agent workflow",
+        "debugging workflow",
+        "implementation workflow",
+        "review workflow"
+      ],
+      "aliasRoutes": [
+        "[[coding agent loop]]",
+        "[[agent workflow]]",
+        "[[debugging workflow]]",
+        "[[implementation workflow]]",
+        "[[review workflow]]"
+      ]
+    },
+    {
+      "title": "Structured Outputs And Evals",
+      "path": "wiki/Structured Outputs And Evals.md",
+      "obsidianRoute": "[[Structured Outputs And Evals]]",
+      "aliases": [
+        "structured outputs",
+        "JSON schema outputs",
+        "model evals",
+        "deterministic validation",
+        "Ollama structured outputs"
+      ],
+      "aliasRoutes": [
+        "[[structured outputs]]",
+        "[[JSON schema outputs]]",
+        "[[model evals]]",
+        "[[deterministic validation]]",
+        "[[Ollama structured outputs]]"
+      ]
     }
   ]
 }

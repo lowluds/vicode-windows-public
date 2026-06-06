@@ -4,7 +4,7 @@
 ---
 type: workflow
 status: active
-updated: 2026-04-24
+updated: 2026-05-30
 aliases:
   - route cards
   - read depth
@@ -15,185 +15,229 @@ aliases:
 
 ## Summary
 
-Agents should consult the shared wiki deliberately, not constantly. The goal is better judgment, not extra ceremony.
+Use this page as Tier 0. Pick one route card, open its Lead page, then add only triggered support pages.
 
-For judgment-heavy work, wiki use is expected, not optional.
-
-Agents should do this autonomously when the task clearly matches a routed category. The user should not need to repeatedly remind the agent to consult the handbook.
-
-When a specialist skill or plugin capability clearly matches the task, use it. Treat the wiki as routing, quality guidance, and review support rather than a weaker substitute.
-
-For substantial or ambiguous work, make the route explicit with [[Routing Preflight Standard]] before reading broadly, delegating, or editing.
-
-When a task may need a skill, plugin, app, or automation, use [[Capability Routing Standard]] to keep the decision small.
+The wiki sets route, source order, and quality bar. Skills, plugins, apps, and automations remain first-class execution capabilities when they are the stronger match.
 
 ## Read Depth Rule
 
-Use the smallest tier that can answer the task.
+- Tier 0: nearest `AGENTS.md` files plus this page.
+- Tier 1: one Lead page from the matching route card.
+- Tier 2: Add pages only when their trigger applies.
+- Tier 3: `raw/` notes, official docs, broad search, or web research only for evidence, citations, current facts, or source-quality review.
 
-- Tier 0: read the nearest `AGENTS.md` files and this page to choose the route.
-- Tier 1: open one lead page from the matching route card.
-- Tier 2: open only the conditional support pages named by the route card when their trigger applies.
-- Tier 3: open `raw/` source notes, official docs, or broad local search only when evidence, citations, version accuracy, or source-quality review is required.
+Stop reading when the task family, lead workflow, source hierarchy, capability choice, and verification path are clear.
 
-Do not read every page in a route card by default. Start with the lead page, then stop as soon as the workflow, constraints, and verification path are clear.
+## Route Card Keys
 
-## Route Card Format
+- Lead: first page to open after Tier 0.
+- Add: conditional support pages.
+- Capability: skill, plugin, app, automation, or tool decision.
+- Evidence: source notes or external sources only when proof matters.
 
-Each route card uses this shape:
+## Route Cards
 
-- Lead: the first wiki page to open after Tier 0.
-- Add: support pages to open only when the trigger applies.
-- Capability: skill, plugin, app, or automation decision point.
-- Evidence: source notes or external sources to open only when proof or current facts matter.
-
-## Always Read First For Unfamiliar Work
+### Unfamiliar Work
 
 - Lead: [[Repo Onboarding Checklist]]
-- Add: [[Operating Model]] when the source hierarchy or wiki boundary is unclear.
+- Add: [[Operating Model]] when source hierarchy or wiki boundary is unclear.
 - Add: [[Source-Backed Workflow]] before substantial edits, debugging, refactoring, or source-sensitive work.
-- Capability: [[Capability Routing Standard]] only if a skill, plugin, app, or automation could materially improve the task.
+- Capability: [[Capability Routing Standard]] only if a capability could materially improve the task.
 
-## Route Cards For Specific Task Types
-
-### Source-backed research or ambiguous implementation
+### Source-Backed Research Or Ambiguous Implementation
 
 - Lead: [[Source-Backed Workflow]]
 - Add: [[Routing Preflight Standard]] before deeper reading, delegation, or editing.
-- Add: [[Prompt To Execution Packet]] when the prompt needs bounding into a task packet.
+- Add: [[Prompt To Execution Packet]] when the prompt needs bounding.
+- Add: [[Library-First Development]] when implementation may otherwise rebuild commodity functionality that likely has mature libraries, SDKs, official examples, or open-source repos.
 - Add: [[Agentic Development Excellence]] when the work is broad, ambitious, ambiguous, or quality-sensitive.
 - Add: [[Execution Discipline]] and [[Verification Standards]] before handoff.
-- Capability: [[Capability Routing Standard]] when a skill, plugin, app, or automation may be useful; use [[Skill Routing Catalog]] only after deciding to inspect skills.
-- Evidence: [[Source Material Policy]] when source quality or provenance affects the answer.
+- Capability: [[Capability Routing Standard]] when a skill, plugin, app, or automation may help.
+- Evidence: [[Source Material Policy]] when provenance affects the answer.
 
-### Agentic development strategy, prompt enhancement, or wiki excellence
+### Agentic Development, Prompt Enhancement, Or Wiki Excellence
 
 - Lead: [[Agentic Development Excellence]]
-- Add: [[Prompt To Execution Packet]] when user intent needs transformation into a bounded execution packet.
-- Add: [[Agent Evaluation And Feedback Loops]] when recurring agent behavior needs measurement or a durable feedback loop.
-- Add: [[Markdown KB Retrieval Design]] and [[Search And Retrieval]] when the work changes wiki structure, routing, or context budget.
-- Add: [[Query And Promotion Workflow]] and [[Wiki Maintenance Model]] when deciding whether a finding should become durable documentation.
-- Capability: [[Capability Routing Standard]] when the solution may require skills, plugins, apps, or automations.
-- Evidence: [[Source Material Policy]] when source quality or current external evidence matters.
+- Add: [[Prompt To Execution Packet]] for rough intent-to-execution translation.
+- Add: [[Coding Agent Behavior Standard]] when the prompt asks to reduce common LLM coding mistakes, overengineering, scope creep, silent assumptions, broad unrelated edits, or weak verification.
+- Add: [[Codex Goal Mechanism]] when the user asks for `/goal`, an active goal, persistent objective handling, or goal-continuation behavior.
+- Add: [[AI Harness Engineering]] when the task is about agent harnesses, Codex efficiency, repeated agent failures, context/tool/memory/guardrail loops, or converting corrections into durable controls.
+- Add: [[LLM Wiki Utilization Model]] when the task is about why Codex chose a wiki page, skill, or pattern; how to make Codex use the shared wiki better; or how to diagnose route-stack behavior.
+- Add: [[Library-First Development]] when repeated Codex behavior shows unnecessary from-scratch implementation instead of library, SDK, or repo reuse.
+- Add: [[Agent Evaluation And Feedback Loops]] for recurring behavior failures.
+- Add: [[Markdown KB Retrieval Design]] and [[Search And Retrieval]] for routing, structure, retrieval, or context-budget changes.
+- Add: [[Wiki Context Reporting]] when the task asks how much wiki context was used, whether the wiki helped, or how to collect passive usage evidence.
+- Add: [[Query And Promotion Workflow]] and [[Wiki Maintenance Model]] for durable documentation decisions.
+- Capability: [[Capability Routing Standard]] when skills, plugins, apps, or automations may be part of the solution.
+- Evidence: [[Source Material Policy]] when source quality or current evidence matters.
 
-### Frontend or UI quality work
+### Codex Operating Layer, Skills, MCP, Or Wiki Utilization Audit
+
+- Lead: [[Codex Operating Layer Standard]]
+- Add: [[LLM Wiki Utilization Model]] when the question is why a skill, route, plugin, or wiki page was selected, over-selected, missed, or used in the wrong role.
+- Add: [[Wiki Utilization Audit]] when measuring whether Codex actually used the wiki, skills, MCP, or instructions correctly.
+- Add: [[Tool Permission And Scope Discipline]] when shell, browser, network, MCP, plugins, config trust, approvals, or project-scoped `.codex` behavior is involved.
+- Add: [[Skill Routing Catalog]] when skill trigger quality, overlap, or implicit invocation is central.
+- Add: [[Search And Retrieval]] and [[Markdown KB Retrieval Design]] when context budget or retrieval path is central.
+- Add: [[Agent Golden Tasks]] when a change must be regression-tested.
+- Capability: use current session-visible Codex config, skills, MCP tools, subagents, plugins, and hooks as the live capability surface.
+- Evidence: [[Source - Codex Operating Layer 2026-05-23]] for current official Codex behavior and research-backed scope risks.
+
+### Production Agent Engineering
+
+- Lead: [[Agent Engineering Standard]]
+- Add: [[Agent Runtime Patterns]] when tool, runtime, permission, state, or memory shape is central.
+- Add: [[Search And Retrieval]] and [[Markdown KB Retrieval Design]] when context budget or retrieval quality is central.
+- Add: [[Security And Secrets]] for trust boundaries, permissions, tool risk, prompt injection, or secrets.
+- Add: [[Agent Evaluation And Feedback Loops]] and [[Verification Standards]] for evals, traces, metrics, and release evidence.
+- Capability: [[Capability Routing Standard]] before MCP, plugin, app, automation, or specialist-skill use.
+- Evidence: [[Source - Production Agent Engineering 2026]] when changing this standard or citing the research.
+
+### Frontend Or UI Quality
 
 - Lead: [[Frontend Standards]]
-- Add: [[Frontend Overlay - Polished Product Website]] for general polished product websites unless repo-local design or a user reference is stronger.
-- Add: [[Design Taste Translation]] and [[Reference To Code Workflow]] when translating visual references into implementation.
+- Add: [[Frontend Overlay - Polished Product Website]] for polished product websites unless stronger repo-local design or user references apply.
+- Add: [[Mobile Web Performance And Design]] when mobile layout, mobile speed, Core Web Vitals, responsive media, touch targets, client JavaScript, or mobile motion restraint is central.
+- Add: [[Design Taste Translation]] and [[Reference To Code Workflow]] when translating references into implementation.
+- Add: [[UI Anti-Patterns]] as a support guard, not the lead route, when the user names repeated visual dislikes, asks to stop frontend patterns, or the work involves shadows, decorative pills, badges, chips, glows, borders, or other recurring generated-UI mistakes.
+- Add: [[Image Generation Model Policy]] when generating or editing raster assets for the UI, website, brand, product, or project.
 - Add: [[UI Review Rubric]] and [[Frontend Quality Gate]] before calling substantial visual work done.
-- Add: [[Verification Standards]] when visual, responsive, accessibility, or runtime checks need an evidence plan.
-- Capability: [[Capability Routing Standard]] first, then the strongest matching frontend skill or plugin; inspect [[Skill Routing Catalog]] only if the session-visible choice is unclear.
-- Evidence: open live references or source notes only when the task needs reference fidelity or citations.
+- Add: [[Verification Standards]] for visual, responsive, accessibility, or runtime evidence.
+- Capability: [[Capability Routing Standard]] first, then the strongest matching frontend skill or plugin.
+- Evidence: live references or source notes only when reference fidelity or citations matter.
 
-### Motion, animation, or scroll choreography work
+### Image Generation Or Visual Asset Creation
+
+- Lead: [[Image Generation Model Policy]]
+- Add: [[Image And Visual Source Workflow]] when screenshots, reference images, visual taste, or source captures affect the image.
+- Add: [[Frontend Standards]], [[Project Taste Packets]], and [[Preferred Product Website Aesthetic]] when the asset belongs to a web or product UI surface.
+- Add: [[Source-Backed Workflow]] when model availability, version, or provenance claims matter.
+- Capability: use the current `imagegen` skill or equivalent image-generation capability. Built-in `image_gen` is acceptable for drafts/previews; explicit API/CLI `gpt-image-2` is required for final or project-bound assets when provenance matters.
+- Evidence: [[Source - OpenAI Image Generation 2026-05-06]] for current GPT Image model policy.
+
+### Motion, Animation, Or Scroll Choreography
 
 - Lead: [[GSAP Usage Standards]]
-- Add: [[Frontend Standards]] when the motion must fit the broader UI system.
+- Add: [[Source - GreenSock GSAP AI Skills 2026]] when implementation details require official GreenSock skill links for core GSAP, timelines, ScrollTrigger, plugins, React, utilities, performance, or framework lifecycle patterns.
+- Add: [[Frontend Standards]] when motion must fit the broader UI system.
+- Add: [[Mobile Web Performance And Design]] when motion must simplify, disable, or adapt on mobile.
 - Add: [[Design Taste Translation]] when motion direction is part of visual taste.
 - Add: [[UI Review Rubric]], [[Frontend Quality Gate]], and [[Verification Standards]] before handoff.
-- Capability: use a specialist frontend or browser verification skill only when it materially improves implementation or rendered review.
+- Capability: use an installed official GreenSock `gsap-*` skill when available; otherwise open the targeted official skill URL listed in [[GSAP Usage Standards]]. Use specialist frontend or browser verification only when it materially improves implementation or rendered review.
 
-### Security-sensitive or secret-sensitive work
+### Security, Secrets, Or Trust Boundaries
 
 - Lead: [[Security And Secrets]]
-- Add: [[Source-Backed Workflow]] when current repo behavior or official guidance must be verified.
-- Add: [[Verification Standards]] before reporting a security-sensitive result.
-- Capability: [[Capability Routing Standard]] before using any specialist security skill, platform plugin, or external tool.
-- Evidence: official upstream docs and repo-local security configuration when claims are version-sensitive or risk-bearing.
+- Add: [[Source-Backed Workflow]] when repo behavior or official guidance must be verified.
+- Add: [[Tool Permission And Scope Discipline]] when the task involves shell, browser, network, MCP, plugins, project trust, approval policy, broad filesystem scope, or destructive actions.
+- Add: [[Verification Standards]] before reporting results.
+- Capability: [[Capability Routing Standard]] before specialist security, platform, or external-tool use.
+- Evidence: official docs and repo-local configuration when claims are risk-bearing or version-sensitive.
 
-### Deployment, infra, or environment work
+### Deployment, Infra, Or Environment Work
 
 - Lead: [[Git And Worktree Discipline]]
-- Add: [[Security And Secrets]] when env vars, auth, secrets, exposed services, or remote infrastructure are involved.
+- Add: [[Security And Secrets]] for env vars, auth, secrets, exposed services, or remote infrastructure.
 - Add: [[Verification Standards]] before reporting deployment or environment status.
-- Capability: [[Capability Routing Standard]] before using platform skills, plugins, CLIs, apps, or automations.
-- Evidence: official platform docs when behavior may have changed or the task is high impact.
+- Capability: [[Capability Routing Standard]] before platform skills, plugins, CLIs, apps, or automations.
+- Evidence: official platform docs when behavior may have changed or impact is high.
 
-### Parallel or role-based work
+### Parallel Or Role-Based Work
 
 - Lead: [[Multi-Agent Collaboration]]
 - Add: [[Routing Preflight Standard]] before spawning, reusing, or handing off substantial work.
-- Add: [[Context Packet Standard]] only when another agent needs a bounded packet or the task has multiple source layers.
-- Add: [[Source-Backed Workflow]] and [[Verification Standards]] when delegated work needs source grounding and acceptance checks.
-- Capability: use [[Capability Routing Standard]] when a role should use a specialist skill, plugin, app, or automation.
+- Add: [[Context Packet Standard]] only when another agent needs a bounded packet.
+- Add: [[Source-Backed Workflow]] and [[Verification Standards]] for grounded delegated work.
+- Capability: [[Capability Routing Standard]] when a role should use a specialist capability.
 
-### Repo setup or branch/worktree questions
+### Repo Setup Or Branch/Worktree Questions
 
 - Lead: [[Git And Worktree Discipline]]
 - Add: [[Repo Onboarding Checklist]] when the repo is unfamiliar or the source map is unclear.
 
-### Documentation updates
+### Documentation Updates
 
 - Lead: [[Docs As Code]]
 - Add: [[Routing Preflight Standard]] before broad documentation edits.
-- Add: [[Cleanup And Stale Artifact Discipline]] when stale docs, duplicated pages, or old artifacts may be present.
-- Add: [[Operating Model]] when deciding whether guidance belongs in the wiki, a project repo, or `AGENTS.md`.
-- Capability: [[Capability Routing Standard]] only if a writing, document, or repository skill/plugin materially helps.
+- Add: [[Cleanup And Stale Artifact Discipline]] for stale docs, duplicated pages, or old artifacts.
+- Add: [[Operating Model]] when deciding whether guidance belongs in the wiki, a repo, or `AGENTS.md`.
+- Capability: [[Capability Routing Standard]] only if a writing, document, or repository capability helps.
 
-### Cleanup, stale code, stale docs, or artifact removal
+### Cleanup Or Stale Artifacts
 
 - Lead: [[Cleanup And Stale Artifact Discipline]]
 - Add: [[Code Organization Standard]] when cleanup intersects with modularity or file bloat.
-- Add: [[Docs As Code]] when documentation may need to move with the cleanup.
+- Add: [[Docs As Code]] when documentation must move with cleanup.
 - Add: [[Git And Worktree Discipline]] and [[Verification Standards]] before destructive or repo-impacting changes.
-- Add: [[Source-Backed Workflow]] when stale status must be proven from local truth or official sources.
-- Add: [[Agent Evaluation And Feedback Loops]] when cleanup is addressing a recurring agent failure.
+- Add: [[Source-Backed Workflow]] when stale status must be proven.
+- Add: [[Agent Evaluation And Feedback Loops]] when cleanup addresses a recurring agent failure.
 
-### Wiki audits, retrieval audits, or source-quality reviews
+### Wiki, Retrieval, Or Source-Quality Audits
 
 - Lead: [[Search And Retrieval]]
-- Add: [[Markdown KB Retrieval Design]] when page structure, route cards, aliases, or context budget are part of the work.
-- Add: [[Source Material Policy]] when evidence quality or provenance is being audited.
-- Add: [[Docs As Code]], [[Documentation Promotion Rule]], and [[Wiki Maintenance Model]] when changes affect durable documentation.
-- Evidence: use `raw/` notes only when validating sources, citations, or promoted claims.
+- Add: [[LLM Wiki Utilization Model]] when auditing whether agents are choosing the correct route stack instead of simply opening more wiki pages.
+- Add: [[Markdown KB Retrieval Design]] for page structure, route cards, aliases, or context budget.
+- Add: [[Wiki Context Reporting]] when measuring estimated wiki tokens, context economy, usage ledger entries, or passive effectiveness signals.
+- Add: [[Source Material Policy]] for evidence quality or provenance.
+- Add: [[Docs As Code]], [[Documentation Promotion Rule]], and [[Wiki Maintenance Model]] when durable docs change.
+- Add: [[Wiki Utilization Audit]] when the question is whether agents are using the wiki to full capacity or whether routing changes improved behavior.
+- Evidence: `raw/` notes only when validating sources, citations, or promoted claims.
 
-### UX writing, website copy, or product messaging
+### UX Writing, Website Copy, Or Product Messaging
 
-- Lead: [[Website Copy Standards]] for marketing or landing-page copy, or [[UX Writing Standards]] for product/interface copy.
-- Add: [[Writing Anti-Patterns]] before revising low-quality or generic agent-generated text.
+- Lead: [[Website Copy Standards]] for marketing copy, or [[UX Writing Standards]] for product/interface copy.
+- Add: [[Writing Anti-Patterns]] before revising generic or low-quality text.
 - Add: [[Verification Standards]] when claims, accessibility, or user-facing behavior need checks.
-- Capability: use the strongest matching writing skill when drafting or editing is the main task; inspect [[Skill Routing Catalog]] only if the choice is unclear.
+- Capability: strongest matching writing skill when drafting or editing is the main task.
 
-### Repeated questions or durable synthesis
+### Repeated Questions Or Durable Synthesis
 
 - Lead: [[Query And Promotion Workflow]]
-- Add: [[Documentation Promotion Rule]] when deciding whether a pattern should be promoted.
+- Add: [[Documentation Promotion Rule]] when deciding whether to promote a pattern.
 - Add: [[Schema And Page Types]] when creating or reshaping wiki pages.
 
-### General implementation work
+### General Implementation
 
 - Lead: [[Execution Discipline]]
+- Add: [[Coding Agent Behavior Standard]] when coding work needs explicit guardrails against silent assumptions, overengineering, broad edits, or vague success criteria.
+- Add: [[Library-First Development]] before implementing non-trivial commodity domains such as browser automation, canvas/wireframe editors, drag/drop, rich text, charts, tables, export, auth, payments, validation, parsing, search, realtime, queues, or state machines.
 - Add: [[Code Organization Standard]] for non-trivial code changes.
-- Add: [[Cleanup And Stale Artifact Discipline]] when stale artifacts or dead code may result from the change.
-- Add: [[Prompt To Execution Packet]] when the implementation request needs bounding.
+- Add: [[Cleanup And Stale Artifact Discipline]] when stale artifacts or dead code may result.
+- Add: [[Prompt To Execution Packet]] when the request needs bounding.
 - Add: [[Verification Standards]] before handoff.
-- Add: [[Context Packet Standard]] only when the task is large enough that a short preflight is insufficient.
-- Capability: [[Capability Routing Standard]] when a skill, plugin, app, or automation may materially improve the work.
+- Add: [[Context Packet Standard]] only when a short preflight is insufficient.
+- Capability: [[Capability Routing Standard]] when a capability may materially improve the work.
 
-### Agent runtime, tool, MCP, memory, or retrieval architecture
+### Agent Runtime, Tool, MCP, Memory, Or Retrieval Architecture
 
 - Lead: [[Agent Runtime Patterns]]
+- Add: [[Codex Goal Mechanism]] when `/goal`, active goals, goal status, resume continuity, or goal-tool behavior is central.
+- Add: [[AI Harness Engineering]] when designing or improving the model-adjacent control layer around context, tools, memory, permissions, orchestration, verification, observability, or recurring Codex behavior.
+- Add: [[Coding Agent Tooling Architecture]] only when building or auditing a coding-agent system, local agent shell, provider runtime, tool registry, approval surface, review-evidence surface, or code-writing agent workflow.
+- Add: [[Codex Operating Layer Standard]] when auditing Codex AGENTS.md discovery, skills, MCP servers, subagents, plugins, permissions, project trust, or config profiles.
+- Add: [[Tool Permission And Scope Discipline]] when the runtime decision changes what tools, network, filesystem, browser, or credentialed systems an agent can access.
 - Add: [[Agentic Development Excellence]] for broad strategy or high-quality agent-system design.
 - Add: [[Markdown KB Retrieval Design]] and [[Search And Retrieval]] when retrieval, memory, or context budget are central.
-- Add: [[Agent Evaluation And Feedback Loops]] when the work needs evaluation criteria or behavior feedback loops.
+- Add: [[Wiki Context Reporting]] when the runtime should emit wiki usage metrics, trace-like route reports, or periodic rollups.
+- Add: [[Source - RAG And Knowledge Base Retrieval Patterns]] when the task asks about RAG, knowledge-base architecture, vector search, hybrid search, retrieval quality, or source-backed retrieval claims.
+- Add: [[Agent Evaluation And Feedback Loops]] for evaluation criteria or behavior loops.
 - Add: [[Source-Backed Workflow]] and [[Verification Standards]] before implementation or claims.
 - Add: [[Multi-Agent Collaboration]] when role agents or delegation are part of the architecture.
-- Capability: [[Capability Routing Standard]] before using MCP, plugin, app, automation, or specialist skills.
+- Capability: [[Capability Routing Standard]] before MCP, plugin, app, automation, or specialist-skill use.
 
-## When Not To Reach For The Shared Wiki
+## Skip Rule
 
-Skip this vault when the repo already has strong local instructions that fully define the work and no cross-project judgment call is needed.
+Skip this vault when repo-local instructions fully define the work and no cross-project judgment call is needed.
 
-Also skip deeper Tier 2 and Tier 3 pages when the Tier 1 lead page already answers the route, constraint, and verification question.
+Skip Tier 2 and Tier 3 when the Tier 1 page already answers the route, constraint, and verification question.
 
 ## Reporting Rule
 
-When shared wiki guidance materially shapes the work, include a short `Using:` line naming the specific pages used.
+When the shared wiki materially shapes the work, include a short `Using:` line.
 
-Preferred format:
+Example:
 
-`Using: Frontend Standards, Design Taste Translation, UI Review Rubric`
+`Using: Frontend Standards, Frontend Quality Gate`
 
 ## Sources
 
@@ -201,4 +245,11 @@ Preferred format:
 - [[Search And Retrieval]]
 - [[Markdown KB Retrieval Design]]
 - [[Capability Routing Standard]]
+- [[Codex Operating Layer Standard]]
+- [[Wiki Utilization Audit]]
+- [[Tool Permission And Scope Discipline]]
 - [[Source - RAG And Knowledge Base Retrieval Patterns]]
+- [[Source - Production Agent Engineering 2026]]
+- [[Source - OpenAI Image Generation 2026-05-06]]
+- [[Source - Codex Operating Layer 2026-05-23]]
+- [[Source - LLM Wiki Routing And Skill Selection 2026]]

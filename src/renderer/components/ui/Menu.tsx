@@ -20,7 +20,7 @@ export function MenuContent({
           align={align}
           collisionPadding={12}
           className={cx(
-          'ui-menu-content z-[90] min-w-[220px] max-h-[min(var(--radix-dropdown-menu-content-available-height),24rem)] overflow-x-hidden overflow-y-auto overscroll-contain rounded-[calc(var(--ui-radius-lg)+2px)] border p-1.5 text-[color:var(--ui-text)] shadow-[var(--ui-shadow-apple)] border-[color:var(--ui-border)] bg-[color:var(--ui-menu-bg)] backdrop-blur-xl',
+          'ui-menu-content z-[90] min-w-[220px] max-h-[min(var(--radix-dropdown-menu-content-available-height),24rem)] overflow-x-hidden overflow-y-auto overscroll-contain rounded-[var(--ui-radius-lg)] border p-1 text-[color:var(--ui-text)] shadow-[var(--ui-shadow-apple)] border-[color:var(--ui-border)] bg-[color:var(--ui-menu-bg)]',
           className
         )}
         {...props}
@@ -42,7 +42,7 @@ export function MenuSubContent({
           alignOffset={alignOffset}
           collisionPadding={12}
           className={cx(
-          'ui-menu-content z-[90] min-w-[220px] max-h-[min(var(--radix-dropdown-menu-content-available-height),24rem)] overflow-x-hidden overflow-y-auto overscroll-contain rounded-[calc(var(--ui-radius-lg)+2px)] border p-1.5 text-[color:var(--ui-text)] shadow-[var(--ui-shadow-apple)] border-[color:var(--ui-border)] bg-[color:var(--ui-menu-bg)] backdrop-blur-xl',
+          'ui-menu-content z-[90] min-w-[220px] max-h-[min(var(--radix-dropdown-menu-content-available-height),24rem)] overflow-x-hidden overflow-y-auto overscroll-contain rounded-[var(--ui-radius-lg)] border p-1 text-[color:var(--ui-text)] shadow-[var(--ui-shadow-apple)] border-[color:var(--ui-border)] bg-[color:var(--ui-menu-bg)]',
           className
         )}
         {...props}
@@ -59,7 +59,7 @@ export function MenuItem({
   return (
     <RadixDropdownMenu.Item
       className={cx(
-        'ui-menu-item flex min-h-9 cursor-default items-center gap-2 rounded-[var(--ui-radius-md)] px-3 text-[13px] font-medium text-[color:var(--ui-text)] outline-none transition-colors data-[highlighted]:bg-[color:var(--ui-hover)] data-[highlighted]:text-[color:var(--ui-text-title)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        'ui-menu-item flex min-h-8 cursor-default items-center gap-2 rounded-[var(--ui-radius-sm)] px-2.5 text-[12.5px] font-medium text-[color:var(--ui-text)] outline-none transition-colors data-[highlighted]:bg-[color:var(--ui-hover)] data-[highlighted]:text-[color:var(--ui-text-title)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         className
       )}
       {...props}
@@ -77,7 +77,7 @@ export function MenuSubTrigger({
   return (
     <RadixDropdownMenu.SubTrigger
       className={cx(
-        'ui-menu-item flex min-h-9 cursor-default items-center gap-2 rounded-[var(--ui-radius-md)] px-3 text-[13px] font-medium text-[color:var(--ui-text)] outline-none transition-colors data-[highlighted]:bg-[color:var(--ui-hover)] data-[highlighted]:text-[color:var(--ui-text-title)] data-[state=open]:bg-[color:var(--ui-hover)]',
+        'ui-menu-item flex min-h-8 cursor-default items-center gap-2 rounded-[var(--ui-radius-sm)] px-2.5 text-[12.5px] font-medium text-[color:var(--ui-text)] outline-none transition-colors data-[highlighted]:bg-[color:var(--ui-hover)] data-[highlighted]:text-[color:var(--ui-text-title)] data-[state=open]:bg-[color:var(--ui-hover)]',
         className
       )}
       {...props}
@@ -95,7 +95,7 @@ export function MenuCheckboxItem({
   return (
     <RadixDropdownMenu.CheckboxItem
       className={cx(
-        'ui-menu-item relative flex min-h-9 cursor-default items-center gap-2 rounded-[var(--ui-radius-md)] px-3 pr-8 text-[13px] font-medium text-[color:var(--ui-text)] outline-none transition-colors data-[highlighted]:bg-[color:var(--ui-hover)] data-[highlighted]:text-[color:var(--ui-text-title)]',
+        'ui-menu-item relative flex min-h-8 cursor-default items-center gap-2 rounded-[var(--ui-radius-sm)] px-2.5 pr-8 text-[12.5px] font-medium text-[color:var(--ui-text)] outline-none transition-colors data-[highlighted]:bg-[color:var(--ui-hover)] data-[highlighted]:text-[color:var(--ui-text-title)]',
         className
       )}
       {...props}
@@ -110,7 +110,7 @@ export function MenuLabel({
   className,
   ...props
 }: ComponentPropsWithoutRef<typeof RadixDropdownMenu.Label>) {
-  return <RadixDropdownMenu.Label className={cx('ui-menu-label px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--ui-text-subtle)]', className)} {...props} />;
+  return <RadixDropdownMenu.Label className={cx('ui-menu-label px-2.5 py-1.5 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-[color:var(--ui-text-subtle)]', className)} {...props} />;
 }
 
 export function MenuSeparator({

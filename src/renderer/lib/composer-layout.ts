@@ -1,5 +1,5 @@
-export const COMPOSER_COMPACT_MIN_HEIGHT = 44;
-export const COMPOSER_EXPANDED_MIN_HEIGHT = 56;
+export const COMPOSER_COMPACT_MIN_HEIGHT = 34;
+export const COMPOSER_EXPANDED_MIN_HEIGHT = 48;
 export const COMPOSER_EXPAND_PROMPT_THRESHOLD = 72;
 
 export function shouldExpandComposerPrompt(prompt: string) {

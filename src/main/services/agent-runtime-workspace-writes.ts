@@ -7,13 +7,15 @@ import {
 import { dirname } from 'node:path';
 import {
   applyPatch as applyUnifiedDiffPatch,
+  diffLines,
   parsePatch
 } from 'diff';
-import type { AgentToolExecutionContext } from '../../providers/agent-runtime';
-import {
-  assertBuildPlannerWorkspaceMutationAllowed,
-  requiresBuildControllerQueueHelper
-} from './agent-runtime-build-planner-policy';
+import type {
+  AgentToolExecutionContext,
+  StagedWorkspaceChangeSet,
+  StagedWorkspaceOperation,
+  StagedWorkspaceSourceToolName
+} from '../../providers/agent-runtime';
 import {
   normalizeWorkspacePath,
   type WorkspacePathResolution
@@ -26,6 +28,15 @@ function toPatchTargetPath(fileName: string) {
 const hunkHeaderPattern = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/u;
 const workspacePatchFuzzFactor = 2;
 type ParsedWorkspaceFilePatch = ReturnType<typeof parsePatch>[number];
+interface PreparedWorkspacePatch {
+  resolved: WorkspacePathResolution;
+  beforeContent: string | null;
+  nextContent: string | null;
+}
+interface PreparedStagedWorkspaceOperationApply {
+  operation: StagedWorkspaceOperation;
+  resolved: WorkspacePathResolution;
+}
 
 function isPatchFileBoundary(lines: string[], index: number) {
   const line = lines[index] ?? '';
@@ -89,6 +100,77 @@ function parseWorkspacePatch(patch: string) {
       `Patch is malformed: ${detail}. Re-read the target file and retry with a smaller patch, or use write_file for the full file content.`
     );
   }
+}
+
+function countTextLines(content: string) {
+  if (content.length === 0) {
+    return 0;
+  }
+
+  const lines = content.split(/\r?\n/u);
+  return content.endsWith('\n') ? lines.length - 1 : lines.length;
+}
+
+function summarizeContentChange(beforeContent: string | null, afterContent: string | null) {
+  let insertions = 0;
+  let deletions = 0;
+
+  for (const part of diffLines(beforeContent ?? '', afterContent ?? '')) {
+    const lineCount = typeof part.count === 'number' ? part.count : countTextLines(part.value);
+    if (part.added) {
+      insertions += lineCount;
+    } else if (part.removed) {
+      deletions += lineCount;
+    }
+  }
+
+  return { insertions, deletions };
+}
+
+function summarizeOperations(operations: StagedWorkspaceOperation[]) {
+  return operations.reduce(
+    (summary, operation) => {
+      if (operation.operation === 'mkdir') {
+        return summary;
+      }
+
+      const diff = summarizeContentChange(
+        operation.beforeContent,
+        operation.proposedAfterContent
+      );
+
+      return {
+        filesChanged: summary.filesChanged + 1,
+        insertions: summary.insertions + diff.insertions,
+        deletions: summary.deletions + diff.deletions
+      };
+    },
+    {
+      filesChanged: 0,
+      insertions: 0,
+      deletions: 0
+    }
+  );
+}
+
+function createStagedWorkspaceChangeSet(input: {
+  context: AgentToolExecutionContext;
+  sourceToolName: StagedWorkspaceSourceToolName;
+  requestedPath: string | null;
+  changedPaths: string[];
+  operations: StagedWorkspaceOperation[];
+}): StagedWorkspaceChangeSet {
+  return {
+    threadId: input.context.threadId ?? null,
+    runId: input.context.runId ?? null,
+    sourceToolName: input.sourceToolName,
+    isolationMode: 'patch_buffer',
+    status: 'proposed',
+    requestedPath: input.requestedPath,
+    changedPaths: input.changedPaths,
+    operations: input.operations,
+    summary: summarizeOperations(input.operations)
+  };
 }
 
 function splitPatchContentLines(content: string) {
@@ -209,9 +291,40 @@ export async function createWorkspaceDirectory(
     );
   }
 
-  assertBuildPlannerWorkspaceMutationAllowed(resolved.relativePath, context);
   await mkdir(resolved.absolutePath, { recursive: true });
   return resolved;
+}
+
+export function stageWorkspaceDirectory(
+  requestedPath: string,
+  context: AgentToolExecutionContext
+): StagedWorkspaceChangeSet {
+  const resolved = normalizeWorkspacePath(
+    context.workspaceRoot,
+    requestedPath
+  );
+
+  if (resolved.relativePath === '.') {
+    throw new Error(
+      'mkdir requires a subdirectory path inside the workspace.'
+    );
+  }
+
+  return createStagedWorkspaceChangeSet({
+    context,
+    sourceToolName: 'mkdir',
+    requestedPath: resolved.relativePath,
+    changedPaths: [resolved.relativePath],
+    operations: [
+      {
+        operation: 'mkdir',
+        path: resolved.relativePath,
+        beforeContent: null,
+        proposedAfterContent: null,
+        patchText: null
+      }
+    ]
+  });
 }
 
 export async function writeWorkspaceTextFile(
@@ -230,29 +343,61 @@ export async function writeWorkspaceTextFile(
     );
   }
 
-  if (requiresBuildControllerQueueHelper(resolved.relativePath, context)) {
-    throw new Error(
-      `Direct queue edits are not allowed for ${resolved.relativePath}. Use .vicode/control/update_build_ticket_queue.py instead.`
-    );
-  }
-
-  assertBuildPlannerWorkspaceMutationAllowed(resolved.relativePath, context);
-
   await mkdir(dirname(resolved.absolutePath), { recursive: true });
   await writeFile(resolved.absolutePath, content, 'utf8');
   return resolved;
 }
 
-export async function applyWorkspacePatch(
+export async function stageWorkspaceTextFile(
+  requestedPath: string,
+  content: string,
+  context: AgentToolExecutionContext
+): Promise<StagedWorkspaceChangeSet> {
+  const resolved = normalizeWorkspacePath(
+    context.workspaceRoot,
+    requestedPath
+  );
+
+  if (resolved.relativePath === '.') {
+    throw new Error(
+      'write_file requires a file path inside the workspace.'
+    );
+  }
+
+  const beforeContent = await readFile(resolved.absolutePath, 'utf8').catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  });
+
+  return createStagedWorkspaceChangeSet({
+    context,
+    sourceToolName: 'write_file',
+    requestedPath: resolved.relativePath,
+    changedPaths: [resolved.relativePath],
+    operations: [
+      {
+        operation: 'write_file',
+        path: resolved.relativePath,
+        beforeContent,
+        proposedAfterContent: content,
+        patchText: null
+      }
+    ]
+  });
+}
+
+async function prepareWorkspacePatches(
   patch: string,
   context: AgentToolExecutionContext
-): Promise<string[]> {
+) {
   const parsed = parseWorkspacePatch(patch);
   if (parsed.length === 0) {
     throw new Error('Patch did not contain any file changes.');
   }
 
-  const changedPaths: string[] = [];
+  const preparedPatches: PreparedWorkspacePatch[] = [];
 
   for (const filePatch of parsed) {
     const oldFileName = toPatchTargetPath(filePatch.oldFileName ?? '');
@@ -267,7 +412,6 @@ export async function applyWorkspacePatch(
       context.workspaceRoot,
       targetName
     );
-    assertBuildPlannerWorkspaceMutationAllowed(resolved.relativePath, context);
     const currentContent =
       oldFileName === '/dev/null'
         ? ''
@@ -293,15 +437,105 @@ export async function applyWorkspacePatch(
       );
     }
 
-    if (newFileName === '/dev/null') {
-      await rm(resolved.absolutePath, { force: true });
-    } else {
-      await mkdir(dirname(resolved.absolutePath), { recursive: true });
-      await writeFile(resolved.absolutePath, nextContent, 'utf8');
-    }
-
-    changedPaths.push(resolved.relativePath);
+    preparedPatches.push({
+      resolved,
+      beforeContent: oldFileName === '/dev/null' ? null : currentContent,
+      nextContent: newFileName === '/dev/null' ? null : nextContent
+    });
   }
 
-  return changedPaths;
+  return preparedPatches;
+}
+
+export async function applyWorkspacePatch(
+  patch: string,
+  context: AgentToolExecutionContext
+): Promise<string[]> {
+  const preparedPatches = await prepareWorkspacePatches(patch, context);
+
+  for (const prepared of preparedPatches) {
+    if (prepared.nextContent === null) {
+      await rm(prepared.resolved.absolutePath, { force: true });
+    } else {
+      await mkdir(dirname(prepared.resolved.absolutePath), { recursive: true });
+      await writeFile(prepared.resolved.absolutePath, prepared.nextContent, 'utf8');
+    }
+  }
+
+  return preparedPatches.map((prepared) => prepared.resolved.relativePath);
+}
+
+export async function stageWorkspacePatch(
+  patch: string,
+  context: AgentToolExecutionContext
+): Promise<StagedWorkspaceChangeSet> {
+  const preparedPatches = await prepareWorkspacePatches(patch, context);
+
+  const operations = preparedPatches.map((prepared): StagedWorkspaceOperation => ({
+    operation: prepared.nextContent === null ? 'delete' : 'apply_patch',
+    path: prepared.resolved.relativePath,
+    beforeContent: prepared.beforeContent,
+    proposedAfterContent: prepared.nextContent,
+    patchText: patch
+  }));
+
+  return createStagedWorkspaceChangeSet({
+    context,
+    sourceToolName: 'apply_patch',
+    requestedPath: null,
+    changedPaths: preparedPatches.map((prepared) => prepared.resolved.relativePath),
+    operations
+  });
+}
+
+async function readWorkspaceOperationContent(absolutePath: string) {
+  return await readFile(absolutePath, 'utf8').catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  });
+}
+
+export async function applyStagedWorkspaceChangeSet(
+  changeSet: StagedWorkspaceChangeSet,
+  context: AgentToolExecutionContext
+): Promise<string[]> {
+  const prepared: PreparedStagedWorkspaceOperationApply[] = [];
+
+  for (const operation of changeSet.operations) {
+    if (!operation.path || typeof operation.path !== 'string') {
+      throw new Error('Approved workspace change is missing a target path.');
+    }
+
+    const resolved = normalizeWorkspacePath(context.workspaceRoot, operation.path);
+    const currentContent = operation.operation === 'mkdir'
+      ? null
+      : await readWorkspaceOperationContent(resolved.absolutePath);
+
+    if (operation.operation !== 'mkdir' && currentContent !== operation.beforeContent) {
+      throw new Error(
+        `Workspace changed after approval was requested for ${resolved.relativePath}. Re-read the file and retry the patch.`
+      );
+    }
+
+    prepared.push({ operation, resolved });
+  }
+
+  for (const { operation, resolved } of prepared) {
+    if (operation.operation === 'mkdir') {
+      await mkdir(resolved.absolutePath, { recursive: true });
+      continue;
+    }
+
+    if (operation.operation === 'delete' || operation.proposedAfterContent === null) {
+      await rm(resolved.absolutePath, { force: true });
+      continue;
+    }
+
+    await mkdir(dirname(resolved.absolutePath), { recursive: true });
+    await writeFile(resolved.absolutePath, operation.proposedAfterContent, 'utf8');
+  }
+
+  return changeSet.changedPaths.slice();
 }

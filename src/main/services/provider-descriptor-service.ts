@@ -1,14 +1,20 @@
 import type { ProviderAdapter } from '../../providers/types';
+import { RetiredProviderAdapter } from '../../providers/retired-adapter';
 import type {
+  CustomProviderDefinition,
   ProviderAccount,
   ProviderAuthMode,
   ProviderDescriptor,
   ProviderId
 } from '../../shared/domain';
+import { encodeCustomProviderModelId } from '../../shared/custom-provider-routing';
 import {
+  isSurfacedProviderId,
+  isRetiredProviderId,
   providerCapabilities,
   providerCliLabel,
-  providerDisplayName
+  providerDisplayName,
+  providerRetiredMessage
 } from '../../shared/providers';
 import { DatabaseService } from '../../storage/database';
 import type { ProviderAuthService } from './provider-auth-service';
@@ -20,7 +26,7 @@ export interface ProviderDescriptorServiceHost {
   authService: Pick<ProviderAuthService, 'getPendingSince' | 'clearPendingAuth'>;
   modelService: Pick<
     ProviderModelService,
-    'getResolvedModels' | 'getResolvedQuota' | 'resolveQuotaProbeModelId' | 'mergeQuotaModels'
+    'getResolvedModels'
   >;
 }
 
@@ -28,20 +34,30 @@ export class ProviderDescriptorService {
   constructor(private readonly host: ProviderDescriptorServiceHost) {}
 
   async listProviders() {
-    return Promise.all(
-      (Object.keys(this.host.adapters) as ProviderId[]).map((providerId) => this.getProvider(providerId))
+    const providers = await Promise.all(
+      (Object.keys(this.host.adapters) as ProviderId[])
+        .filter((providerId) => isSurfacedProviderId(providerId))
+        .map((providerId) => this.getProvider(providerId))
     );
+    return providers.filter((provider) => provider.id !== 'openai_compatible' || provider.models.length > 0);
   }
 
   async getProvider(providerId: ProviderId, options: { forceRefresh?: boolean } = {}): Promise<ProviderDescriptor> {
+    if (providerId === 'openai_compatible') {
+      return this.getOpenAICompatibleProvider();
+    }
+    if (this.isRetiredProviderUnavailable(providerId)) {
+      return this.getRetiredProvider(providerId);
+    }
+
     const adapter = this.host.adapters[providerId];
     const install = await adapter.detectInstall();
     const storedAccount = this.host.db.getProviderAccount(providerId);
     const machineAuth = await adapter.getAuthState(storedAccount);
-    const availableAuthMode = this.resolveAvailableAuthMode(machineAuth, storedAccount);
-    const ollamaCloudConfigured = providerId === 'ollama' && availableAuthMode === 'api_key';
+    const availableAuthMode = this.resolveAvailableAuthMode(providerId, machineAuth, storedAccount);
+    const openAiApiKeyConfigured = providerId === 'openai' && availableAuthMode === 'api_key' && Boolean(storedAccount?.encryptedApiKey);
 
-    if (!install.installed && !ollamaCloudConfigured) {
+    if (!install.installed && !openAiApiKeyConfigured) {
       this.host.authService.clearPendingAuth(providerId);
       return {
         id: providerId,
@@ -56,7 +72,6 @@ export class ProviderDescriptorService {
         canLiveDiscoverModels: false,
         capabilities: providerCapabilities(providerId),
         plannerPolicy: adapter.getPlannerCapability(),
-        quota: null,
         message: this.getMissingCliMessage(providerId, availableAuthMode)
       };
     }
@@ -87,32 +102,19 @@ export class ProviderDescriptorService {
       cliPath: install.cliPath,
       forceRefresh: options.forceRefresh ?? false
     });
-    const resolvedQuota = await this.host.modelService.getResolvedQuota(providerId, adapter, {
-      account,
-      authMode: preserveLocalDisconnect ? null : auth.authMode,
-      cliPath: install.cliPath,
-      modelId: this.host.modelService.resolveQuotaProbeModelId(providerId, resolvedModels.models)
-    });
-    const visibleModels = this.host.modelService.mergeQuotaModels(
-      providerId,
-      resolvedModels.models,
-      resolvedQuota.quota
-    );
-
     return {
       id: providerId,
       label: adapter.label,
-      installed: install.installed || ollamaCloudConfigured,
+      installed: install.installed || openAiApiKeyConfigured,
       cliPath: install.cliPath,
       authState: preserveLocalDisconnect ? 'disconnected' : isChecking ? 'checking' : auth.authState,
       authMode: preserveLocalDisconnect ? availableAuthMode : auth.authMode,
-      models: visibleModels,
+      models: resolvedModels.models,
       modelSource: resolvedModels.source,
       modelsUpdatedAt: resolvedModels.updatedAt,
       canLiveDiscoverModels: resolvedModels.canLiveDiscoverModels,
       capabilities: providerCapabilities(providerId),
       plannerPolicy: adapter.getPlannerCapability(),
-      quota: resolvedQuota.quota,
       message: isChecking
         ? providerId === 'ollama'
           ? 'Waiting for the Ollama local runtime to start...'
@@ -123,10 +125,92 @@ export class ProviderDescriptorService {
     };
   }
 
+  private getOpenAICompatibleProvider(): ProviderDescriptor {
+    const configuredProviders = this.host.db
+      .listCustomProviders()
+      .filter((provider) => this.customProviderCanRun(provider));
+    const models = configuredProviders.map((provider) => ({
+      id: encodeCustomProviderModelId({
+        customProviderId: provider.id,
+        modelId: provider.defaultModelId
+      }),
+      label: `${provider.name} · ${provider.defaultModelId}`,
+      description: `OpenAI-compatible chat model served by ${provider.name}.`,
+      supportsVision: false
+    }));
+
+    return {
+      id: 'openai_compatible',
+      label: providerDisplayName('openai_compatible'),
+      installed: models.length > 0,
+      cliPath: null,
+      authState: models.length > 0 ? 'connected' : 'disconnected',
+      authMode: 'api_key',
+      models,
+      modelSource: 'fallback',
+      modelsUpdatedAt: null,
+      canLiveDiscoverModels: false,
+      capabilities: providerCapabilities('openai_compatible'),
+      plannerPolicy: {
+        supported: false,
+        executionMode: 'workspace-write',
+        enforcement: 'best-effort',
+        message: 'Custom OpenAI-compatible providers run through Vicode-owned context, tools, and approvals.'
+      },
+      message: models.length > 0
+        ? `${models.length} enabled custom provider${models.length === 1 ? '' : 's'} ready.`
+        : 'Add an enabled custom provider with a base URL, API key, and model before using this lane.'
+    };
+  }
+
+  private getRetiredProvider(providerId: ProviderId): ProviderDescriptor {
+    const adapter = this.host.adapters[providerId];
+    return {
+      id: providerId,
+      label: adapter?.label ?? providerDisplayName(providerId),
+      installed: false,
+      cliPath: null,
+      authState: 'disconnected',
+      authMode: null,
+      models: [],
+      modelSource: 'fallback',
+      modelsUpdatedAt: null,
+      canLiveDiscoverModels: false,
+      capabilities: providerCapabilities(providerId),
+      plannerPolicy: {
+        supported: false,
+        executionMode: 'workspace-write',
+        enforcement: 'best-effort',
+        message: providerRetiredMessage(providerId)
+      },
+      message: providerRetiredMessage(providerId)
+    };
+  }
+
+  private isRetiredProviderUnavailable(providerId: ProviderId) {
+    return providerId === 'qwen'
+      || providerId === 'kimi'
+      || (isRetiredProviderId(providerId) && this.host.adapters[providerId] instanceof RetiredProviderAdapter);
+  }
+
+  private customProviderCanRun(provider: CustomProviderDefinition) {
+    return Boolean(
+      provider.enabled &&
+      provider.transportKind === 'openai_compatible_chat' &&
+      provider.baseUrl.trim() &&
+      provider.defaultModelId.trim() &&
+      provider.encryptedApiKey.trim()
+    );
+  }
+
   resolveAvailableAuthMode(
+    providerId: ProviderId,
     auth: { authState: ProviderAccount['authState']; authMode: ProviderAuthMode | null },
     account: ProviderAccount | null
   ) {
+    if (providerId === 'ollama') {
+      return auth.authMode === 'api_key' ? null : auth.authMode;
+    }
     if (auth.authMode) {
       return auth.authMode;
     }
@@ -186,6 +270,14 @@ export class ProviderDescriptorService {
     account: ProviderAccount | null,
     machineAuth: { authState: ProviderAccount['authState']; authMode: ProviderAuthMode | null; message?: string }
   ) {
+    if (providerId === 'openai' && account?.authMode === 'api_key' && account.encryptedApiKey) {
+      return {
+        authState: 'connected' as const,
+        authMode: 'api_key' as const,
+        message: 'Using encrypted API key as fallback.'
+      };
+    }
+
     if (machineAuth.authMode === 'api_key') {
       return machineAuth;
     }
@@ -244,16 +336,16 @@ export class ProviderDescriptorService {
   }
 
   private getMissingCliMessage(providerId: ProviderId, authMode: ProviderAuthMode | null) {
-    if (providerId === 'ollama') {
-      if (authMode === 'api_key') {
-        return 'An Ollama cloud API key is stored locally. You can use hosted Ollama models without installing the local runtime.';
-      }
+    if (this.isRetiredProviderUnavailable(providerId)) {
+      return providerRetiredMessage(providerId);
+    }
 
+    if (providerId === 'ollama') {
       if (authMode === 'cli') {
         return 'Ollama state was detected on this machine, but the local runtime is not runnable from Vicode. Install or repair the Ollama runtime and refresh.';
       }
 
-      return 'Ollama local runtime is not installed. Install it for local models, or save an Ollama API key in Vicode to use hosted models.';
+      return 'Ollama local runtime is not installed. Install it for local models.';
     }
 
     if (authMode === 'cli') {
@@ -261,7 +353,9 @@ export class ProviderDescriptorService {
     }
 
     if (authMode === 'api_key') {
-      return `A ${providerDisplayName(providerId)} API key is stored locally, but ${providerCliLabel(providerId)} is still required to run ${providerDisplayName(providerId)} in Vicode.`;
+      return providerId === 'openai'
+        ? 'An OpenAI API key is stored locally. Refresh models to use OpenAI without a provider CLI.'
+        : `A ${providerDisplayName(providerId)} API key is stored locally, but ${providerCliLabel(providerId)} is still required to run ${providerDisplayName(providerId)} in Vicode.`;
     }
 
     return `${providerCliLabel(providerId)} is not installed. Install it before signing in.`;

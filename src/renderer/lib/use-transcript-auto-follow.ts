@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef } from 'react';
-import { isTranscriptNearBottomPosition, shouldAutoFollowTranscript, transcriptAutoFollowThreshold } from './transcript-scroll';
+import { isTranscriptNearBottomPosition, shouldAutoFollowTranscript, shouldPauseTranscriptAutoFollowForWheel, transcriptAutoFollowThreshold } from './transcript-scroll';
 
 type UseTranscriptAutoFollowInput = {
   transcriptRef: React.RefObject<HTMLElement | null>;
@@ -23,8 +23,14 @@ export function useTranscriptAutoFollow(input: UseTranscriptAutoFollowInput) {
   const transcriptUserScrollIntentTimeoutRef = useRef<number | null>(null);
   const transcriptThreadIdRef = useRef<string | null>(null);
 
-  function markTranscriptUserScrollIntent() {
+  function markTranscriptUserScrollIntent(input?: { wheelDeltaY?: number }) {
     transcriptUserScrollIntentRef.current = true;
+    if (
+      typeof input?.wheelDeltaY === 'number' &&
+      shouldPauseTranscriptAutoFollowForWheel(input.wheelDeltaY)
+    ) {
+      transcriptAutoFollowRef.current = false;
+    }
     if (transcriptUserScrollIntentTimeoutRef.current !== null) {
       window.clearTimeout(transcriptUserScrollIntentTimeoutRef.current);
     }
@@ -36,9 +42,6 @@ export function useTranscriptAutoFollow(input: UseTranscriptAutoFollowInput) {
 
   function updateTranscriptAutoFollow(element: HTMLElement) {
     if (transcriptProgrammaticScrollRef.current) {
-      return;
-    }
-    if (!transcriptUserScrollIntentRef.current) {
       return;
     }
     transcriptAutoFollowRef.current = isTranscriptNearBottom(element);

@@ -1,6 +1,5 @@
 import type { AutonomyDelegationProfile, ProviderId, RunProgressState } from '../../shared/domain';
 import type { AppEvent } from '../../shared/events';
-import { providerCapabilities } from '../../shared/providers';
 import { advanceRunProgress, completeRunProgress, failRunProgress } from '../../shared/run-progress';
 
 function createPlannerDelegationItems(runId: string) {
@@ -218,12 +217,12 @@ export class ProviderRunProgressService {
   }
 
   private createPlannerDelegationState(
-    providerId: ProviderId,
+    _providerId: ProviderId,
     phase: NonNullable<RunProgressState['delegation']>['phase']
   ): NonNullable<RunProgressState['delegation']> {
-    const compatFileName = providerCapabilities(providerId).workspaceInstructionFileName;
     const noteByPhase: Record<NonNullable<RunProgressState['delegation']>['phase'], string> = {
-      active: `This planner run is using delegated context only: AGENTS.md and ${compatFileName} when present. SOUL.md, USER.md, and auto memory stay with the main thread.`,
+      active:
+        'This planner run is using a thin delegated context. Full project memory and main-thread history stay with the composer run.',
       waiting_for_answers:
         'The delegated planner needs a clarifying answer before it should continue drafting the plan.',
       resuming:
@@ -236,16 +235,15 @@ export class ProviderRunProgressService {
       phase,
       title: 'Delegated planner context',
       note: noteByPhase[phase],
-      includedContext: ['AGENTS.md', compatFileName],
-      excludedContext: ['SOUL.md', 'USER.md', 'auto memory']
+      includedContext: ['Project instructions', 'Provider compatibility notes'],
+      excludedContext: ['Full project memory', 'Main-thread history']
     };
   }
 
   private createBackgroundDelegationState(
-    providerId: ProviderId,
+    _providerId: ProviderId,
     input: BackgroundDelegationDescriptor
   ): NonNullable<RunProgressState['delegation']> {
-    const compatFileName = providerCapabilities(providerId).workspaceInstructionFileName;
     const profileLabel =
       input.profile === 'heartbeat'
         ? 'heartbeat'
@@ -260,9 +258,9 @@ export class ProviderRunProgressService {
       profile: input.profile,
       phase: 'active',
       title: input.title,
-      note: `This ${profileLabel} run is using delegated context only: AGENTS.md and ${compatFileName} when present. SOUL.md, USER.md, auto memory, and inline thread history stay with the main thread.`,
-      includedContext: ['AGENTS.md', compatFileName],
-      excludedContext: ['SOUL.md', 'USER.md', 'auto memory', 'inline thread history']
+      note: `This ${profileLabel} run is using a thin delegated context. Full project memory and main-thread history stay with the composer run.`,
+      includedContext: ['Project instructions', 'Provider compatibility notes'],
+      excludedContext: ['Full project memory', 'Main-thread history']
     };
   }
 }

@@ -31,9 +31,8 @@ async function seedProjectAndThread(window: Page, projectName: string, projectPa
     async ({ projectName, projectPath, threadTitle }) => {
       const bootstrap = await window.vicode.app.getBootstrap();
       const provider =
-        bootstrap.providers.find((entry) => entry.id === 'openai') ??
-        bootstrap.providers.find((entry) => entry.id === 'gemini') ??
         bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+        bootstrap.providers.find((entry) => entry.id === 'openai_compatible') ??
         null;
       if (!provider) {
         throw new Error('Expected a release-facing provider for E2E setup.');
@@ -49,7 +48,7 @@ async function seedProjectAndThread(window: Page, projectName: string, projectPa
         projectId: project.id,
         title: threadTitle,
         providerId: provider.id,
-        modelId: provider.models[0]?.id ?? 'gpt-5',
+        modelId: provider.models[0]?.id ?? 'qwen2.5-coder:14b-instruct-q6_K',
         executionPermission: 'default'
       });
 
@@ -238,8 +237,8 @@ test('pending review alerts render as an overlay notice instead of shifting page
           details = json.dumps({
             'actionType': 'workflow_resume',
             'trigger': 'manual',
-            'providerId': 'openai',
-            'modelId': 'gpt-5.4',
+            'providerId': 'ollama',
+            'modelId': 'qwen2.5-coder:14b-instruct-q6_K',
             'projectId': project_id,
             'threadId': thread_id
           })

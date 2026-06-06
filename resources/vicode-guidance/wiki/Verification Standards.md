@@ -21,6 +21,8 @@ Quality claims require evidence. The bar depends on the task, but â€œlooks fineâ
 - clear note of what was actually run
 - clear note of what could not be run
 - note any static analysis, secret scanning, or dependency checks that materially shaped confidence
+- note whether warnings were resolved, explicitly accepted, or still present
+- for loop-heavy, retry-heavy, queue, polling, parser, agent, or resource-sensitive code, verify bounds and failure behavior
 
 ### UI change
 
@@ -52,11 +54,13 @@ Choose the techniques that match the risk and change surface:
 - structural or code-based tests for logic-heavy changes
 - fuzzing or broader probing when the interface is risky enough to justify it
 - explicit review of included components such as packages, libraries, or services
+- assertion, schema, precondition, postcondition, and invariant checks when correctness depends on assumptions that tests alone may not cover
 
 ## Code Review Standard
 
 - the goal is improved code health, not imagined perfection
 - reviewers should check design, functionality, complexity, tests, documentation, and consistency
+- reviewers should flag unbounded loops, uncontrolled retries, unchecked API/tool results, broad mutable scope, and warning-heavy code because these reduce analyzability
 - if a change affects how users build, test, interact with, or release code, docs should usually move with it
 - if a reviewer cannot confidently assess a specialized area such as security or accessibility, the work should get qualified review instead of bluffing through it
 - when a dedicated verifier or review agent is used, keep it structurally adversarial: prefer read-only or write-blocked review, require exact command/output evidence, and force an explicit verdict rather than a vague summary
@@ -88,3 +92,4 @@ Choose the techniques that match the risk and change surface:
 - [[Source - Verification And Code Review]]
 - [[Source - AHRQ And NIST]]
 - project pattern sweep
+- [[Source - Power of 10 Safety-Critical Code]]

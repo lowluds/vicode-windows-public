@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { extname, join, relative } from 'node:path';
+import { diffLines, type Change } from 'diff';
 import type {
   RunChangeArtifact,
   RunChangePreviewLine,
@@ -65,7 +66,8 @@ const TEXT_FILE_EXTENSIONS = new Set([
 ]);
 
 const MAX_FILE_BYTES = 256 * 1024;
-const MAX_DIFF_MATRIX_CELLS = 180_000;
+const MAX_DIFF_EDIT_LENGTH = 20_000;
+const DIFF_TIMEOUT_MS = 250;
 const MAX_PREVIEW_LINES = 160;
 const MAX_BOUNDARY_CHANGE_LINES = 48;
 const EDGE_CONTEXT_LINES = 3;
@@ -197,52 +199,18 @@ function buildBoundaryDiff(beforeLines: string[], afterLines: string[]) {
   };
 }
 
-function buildLineDiff(beforeLines: string[], afterLines: string[]) {
-  const matrixCells = (beforeLines.length + 1) * (afterLines.length + 1);
-  if (matrixCells > MAX_DIFF_MATRIX_CELLS) {
-    return buildBoundaryDiff(beforeLines, afterLines);
+function buildLineDiff(beforeContent: string, afterContent: string) {
+  const changes = diffLines(beforeContent, afterContent, {
+    ignoreNewlineAtEof: true,
+    stripTrailingCr: true,
+    maxEditLength: MAX_DIFF_EDIT_LENGTH,
+    timeout: DIFF_TIMEOUT_MS
+  });
+  if (!changes) {
+    return buildBoundaryDiff(splitLines(beforeContent), splitLines(afterContent));
   }
 
-  const matrix = Array.from({ length: beforeLines.length + 1 }, () => new Uint16Array(afterLines.length + 1));
-  for (let beforeIndex = beforeLines.length - 1; beforeIndex >= 0; beforeIndex -= 1) {
-    for (let afterIndex = afterLines.length - 1; afterIndex >= 0; afterIndex -= 1) {
-      matrix[beforeIndex][afterIndex] =
-        beforeLines[beforeIndex] === afterLines[afterIndex]
-          ? matrix[beforeIndex + 1][afterIndex + 1] + 1
-          : Math.max(matrix[beforeIndex + 1][afterIndex], matrix[beforeIndex][afterIndex + 1]);
-    }
-  }
-
-  const operations: DiffOperation[] = [];
-  let beforeIndex = 0;
-  let afterIndex = 0;
-  while (beforeIndex < beforeLines.length && afterIndex < afterLines.length) {
-    if (beforeLines[beforeIndex] === afterLines[afterIndex]) {
-      operations.push({ type: 'context', text: beforeLines[beforeIndex] });
-      beforeIndex += 1;
-      afterIndex += 1;
-      continue;
-    }
-
-    if (matrix[beforeIndex + 1][afterIndex] >= matrix[beforeIndex][afterIndex + 1]) {
-      operations.push({ type: 'removed', text: beforeLines[beforeIndex] });
-      beforeIndex += 1;
-      continue;
-    }
-
-    operations.push({ type: 'added', text: afterLines[afterIndex] });
-    afterIndex += 1;
-  }
-
-  while (beforeIndex < beforeLines.length) {
-    operations.push({ type: 'removed', text: beforeLines[beforeIndex] });
-    beforeIndex += 1;
-  }
-
-  while (afterIndex < afterLines.length) {
-    operations.push({ type: 'added', text: afterLines[afterIndex] });
-    afterIndex += 1;
-  }
+  const operations = changes.flatMap(changeToOperations);
 
   return {
     operations,
@@ -250,6 +218,26 @@ function buildLineDiff(beforeLines: string[], afterLines: string[]) {
     deletions: operations.filter((operation) => operation.type === 'removed').length,
     truncated: false
   };
+}
+
+function splitDiffChangeLines(value: string) {
+  if (value.length === 0) {
+    return [];
+  }
+
+  const lines = value.replace(/\r\n/gu, '\n').split('\n');
+  if (lines[lines.length - 1] === '') {
+    lines.pop();
+  }
+  return lines;
+}
+
+function changeToOperations(change: Change): DiffOperation[] {
+  const type: DiffOperation['type'] = change.added ? 'added' : change.removed ? 'removed' : 'context';
+  return splitDiffChangeLines(change.value).map((text) => ({
+    type,
+    text
+  }));
 }
 
 function attachLineNumbers(operations: DiffOperation[]) {
@@ -318,15 +306,13 @@ function truncatePreviewLines(lines: RunChangePreviewLine[]) {
   };
 }
 
-function deriveFileArtifact(
+export function deriveRunChangedFileArtifact(
   path: string,
   status: RunChangedFileArtifact['status'],
   beforeContent: string | null,
   afterContent: string | null
 ) {
-  const beforeLines = splitLines(beforeContent ?? '');
-  const afterLines = splitLines(afterContent ?? '');
-  const diff = buildLineDiff(beforeLines, afterLines);
+  const diff = buildLineDiff(beforeContent ?? '', afterContent ?? '');
   const numbered = attachLineNumbers(diff.operations);
   const preview = truncatePreviewLines(numbered);
 
@@ -342,7 +328,13 @@ function deriveFileArtifact(
   } satisfies RunChangedFileArtifact;
 }
 
-export function deriveRunChangeArtifact(snapshot: WorkspaceSnapshot | null, folderPath: string | null) {
+export function deriveRunChangeArtifact(
+  snapshot: WorkspaceSnapshot | null,
+  folderPath: string | null,
+  options: {
+    source?: RunChangeArtifact['source'];
+  } = {}
+) {
   if (!snapshot || !folderPath || snapshot.rootPath !== folderPath || !existsSync(folderPath)) {
     return null;
   }
@@ -368,7 +360,7 @@ export function deriveRunChangeArtifact(snapshot: WorkspaceSnapshot | null, fold
     }
 
     const status: RunChangedFileArtifact['status'] = beforeFile && afterFile ? 'modified' : beforeFile ? 'deleted' : 'added';
-    const artifact = deriveFileArtifact(filePath, status, beforeFile?.content ?? null, afterFile?.content ?? null);
+    const artifact = deriveRunChangedFileArtifact(filePath, status, beforeFile?.content ?? null, afterFile?.content ?? null);
     insertions += artifact.insertions;
     deletions += artifact.deletions;
     files.push(artifact);
@@ -379,7 +371,7 @@ export function deriveRunChangeArtifact(snapshot: WorkspaceSnapshot | null, fold
   }
 
   return {
-    source: 'workspace_diff',
+    source: options.source ?? 'workspace_diff',
     summary: {
       filesChanged: files.length,
       insertions,

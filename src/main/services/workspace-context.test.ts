@@ -31,7 +31,7 @@ describe('WorkspaceContextService', () => {
     return dir;
   }
 
-  it('loads shared files plus codex compatibility for trusted OpenAI workspaces in deterministic order', () => {
+  it('loads supported files plus codex compatibility for trusted OpenAI workspaces in deterministic order', () => {
     const workspace = createWorkspace({
       'AGENTS.md': 'Use small diffs.',
       'SOUL.md': 'You are the workspace agent.',
@@ -47,11 +47,11 @@ describe('WorkspaceContextService', () => {
       trusted: true
     });
 
-    expect(result.blocks.map((block) => block.fileName)).toEqual(['AGENTS.md', 'SOUL.md', 'USER.md', 'codex.md']);
-    expect(result.blocks.map((block) => block.kind)).toEqual(['agents', 'soul', 'user', 'provider_compat']);
+    expect(result.blocks.map((block) => block.fileName)).toEqual(['AGENTS.md', 'USER.md', 'codex.md']);
+    expect(result.blocks.map((block) => block.kind)).toEqual(['agents', 'user', 'provider_compat']);
   });
 
-  it('loads shared files plus gemini compatibility for trusted Gemini workspaces', () => {
+  it('loads supported files plus gemini compatibility for trusted Gemini workspaces', () => {
     const workspace = createWorkspace({
       'AGENTS.md': 'Use small diffs.',
       'SOUL.md': 'You are the workspace agent.',
@@ -67,7 +67,7 @@ describe('WorkspaceContextService', () => {
       trusted: true
     });
 
-    expect(result.blocks.map((block) => block.fileName)).toEqual(['AGENTS.md', 'SOUL.md', 'USER.md', 'gemini.md']);
+    expect(result.blocks.map((block) => block.fileName)).toEqual(['AGENTS.md', 'USER.md', 'gemini.md']);
   });
 
   it('returns no blocks for untrusted workspaces', () => {
@@ -89,10 +89,10 @@ describe('WorkspaceContextService', () => {
     expect(result.selectedSkillIds).toEqual([]);
   });
 
-  it('ignores missing and empty files', () => {
+  it('ignores unsupported, missing, and empty files', () => {
     const workspace = createWorkspace({
       'AGENTS.md': 'Use small diffs.',
-      'SOUL.md': '   ',
+      'SOUL.md': 'Retired workspace identity.',
       'USER.md': 'Be concise.'
     });
     const service = new WorkspaceContextService();
@@ -308,11 +308,69 @@ describe('WorkspaceContextService', () => {
     expect(result.diagnostics.generatedMemoryRetrievalMs).toBe(0);
   });
 
+  it('retrieves Project Knowledge from the configured knowledge folder', () => {
+    const retrieve = vi.fn(() => ({
+      blocks: [
+        {
+          label: 'Project Knowledge' as const,
+          title: 'Runtime Patterns',
+          fileName: 'runtime.md',
+          path: 'C:/knowledge/runtime.md',
+          relativePath: 'runtime.md',
+          heading: 'Web Search',
+          content: 'Use web research for current public docs.',
+          score: 12,
+          retrievalReason: {
+            rank: 1,
+            reason: 'matched heading, body: web, research',
+            matchedTerms: ['web', 'research'],
+            matchedFields: ['heading', 'body']
+          }
+        }
+      ],
+      query: 'How should we handle web research?',
+      evidence: {
+        reason: 'built from prompt',
+        promptIncluded: true,
+        memoryQueryIncluded: false,
+        taskObjectiveIncluded: false,
+        expectedToolGroups: []
+      }
+    }));
+    const service = new WorkspaceContextService({
+      projectKnowledgeRetriever: {
+        retrieve
+      }
+    });
+
+    const result = service.assemble({
+      providerId: 'openai',
+      folderPath: null,
+      trusted: false,
+      query: 'How should we handle web research?',
+      projectKnowledgePath: 'C:/knowledge',
+      projectKnowledgeMaxResults: 2
+    });
+
+    expect(retrieve).toHaveBeenCalledWith({
+      rootPath: 'C:/knowledge',
+      prompt: 'How should we handle web research?',
+      memoryQuery: undefined,
+      task: null,
+      maxResults: 2
+    });
+    expect(result.projectKnowledgeBlocks[0]?.title).toBe('Runtime Patterns');
+    expect(result.projectKnowledgeRouter?.reason).toBe('built from prompt');
+    expect(result.diagnostics.projectKnowledgeBlockCount).toBe(1);
+    expect(result.diagnostics.projectKnowledgeRetrievalMs).toBeGreaterThanOrEqual(0);
+  });
+
   it('resolves skills through the context seam even without trusted workspace files', () => {
     const service = new WorkspaceContextService({
       skillResolver: {
         resolve: () => ({
           selectedSkillIds: ['skill-1', 'skill-2'],
+          autoSelectedSkillIds: [],
           mentionedSkillIds: ['skill-2'],
           promptSkills: [
             {
@@ -367,6 +425,7 @@ describe('WorkspaceContextService', () => {
 
     expect(result.blocks).toEqual([]);
     expect(result.selectedSkillIds).toEqual(['skill-1', 'skill-2']);
+    expect(result.autoSelectedSkillIds).toEqual([]);
     expect(result.mentionedSkillIds).toEqual(['skill-2']);
     expect(result.skillBlocks.map((block) => block.kind)).toEqual(['prompt_skill']);
     expect(result.runtimeSkillResources).toEqual([]);
@@ -377,6 +436,7 @@ describe('WorkspaceContextService', () => {
       skillResolver: {
         resolve: () => ({
           selectedSkillIds: ['skill-1', 'skill-2'],
+          autoSelectedSkillIds: [],
           mentionedSkillIds: ['skill-2'],
           promptSkills: [
             {
@@ -434,11 +494,28 @@ describe('WorkspaceContextService', () => {
     expect(result.runtimeSkillResources).toEqual([{ kind: 'extension', path: 'C:/skills/browser-helper' }]);
   });
 
-  it('skips skill resolution when no explicit or mentioned skills are present', () => {
+  it('resolves skills for ordinary prompts so autonomous selection can run', () => {
     const resolve = vi.fn(() => ({
       selectedSkillIds: ['skill-1'],
-      mentionedSkillIds: ['skill-1'],
-      promptSkills: [],
+      autoSelectedSkillIds: ['skill-1'],
+      mentionedSkillIds: [],
+      promptSkills: [
+        {
+          id: 'skill-1',
+          name: 'Reviewer',
+          description: 'Review patches.',
+          instructions: 'Look for regressions.',
+          origin: 'custom_local',
+          scope: 'project',
+          providerTargets: ['openai'],
+          enabled: true,
+          projectId: 'project-1',
+          metadata: {},
+          path: null,
+          createdAt: '2026-03-17T00:00:00.000Z',
+          updatedAt: '2026-03-17T00:00:00.000Z'
+        }
+      ],
       runtimeSkills: []
     }));
     const service = new WorkspaceContextService({
@@ -459,10 +536,11 @@ describe('WorkspaceContextService', () => {
       explicitSkillIds: []
     });
 
-    expect(resolve).not.toHaveBeenCalled();
-    expect(result.selectedSkillIds).toEqual([]);
-    expect(result.skillBlocks).toEqual([]);
-    expect(result.diagnostics.skillResolutionMs).toBe(0);
+    expect(resolve).toHaveBeenCalled();
+    expect(result.selectedSkillIds).toEqual(['skill-1']);
+    expect(result.autoSelectedSkillIds).toEqual(['skill-1']);
+    expect(result.skillBlocks.map((block) => block.kind)).toEqual(['prompt_skill']);
+    expect(result.diagnostics.skillResolutionMs).toBeGreaterThanOrEqual(0);
   });
 
   it('omits runtime helper blocks when no attachable runtime resources remain', () => {
@@ -470,6 +548,7 @@ describe('WorkspaceContextService', () => {
       skillResolver: {
         resolve: () => ({
           selectedSkillIds: ['skill-2'],
+          autoSelectedSkillIds: [],
           mentionedSkillIds: ['skill-2'],
           promptSkills: [],
           runtimeSkills: [

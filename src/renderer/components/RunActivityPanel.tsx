@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { RunActivityViewModel, ThinkingLineViewModel } from '../lib/run-activity';
 import { resolveSkillIconByToken } from './skillIcons';
 import { ChevronDownIcon, ChevronRightIcon, LoadingIcon, SkillsIcon } from './icons';
-import { DisclosureButton, StatusPill } from './ui';
+import { DisclosureButton } from './ui';
 import { cx } from './ui/utils';
 
 interface RunActivityPanelProps {
@@ -27,7 +27,7 @@ function formatElapsedSeconds(totalSeconds: number) {
 }
 
 function renderThinkingMeta(line: ThinkingLineViewModel) {
-  if (line.kind === 'file_edit') {
+  if (line.kind === 'file_edit' || line.kind === 'memory_checkpoint' || line.kind === 'context_compaction') {
     return null;
   }
 
@@ -225,11 +225,8 @@ export function RunActivityPanel({
 
       {showOutcomeNotice ? (
         <div className={`run-activity-outcome run-activity-outcome-${activity.state}`} role="status" aria-live="polite">
-          <div className="run-activity-outcome-header">
-            <StatusPill tone={activity.state}>{activity.state === 'failed' ? 'Run failed' : 'Run stopped'}</StatusPill>
-            {activity.workedForLabel ? <span className="run-activity-outcome-time">{activity.workedForLabel}</span> : null}
-          </div>
-          <div className="run-activity-outcome-message">{activity.outcomeMessage}</div>
+          <span className="run-activity-outcome-message">{activity.outcomeMessage}</span>
+          {activity.workedForLabel ? <span className="run-activity-outcome-time">{activity.workedForLabel}</span> : null}
         </div>
       ) : null}
 
@@ -254,13 +251,8 @@ export function RunActivityPanel({
                     renderSkillLine(line)
                   ) : line.kind === 'file_edit' ? (
                     renderFileEditLine(line)
-                  ) : line.kind === 'memory_checkpoint' ? (
-                    <>
-                      <div className="run-activity-thinking-text text-[13px] leading-6 text-[color:var(--ui-text)]">{line.label}</div>
-                      {line.path ? (
-                        <div className="mt-2 text-[12px] leading-5 text-[color:var(--ui-text-subtle)]">{line.path}</div>
-                      ) : null}
-                    </>
+                  ) : line.kind === 'memory_checkpoint' || line.kind === 'context_compaction' ? (
+                    <div className="run-activity-thinking-text text-[13px] leading-6 text-[color:var(--ui-text)]">{line.label}</div>
                   ) : collapseLine ? (
                     <>
                       <DisclosureButton

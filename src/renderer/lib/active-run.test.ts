@@ -66,6 +66,27 @@ describe('active-run', () => {
     expect(deriveCurrentRunId(thread, null)).toBe('run-1');
   });
 
+  it('keeps the latest failed run displayed so failure evidence can render', () => {
+    const thread = createThread({
+      status: 'failed',
+      rawOutput: [
+        { id: 'event-1', threadId: 'thread-1', runId: 'run-1', eventType: 'started', payload: {}, createdAt: '2026-04-20T00:00:00.000Z' },
+        {
+          id: 'event-2',
+          threadId: 'thread-1',
+          runId: 'run-1',
+          eventType: 'failed',
+          payload: {
+            message: 'No page files were written.'
+          },
+          createdAt: '2026-04-20T00:00:01.000Z'
+        }
+      ]
+    });
+
+    expect(deriveCurrentRunId(thread, null)).toBe('run-1');
+  });
+
   it('prefers an explicit active run id', () => {
     expect(deriveCurrentRunId(createThread(), 'run-explicit')).toBe('run-explicit');
   });

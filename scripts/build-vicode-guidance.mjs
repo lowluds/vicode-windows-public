@@ -2,15 +2,40 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import path from 'node:path';
 
 const root = process.cwd();
-const defaultSourceWikiRoot = path.resolve(root, '..', '..', '..', 'agents-wiki', 'wiki');
-const sourceInput = path.resolve(
-  process.env.VICODE_GUIDANCE_WIKI_SOURCE ??
-    process.env.VICODE_GUIDANCE_SOURCE ??
-    defaultSourceWikiRoot
-);
 const outputRoot = path.join(root, 'resources', 'vicode-guidance');
+const localSeedWikiRoot = path.join(root, 'docs', 'engineering', 'vicode-guidance-seed', 'wiki');
 const privateName = process.env.VICODE_GUIDANCE_PRIVATE_NAME ?? ['Ky', 'le'].join('');
 const privateSlug = process.env.VICODE_GUIDANCE_PRIVATE_SLUG ?? `${privateName.toLowerCase()}-`;
+
+function resolveSourceWikiRoot(sourcePath) {
+  if (existsSync(path.join(sourcePath, 'Task Routing.md'))) {
+    return sourcePath;
+  }
+
+  const nestedWikiPath = path.join(sourcePath, 'wiki');
+  if (existsSync(path.join(nestedWikiPath, 'Task Routing.md'))) {
+    return nestedWikiPath;
+  }
+
+  return sourcePath;
+}
+
+function firstExistingSourceRoot(candidates) {
+  return candidates.find((candidate) => existsSync(path.join(resolveSourceWikiRoot(candidate), 'Task Routing.md'))) ?? candidates[0];
+}
+
+const explicitSource =
+  process.env.VICODE_GUIDANCE_WIKI_SOURCE ??
+  process.env.VICODE_GUIDANCE_SOURCE ??
+  null;
+const defaultSourceWikiRoot = firstExistingSourceRoot([
+  path.resolve(root, '..', 'llm-wiki'),
+  path.resolve(root, '..', 'project', 'llm-wiki'),
+  path.resolve(root, '..', '..', 'llm-wiki'),
+  path.resolve(root, '..', '..', '..', 'agents-wiki', 'wiki')
+]);
+const sourceInput = path.resolve(explicitSource ?? defaultSourceWikiRoot);
+const sourceWikiRoot = resolveSourceWikiRoot(sourceInput);
 
 const wikiFiles = [
   'Agent Runtime Patterns.md',
@@ -36,20 +61,14 @@ const wikiFiles = [
   'Writing Anti-Patterns.md'
 ];
 
-function resolveSourceWikiRoot(sourcePath) {
-  if (existsSync(path.join(sourcePath, 'Task Routing.md'))) {
-    return sourcePath;
-  }
-
-  const nestedWikiPath = path.join(sourcePath, 'wiki');
-  if (existsSync(path.join(nestedWikiPath, 'Task Routing.md'))) {
-    return nestedWikiPath;
-  }
-
-  return sourcePath;
-}
-
-const sourceWikiRoot = resolveSourceWikiRoot(sourceInput);
+const seedWikiFiles = [
+  'Ollama And Local Models.md',
+  'Retrieval For Coding Projects.md',
+  'Source Quality And Grounding.md',
+  'Tool Use And Trust.md',
+  'Coding Agent Workflows.md',
+  'Structured Outputs And Evals.md'
+];
 
 function normalizeNewlines(value) {
   return value.replace(/\r\n/gu, '\n');
@@ -85,12 +104,16 @@ function sanitizeContent(content) {
     .trim();
 }
 
-function readSanitized(relativePath) {
-  const sourcePath = path.join(sourceWikiRoot, relativePath);
+function readSanitizedFrom(sourceRoot, relativePath) {
+  const sourcePath = path.join(sourceRoot, relativePath);
   if (!existsSync(sourcePath)) {
     throw new Error(`Missing source guidance file: ${sourcePath}`);
   }
   return sanitizeContent(readFileSync(sourcePath, 'utf8'));
+}
+
+function readSanitized(relativePath) {
+  return readSanitizedFrom(sourceWikiRoot, relativePath);
 }
 
 function ensureParent(targetPath) {
@@ -186,6 +209,7 @@ The packaged guidance is a curated Obsidian-style markdown vault:
 
 - \`VICODE.md\` is the entrypoint and router.
 - \`wiki/\` mirrors the selected pages from the source wiki vault.
+- The bundle also includes first-party Vicode starter knowledge for Ollama, Project Knowledge, source quality, tool trust, coding workflows, and evals.
 - Prefer Obsidian routes such as \`[[Task Routing]]\` when available.
 - Fall back to packaged markdown paths such as \`wiki/Task Routing.md\` when Obsidian is not available.
 - Use \`manifest.json\` to map page titles, aliases, Obsidian routes, and packaged file paths.
@@ -206,13 +230,15 @@ Use \`[[Task Routing]]\` first. Choose one lead page for the task family, then a
 
 Use \`[[Source-Backed Workflow]]\` before substantial implementation, debugging, refactoring, or source-sensitive work.
 
-## Using Disclosure
+## Disclosure Labels
 
-When a run uses Vicode wiki pages, skills, external references, or app/tool capabilities, start the response with one short line:
+When a run uses skills, local context, or external evidence, keep disclosure lines short and specific:
 
-\`Using: <references>\`
+- \`Using:\` for active skills and app/tool capabilities.
+- \`Context:\` for user-connected Project Knowledge, workspace memory, or workspace instructions.
+- \`Sources:\` for external evidence such as web pages, public docs, papers, URLs, search results, or uploaded source material.
 
-Name only the references actually used. Include the same important references in the final summary when they shaped the work.
+Packaged Vicode guidance pages are internal routing context. Do not list them in \`Using:\`, \`Context:\`, or \`Sources:\` unless the user asks what internal guidance shaped the run.
 
 ## Default Rules
 
@@ -240,6 +266,11 @@ function main() {
   const pages = [];
   for (const fileName of wikiFiles) {
     const content = readSanitized(fileName);
+    writeGuidanceFile(path.join('wiki', fileName), content);
+    pages.push(buildPageManifest(fileName, content));
+  }
+  for (const fileName of seedWikiFiles) {
+    const content = readSanitizedFrom(localSeedWikiRoot, fileName);
     writeGuidanceFile(path.join('wiki', fileName), content);
     pages.push(buildPageManifest(fileName, content));
   }

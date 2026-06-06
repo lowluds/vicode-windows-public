@@ -26,33 +26,8 @@ describe('McpRegistryService', () => {
 
   function seedInternalAnalysisWorkspace(root: string) {
     mkdirSync(join(root, 'docs', 'engineering'), { recursive: true });
-    mkdirSync(join(root, '.vicode', 'control', 'build-tickets'), { recursive: true });
     writeFileSync(join(root, 'docs', 'engineering', 'README.md'), '# Engineering README\n');
     writeFileSync(join(root, 'docs', 'engineering', 'WORKLOG.md'), '# Worklog\n');
-    writeFileSync(join(root, 'docs', 'engineering', 'claude-code-adoption-plan.md'), '# Adoption Plan\n');
-    writeFileSync(
-      join(root, '.vicode', 'control', 'vicode-build-teams.json'),
-      JSON.stringify(
-        {
-          version: 3,
-          controls: [
-            {
-              id: 'maintenance-team',
-              label: 'Maintenance Team',
-              goal: 'Keep docs current',
-              worktree_path: 'worktree',
-              heartbeat_path: 'HEARTBEAT.md'
-            }
-          ]
-        },
-        null,
-        2
-      )
-    );
-    writeFileSync(join(root, '.vicode', 'control', 'build-tickets', 'maintenance-team.json'), JSON.stringify({
-      tickets: [{ id: 'ticket-1', title: 'Audit stale docs', status: 'in_progress' }]
-    }, null, 2));
-    writeFileSync(join(root, 'HEARTBEAT.md'), 'status: running\n');
   }
 
   it('registers a stdio MCP server, refreshes catalogs, and persists connection state', async () => {
@@ -282,6 +257,41 @@ describe('McpRegistryService', () => {
     db.close();
   });
 
+  it('stores remote MCP servers as approval-gated integrations with redacted header keys', async () => {
+    const dir = createTempDir();
+    const db = new DatabaseService(join(dir, 'vicode.sqlite'));
+    db.migrate();
+    const registry = new McpRegistryService(db, { name: 'vicode-test', version: '0.0.0' });
+
+    const server = await registry.saveServer({
+      name: 'Remote MCP',
+      transportType: 'streamable_http',
+      command: '',
+      url: 'https://mcp.example.com/mcp',
+      headers: {
+        Authorization: 'Bearer test-token'
+      },
+      enabled: true,
+      toolInvocationMode: 'ask',
+      launchApproved: false
+    });
+
+    const view = registry.listServerViews()[0];
+
+    expect(server.state?.status).toBe('approval_required');
+    expect(view).toMatchObject({
+      name: 'Remote MCP',
+      transportType: 'streamable_http',
+      command: '',
+      url: 'https://mcp.example.com/mcp',
+      headerKeys: ['Authorization']
+    });
+    expect(JSON.stringify(view)).not.toContain('test-token');
+
+    await registry.dispose();
+    db.close();
+  });
+
   it('persists and restores enabled approved MCP servers during registry initialization', async () => {
     const dir = createTempDir();
     const db = new DatabaseService(join(dir, 'vicode.sqlite'));
@@ -340,11 +350,12 @@ describe('McpRegistryService', () => {
 
     expect(views.some((view) => view.name === 'Vicode Internal Analysis MCP')).toBe(true);
     expect(catalog.tools.map((tool) => tool.name)).toContain('list_projects');
-    expect(catalog.tools.map((tool) => tool.name)).toContain('get_build_control_summary');
     expect(catalog.tools.map((tool) => tool.name)).toContain('get_project_threads');
-    expect(catalog.resources.map((resource) => resource.uri)).toContain('vicode://engineering/adoption-plan');
+    expect(catalog.tools.map((tool) => tool.name)).not.toContain('get_build_control_summary');
+    expect(catalog.resources.map((resource) => resource.uri)).toContain('vicode://engineering/readme');
     expect(catalog.resources.map((resource) => resource.uri)).toContain('vicode://engineering/worklog');
     expect(catalog.resources.map((resource) => resource.uri)).toContain('vicode://app/projects');
+    expect(catalog.resources.map((resource) => resource.uri)).not.toContain('vicode://build-control/summary');
 
     await registry.dispose();
     db.close();
@@ -456,10 +467,11 @@ describe('McpRegistryService', () => {
     expect(server.launchApproved).toBe(true);
     expect(server.state?.status).toBe('connected');
     expect(catalog.tools.map((tool) => tool.name)).toContain('list_projects');
-    expect(catalog.tools.map((tool) => tool.name)).toContain('get_build_control_summary');
     expect(catalog.tools.map((tool) => tool.name)).toContain('get_project_autonomous_tasks');
+    expect(catalog.tools.map((tool) => tool.name)).not.toContain('get_build_control_summary');
     expect(catalog.resources.map((resource) => resource.uri)).toContain('vicode://engineering/worklog');
     expect(catalog.resources.map((resource) => resource.uri)).toContain('vicode://app/projects');
+    expect(catalog.resources.map((resource) => resource.uri)).not.toContain('vicode://build-control/summary');
 
     await registry.dispose();
     db.close();

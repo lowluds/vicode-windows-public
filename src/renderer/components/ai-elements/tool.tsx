@@ -1,8 +1,8 @@
 "use client";
 
-import type { ComponentProps, ReactNode } from 'react';
-import { CheckIcon, ChevronDownIcon, CloseIcon, CodeIcon, RefreshIcon, TaskIcon } from '../icons';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger, StatusPill } from '../ui';
+import type { ComponentProps } from 'react';
+import { ChevronDownIcon } from '../icons';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui';
 import { cx } from '../ui/utils';
 
 export type ToolState =
@@ -20,7 +20,7 @@ export function Tool({ className, ...props }: ToolProps) {
   return (
     <Collapsible
       className={cx(
-        'group w-full rounded-[20px] border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-surface-2)]',
+        'group w-full rounded-[10px] border border-[color:var(--ui-alpha-06)] bg-[color:var(--ui-alpha-025)] shadow-none',
         className
       )}
       {...props}
@@ -31,7 +31,7 @@ export function Tool({ className, ...props }: ToolProps) {
 function toolStateLabel(state: ToolState) {
   switch (state) {
     case 'approval-requested':
-      return 'Awaiting Approval';
+      return 'Awaiting approval';
     case 'approval-responded':
       return 'Responded';
     case 'input-available':
@@ -49,39 +49,6 @@ function toolStateLabel(state: ToolState) {
   }
 }
 
-function toolStateTone(state: ToolState) {
-  switch (state) {
-    case 'approval-requested':
-      return 'default';
-    case 'approval-responded':
-      return 'checking';
-    case 'output-available':
-      return 'connected';
-    case 'output-denied':
-    case 'output-error':
-      return 'failed';
-    default:
-      return 'default';
-  }
-}
-
-function toolStateIcon(state: ToolState): ReactNode {
-  switch (state) {
-    case 'approval-requested':
-      return <TaskIcon size={14} />;
-    case 'approval-responded':
-    case 'output-available':
-      return <CheckIcon size={14} />;
-    case 'output-denied':
-    case 'output-error':
-      return <CloseIcon size={14} />;
-    case 'input-available':
-    case 'input-streaming':
-    default:
-      return <RefreshIcon size={14} />;
-  }
-}
-
 export type ToolHeaderProps = Omit<ComponentProps<typeof CollapsibleTrigger>, 'children'> & {
   title: string;
   state: ToolState;
@@ -91,26 +58,18 @@ export function ToolHeader({ className, title, state, ...props }: ToolHeaderProp
   return (
     <CollapsibleTrigger
       className={cx(
-        'flex w-full items-center justify-between gap-4 px-4 py-3 text-left',
+        'tool-header-trigger flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left',
         className
       )}
       {...props}
     >
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-alpha-04)] text-[color:var(--ui-text-muted)]">
-          <CodeIcon size={14} />
-        </span>
-        <span className="min-w-0 truncate text-[13px] font-semibold text-[color:var(--ui-text-title)]">
+      <div className="tool-header-leading flex min-w-0 items-center gap-2">
+        <span className="tool-header-title min-w-0 truncate text-[13px] font-medium text-[color:var(--ui-text)]">
           {title}
         </span>
-        <StatusPill tone={toolStateTone(state)}>
-          <span className="inline-flex items-center gap-1.5">
-            {toolStateIcon(state)}
-            <span>{toolStateLabel(state)}</span>
-          </span>
-        </StatusPill>
+        <span className={cx('tool-header-state', `is-${state}`)}>{toolStateLabel(state)}</span>
       </div>
-      <ChevronDownIcon className="shrink-0 text-[color:var(--ui-text-subtle)] transition-transform group-data-[state=open]:rotate-180" />
+      <ChevronDownIcon className="tool-header-chevron shrink-0 text-[color:var(--ui-text-subtle)] transition-transform group-data-[state=open]:rotate-180" />
     </CollapsibleTrigger>
   );
 }
@@ -121,12 +80,12 @@ export function ToolContent({ className, children, ...props }: ToolContentProps)
   return (
     <CollapsibleContent
       className={cx(
-        'overflow-hidden border-t border-[color:var(--ui-border-soft)] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:animate-in data-[state=open]:slide-in-from-top-2',
+        'overflow-hidden border-t border-[color:var(--ui-alpha-06)] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:animate-in data-[state=open]:slide-in-from-top-2',
         className
       )}
       {...props}
     >
-      <div className="space-y-4 px-4 py-4">{children}</div>
+      <div className="space-y-2 px-3 py-3">{children}</div>
     </CollapsibleContent>
   );
 }
@@ -139,12 +98,12 @@ export function ToolSection({ className, title, children, ...props }: ToolSectio
   return (
     <section
       className={cx(
-        'rounded-[16px] border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-alpha-03)] px-4 py-3',
+        'rounded-[10px] border border-[color:var(--ui-alpha-06)] bg-[color:var(--ui-alpha-03)] px-3 py-2.5',
         className
       )}
       {...props}
     >
-      <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[color:var(--ui-text-subtle)]">
+      <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-[color:var(--ui-text-subtle)]">
         {title}
       </div>
       {children}

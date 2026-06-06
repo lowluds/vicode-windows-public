@@ -175,10 +175,12 @@ export class McpRegistryService {
       command: server.definition.command,
       args: server.definition.args,
       cwd: server.definition.cwd,
+      url: server.definition.url,
       enabled: server.definition.enabled,
       toolInvocationMode: server.definition.toolInvocationMode,
       launchApproved: server.definition.launchApproved,
       envKeys: Object.keys(server.definition.env).sort(),
+      headerKeys: Object.keys(server.definition.headers).sort(),
       createdAt: server.definition.createdAt,
       updatedAt: server.definition.updatedAt,
       state: server.state
@@ -278,6 +280,8 @@ export class McpRegistryService {
           args: existing.definition.args,
           cwd: existing.definition.cwd,
           env: existing.definition.env,
+          url: existing.definition.url,
+          headers: existing.definition.headers,
           enabled: true,
           toolInvocationMode: existing.definition.toolInvocationMode,
           launchApproved: existing.definition.launchApproved
@@ -323,6 +327,8 @@ export class McpRegistryService {
       args: server.definition.args,
       cwd: server.definition.cwd,
       env: server.definition.env,
+      url: server.definition.url,
+      headers: server.definition.headers,
       enabled: server.definition.enabled,
       toolInvocationMode: server.definition.toolInvocationMode,
       launchApproved: true
@@ -348,6 +354,8 @@ export class McpRegistryService {
       args: server.definition.args,
       cwd: server.definition.cwd,
       env: server.definition.env,
+      url: server.definition.url,
+      headers: server.definition.headers,
       enabled,
       toolInvocationMode: server.definition.toolInvocationMode,
       launchApproved: server.definition.launchApproved

@@ -161,6 +161,18 @@ function describeToolArguments(call: AgentToolCall) {
           .join('\n') || null
       );
     }
+    case 'browser_preview_check': {
+      const url = readTelemetryString(call.arguments, 'url');
+      const expectedText = readTelemetryString(call.arguments, 'expected_text');
+      return (
+        [
+          url ? `Preview URL: ${url}` : null,
+          expectedText ? `Expected text: ${expectedText}` : null
+        ]
+          .filter((value): value is string => Boolean(value))
+          .join('\n') || null
+      );
+    }
     case 'mkdir': {
       const path = readTelemetryString(call.arguments, 'path');
       return path ? `path: ${path}` : null;
@@ -232,6 +244,8 @@ function summarizeToolCall(call: AgentToolCall) {
       return 'Crawling a site';
     case 'map_site':
       return 'Mapping a site';
+    case 'browser_preview_check':
+      return 'Checking preview';
     case 'create_skill_bundle':
       return 'Creating a Vicode skill bundle';
     case 'create_plugin_bundle':
@@ -259,6 +273,8 @@ function summarizeToolResult(call: AgentToolCall, result: AgentToolExecutionResu
       return result.isError ? 'Site crawl failed' : 'Crawled the site';
     case 'map_site':
       return result.isError ? 'Site map failed' : 'Mapped the site';
+    case 'browser_preview_check':
+      return result.isError ? 'Preview check failed' : 'Checked preview';
     case 'create_skill_bundle':
       return result.isError ? 'Skill bundle creation failed' : 'Created the skill bundle';
     case 'create_plugin_bundle':
@@ -319,7 +335,7 @@ export function buildToolResultActivity(
   const webResearchMetadata = extractWebResearchActivitySources(call, result);
   const text = result.isError
     ? truncateText(result.content)
-    : call.name === 'mkdir' || call.name === 'apply_patch' || call.name === 'use_mcp_tool'
+    : call.name === 'mkdir' || call.name === 'apply_patch' || call.name === 'use_mcp_tool' || call.name === 'browser_preview_check'
       ? truncateText(result.content)
       : null;
 

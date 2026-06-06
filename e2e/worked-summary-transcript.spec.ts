@@ -30,9 +30,8 @@ async function seedProjectAndThread(window: Page, projectName: string, projectPa
     async ({ projectName, projectPath, threadTitle }) => {
       const bootstrap = await window.vicode.app.getBootstrap();
       const provider =
-        bootstrap.providers.find((entry) => entry.id === 'openai') ??
-        bootstrap.providers.find((entry) => entry.id === 'gemini') ??
         bootstrap.providers.find((entry) => entry.id === 'ollama') ??
+        bootstrap.providers.find((entry) => entry.id === 'openai_compatible') ??
         null;
       if (!provider) {
         throw new Error('Expected a release-facing provider for E2E setup.');
@@ -48,7 +47,7 @@ async function seedProjectAndThread(window: Page, projectName: string, projectPa
         projectId: project.id,
         title: threadTitle,
         providerId: provider.id,
-        modelId: provider.models[0]?.id ?? 'gpt-5',
+        modelId: provider.models[0]?.id ?? 'qwen2.5-coder:14b-instruct-q6_K',
         executionPermission: 'default'
       });
 
@@ -203,10 +202,10 @@ test('worked-for disclosure nests compact sources and exposes command details', 
     const relaunched = await restartWithState(statePaths, ['vicode.app', 'vicode.projects', 'vicode.threads']);
     try {
       await relaunched.window.getByTestId(`thread-row-${seeded.threadId}`).click();
-      await expect(relaunched.window.getByRole('button', { name: 'Used 2 sources' })).toHaveCount(0);
 
       const workedButton = relaunched.window.getByRole('button', { name: /Worked for 27s/i });
       await expect(workedButton).toBeVisible();
+      await expect(relaunched.window.getByRole('button', { name: 'Used 2 sources' })).toBeHidden();
       await workedButton.click();
 
       const compactSourcesButton = relaunched.window.getByRole('button', { name: 'Used 2 sources' });
@@ -219,11 +218,9 @@ test('worked-for disclosure nests compact sources and exposes command details', 
       await expect(commandGroupDisclosure).toBeVisible();
       await commandGroupDisclosure.click();
 
-      const commandDisclosure = relaunched.window.getByRole('button', {
-        name: /Background terminal finished with Select-String/i
-      });
-      await expect(commandDisclosure).toBeVisible();
-      await commandDisclosure.click();
+      const commandEntry = relaunched.window.locator('.run-transcript-command-entry').filter({ hasText: /Select-String/i }).first();
+      await expect(commandEntry).toBeVisible();
+      await commandEntry.getByRole('button').click();
       await expect(relaunched.window.getByText(/\$ Select-String -Path src\/renderer\/components\/AppSidebar\.tsx/i)).toBeVisible();
       await expect(relaunched.window.getByText(/src\/renderer\/components\/AppSidebar\.tsx: import type \{ DragEvent \} from 'react';/i)).toBeVisible();
     } finally {

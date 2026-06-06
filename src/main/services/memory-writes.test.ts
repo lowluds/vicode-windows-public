@@ -56,6 +56,10 @@ describe('MemoryWritesService', () => {
 
     expect(created.alreadyPending).toBe(false);
     expect(created.job.sourceType).toBe('manual');
+    expect(created.job.title).toContain('Capture project checkpoint');
+    expect(created.job.title).not.toContain('daily note');
+    expect(created.reviewItem.summary).toContain('Review project checkpoint');
+    expect(created.reviewItem.summary).not.toContain('daily note');
     expect(created.reviewItem.details.actionType).toBe('daily_note_capture');
     expect(String(created.reviewItem.details.relativePath)).toMatch(/^memory[\\/]\d{4}-\d{2}-\d{2}\.md$/u);
     expect(String(created.reviewItem.details.content)).toContain('Ship the memory review flow');
@@ -100,6 +104,10 @@ describe('MemoryWritesService', () => {
 
     expect(created.alreadyPending).toBe(false);
     expect(created.job.sourceType).toBe('manual');
+    expect(created.job.title).toContain('Save project memory');
+    expect(created.job.title).not.toContain('MEMORY.md');
+    expect(created.reviewItem.summary).toContain('Review project memory');
+    expect(created.reviewItem.summary).not.toContain('MEMORY.md');
     expect(created.reviewItem.details.actionType).toBe('memory_promotion');
     expect(String(created.reviewItem.details.relativePath)).toBe('MEMORY.md');
     expect(String(created.reviewItem.details.content)).toContain('# Durable Workspace Memory');
@@ -140,6 +148,10 @@ describe('MemoryWritesService', () => {
 
     expect(created.alreadyPending).toBe(false);
     expect(created.job.sourceType).toBe('manual');
+    expect(created.job.title).toContain('Save project preference');
+    expect(created.job.title).not.toContain('USER.md');
+    expect(created.reviewItem.summary).toContain('Review project preference');
+    expect(created.reviewItem.summary).not.toContain('USER.md');
     expect(created.reviewItem.details.actionType).toBe('user_preference');
     expect(String(created.reviewItem.details.relativePath)).toBe('USER.md');
     expect(String(created.reviewItem.details.content)).toContain('# User Preferences');
@@ -319,7 +331,7 @@ describe('MemoryWritesService', () => {
       'Memory promotion requires a project with a real workspace folder.'
     );
     expect(() => service.createUserPreferenceReview(thread.id)).toThrow(
-      'USER.md updates require a project with a real workspace folder.'
+      'Preference capture requires a project with a real workspace folder.'
     );
     expect(db.listJobs()).toHaveLength(0);
     expect(db.listPendingReviewItems()).toHaveLength(0);

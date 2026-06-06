@@ -15,12 +15,15 @@ const forbiddenPaths = [
   'docs/engineering'
 ];
 const requiredPaths = [
+  '.github/ISSUE_TEMPLATE/beta-feedback.yml',
+  '.github/ISSUE_TEMPLATE/bug-report.yml',
   'README.md',
   'CHANGELOG.md',
   'CONTRIBUTING.md',
   'LICENSE',
-  'docs/releases/0.2.6.md',
-  'docs/releases/0.2.6-reviewer-guide.md',
+  'docs/releases/0.2.8.md',
+  'docs/releases/0.2.8-public-beta-handoff.md',
+  'docs/releases/0.2.8-reviewer-guide.md',
   'docs/releases/beta-tester-quick-start.md',
   'docs/setup/windows-provider-setup.md',
   'package.json'
@@ -41,7 +44,7 @@ const textExtensions = new Set([
 ]);
 
 function normalizePath(value) {
-  return value.replace(/\\/gu, '/');
+  return value.replace(/\\+/gu, '/');
 }
 
 function walkFiles(targetPath, files = []) {
@@ -152,6 +155,12 @@ function main() {
         for (const match of matches) {
           findings.push(`${relativePath}:${index + 1}: contains secret-like token "${match}"`);
         }
+      }
+      const privateIssueTracker = ['github.com/lowluds', 'vicode-windows/issues'].join('/');
+      if (normalizedLine.includes(privateIssueTracker)) {
+        findings.push(
+          `${relativePath}:${index + 1}: links beta testers to the private repo issue tracker instead of the public mirror`
+        );
       }
     }
   }

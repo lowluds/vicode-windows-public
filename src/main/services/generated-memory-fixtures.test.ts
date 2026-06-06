@@ -3,8 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type {
-  GeneratedMemoryCandidateKind,
-  PersonalizationSettings
+  GeneratedMemoryCandidateKind
 } from '../../shared/domain';
 import { DatabaseService } from '../../storage/database';
 import { normalizeGeneratedMemoryWorkspaceScopeKey } from './generated-memory';
@@ -44,18 +43,6 @@ interface FixtureResult {
   reviewerNotes: string[];
   pass: boolean;
 }
-
-const EMPTY_PERSONALIZATION: PersonalizationSettings = {
-  globalInstructions: '',
-  providerInstructions: {
-    openai: '',
-    gemini: '',
-    ollama: '',
-    qwen: '',
-    kimi: ''
-  },
-  useWorkspaceInstructions: true
-};
 
 describe('Generated-memory fixture comparison', () => {
   const tempDirs: string[] = [];
@@ -156,7 +143,6 @@ describe('Generated-memory fixture comparison', () => {
       },
       context,
       {
-        personalization: EMPTY_PERSONALIZATION,
         continuity: {
           strategy: 'none',
           resumeSessionId: null,

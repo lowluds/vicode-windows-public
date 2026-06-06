@@ -1,5 +1,6 @@
 import type { ProviderId, ProviderModel, ProviderModelRecommendation } from '../shared/domain';
 import { resolveContextWindowAutoCompactTokenLimit, resolveContextWindowLimit, resolveContextWindowPolicy } from '../shared/context-window';
+import { OLLAMA_DEFAULT_LOCAL_MODEL_ID, OLLAMA_LIGHTWEIGHT_SMOKE_MODEL_ID } from '../shared/providers';
 
 function withKnownContextWindow(providerId: ProviderId, model: ProviderModel): ProviderModel {
   if (typeof model.contextWindowTokens === 'number' && model.contextWindowTokens > 0) {
@@ -24,9 +25,9 @@ function withKnownContextWindow(providerId: ProviderId, model: ProviderModel): P
 
 const FALLBACK_MODELS: Record<ProviderId, ProviderModel[]> = {
   openai: [
-    { id: 'gpt-5.5', label: 'GPT-5.5', description: 'Latest frontier coding and reasoning model available through Codex.', supportsVision: true },
-    { id: 'gpt-5.4', label: 'GPT-5.4', description: 'Frontier coding and reasoning model available through Codex.', supportsVision: true },
-    { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex', description: 'Agentic coding model verified to work with Codex CLI auth.', supportsVision: true },
+    { id: 'gpt-5.5', label: 'GPT-5.5', description: 'Latest frontier coding and reasoning model available through an OpenAI API key.', supportsVision: true },
+    { id: 'gpt-5.4', label: 'GPT-5.4', description: 'Frontier coding and reasoning model available through an OpenAI API key.', supportsVision: true },
+    { id: 'gpt-5.3-codex', label: 'GPT-5.3', description: 'OpenAI coding model available through an OpenAI API key.', supportsVision: true },
     { id: 'gpt-5', label: 'GPT-5', description: 'Balanced coding model for day-to-day work.', supportsVision: true },
     { id: 'gpt-5-mini', label: 'GPT-5 Mini', description: 'Faster, cheaper model for lightweight tasks.', supportsVision: true, recommendation: 'fast' }
   ],
@@ -35,9 +36,9 @@ const FALLBACK_MODELS: Record<ProviderId, ProviderModel[]> = {
     { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: 'Best quality for large-context reasoning.', supportsVision: true, recommendation: 'recommended' },
     { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: 'Fast model for iterative chat and automations.', supportsVision: true, recommendation: 'fast' },
     { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', description: 'Lightweight Gemini Flash variant for cheaper, faster tasks.', supportsVision: true },
-    { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro Preview', description: 'Preview Gemini Pro model surfaced by Gemini CLI quota reporting.', supportsVision: true, recommendation: 'preview' },
-    { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview', description: 'Preview Gemini Pro model surfaced by Gemini CLI model selection.', supportsVision: true, recommendation: 'preview' },
-    { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash Preview', description: 'Preview Gemini Flash model surfaced by Gemini CLI model selection.', supportsVision: true, recommendation: 'preview' }
+    { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro Preview', description: 'Historical Gemini preview metadata retained for legacy thread records.', supportsVision: true, recommendation: 'preview' },
+    { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview', description: 'Historical Gemini preview metadata retained for legacy thread records.', supportsVision: true, recommendation: 'preview' },
+    { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash Preview', description: 'Historical Gemini preview metadata retained for legacy thread records.', supportsVision: true, recommendation: 'preview' }
   ],
   qwen: [
     {
@@ -48,6 +49,20 @@ const FALLBACK_MODELS: Record<ProviderId, ProviderModel[]> = {
     }
   ],
   ollama: [
+    {
+      id: OLLAMA_DEFAULT_LOCAL_MODEL_ID,
+      label: 'Qwen 2.5 Coder 14B Q6',
+      description: 'GPU-safe local coding default served through Ollama.',
+      supportsVision: false,
+      recommendation: 'recommended'
+    },
+    {
+      id: OLLAMA_LIGHTWEIGHT_SMOKE_MODEL_ID,
+      label: 'Qwen 2.5 Coder 7B',
+      description: 'Lightweight local coding model for fast smoke tests.',
+      supportsVision: false,
+      recommendation: 'fast'
+    },
     {
       id: 'qwen3',
       label: 'Qwen 3',
@@ -105,7 +120,8 @@ const FALLBACK_MODELS: Record<ProviderId, ProviderModel[]> = {
       description: 'Faster Kimi reasoning model exposed by Kimi Code CLI.',
       supportsVision: false
     }
-  ]
+  ],
+  openai_compatible: []
 };
 
 const ALLOWLIST_PATTERNS: Record<ProviderId, RegExp[]> = {
@@ -113,7 +129,8 @@ const ALLOWLIST_PATTERNS: Record<ProviderId, RegExp[]> = {
   gemini: [/^gemini-(?:2\.5|3(?:\.1)?)-[a-z0-9.-]+$/i, /^auto-gemini-(?:2\.5|3)$/i],
   qwen: [/^qwen(?:[\d.]+)?-(?:plus|max|turbo|coder(?:-[a-z0-9.-]+)?)$/i],
   ollama: [/^[a-z0-9][a-z0-9._-]*(?::[a-z0-9._-]+)?$/i],
-  kimi: [/^kimi-[a-z0-9.-]+$/i]
+  kimi: [/^kimi-[a-z0-9.-]+$/i],
+  openai_compatible: [/^openai-compatible:[^:]+:[^:]+$/i]
 };
 
 const PREFERRED_OPENAI_ORDER = [
@@ -148,8 +165,19 @@ const MODEL_ALIASES: Partial<Record<ProviderId, Record<string, string>>> = {
 };
 
 const PREFERRED_QWEN_ORDER = ['qwen3.5-plus', 'qwen3-coder-plus', 'qwen3-coder-next'];
-const PREFERRED_OLLAMA_ORDER = ['qwen3-coder', 'qwen2.5vl', 'gemma3', 'llava', 'deepseek-coder', 'qwen3', 'llama3.1'];
+const PREFERRED_OLLAMA_ORDER = [
+  OLLAMA_DEFAULT_LOCAL_MODEL_ID,
+  OLLAMA_LIGHTWEIGHT_SMOKE_MODEL_ID,
+  'qwen3-coder',
+  'qwen2.5vl',
+  'gemma3',
+  'llava',
+  'deepseek-coder',
+  'qwen3',
+  'llama3.1'
+];
 const PREFERRED_KIMI_ORDER = ['kimi-k2-thinking', 'kimi-k2-thinking-turbo'];
+const PREFERRED_OPENAI_COMPATIBLE_ORDER: string[] = [];
 const UNSUPPORTED_MODEL_IDS: Partial<Record<ProviderId, Set<string>>> = {
   gemini: new Set(['gemini-3.1-flash-lite-preview'])
 };
@@ -189,14 +217,21 @@ export function sanitizeDiscoveredModels(
       providerId === 'openai' && model.recommendation === 'recommended'
         ? defaultModelRecommendation(providerId, normalizedId)
         : model.recommendation ?? defaultModelRecommendation(providerId, normalizedId);
+    const trimmedLabel = model.label.trim();
+    const label =
+      trimmedLabel && trimmedLabel !== normalizedId && !(providerId === 'openai' && /codex/iu.test(trimmedLabel))
+        ? trimmedLabel
+        : formatProviderModelLabel(providerId, normalizedId);
+    const trimmedDescription = model.description.trim();
+    const description =
+      trimmedDescription && !(providerId === 'openai' && /codex/iu.test(trimmedDescription))
+        ? trimmedDescription
+        : defaultModelDescription(providerId, normalizedId);
 
     deduped.set(normalizedId, {
       id: normalizedId,
-      label:
-        model.label.trim() && model.label.trim() !== normalizedId
-          ? model.label.trim()
-          : formatProviderModelLabel(providerId, normalizedId),
-      description: model.description.trim() || defaultModelDescription(providerId, normalizedId),
+      label,
+      description,
       supportsVision: model.supportsVision ?? false,
       recommendation,
       contextWindowTokens: model.contextWindowTokens ?? null,
@@ -256,23 +291,23 @@ function formatProviderModelLabel(providerId: ProviderId, modelId: string) {
   if (providerId === 'openai') {
     return modelId
       .split('-')
-      .map((part) => {
+      .flatMap((part) => {
         if (part === 'gpt') {
-          return 'GPT';
+          return ['GPT'];
         }
         if (part === 'codex') {
-          return 'Codex';
+          return [];
         }
         if (part === 'mini') {
-          return 'Mini';
+          return ['Mini'];
         }
         if (part === 'max') {
-          return 'Max';
+          return ['Max'];
         }
         if (part === 'spark') {
-          return 'Spark';
+          return ['Spark'];
         }
-        return part;
+        return [part];
       })
       .join('-');
   }
@@ -315,8 +350,8 @@ function formatProviderModelLabel(providerId: ProviderId, modelId: string) {
 function defaultModelDescription(providerId: ProviderId, modelId: string) {
   if (providerId === 'openai') {
     return modelId.includes('mini')
-      ? 'Fast coding model discovered from OpenAI.'
-      : 'Coding-capable model discovered from OpenAI.';
+      ? 'Fast coding model available through an OpenAI API key.'
+      : 'Coding-capable model available through an OpenAI API key.';
   }
 
   if (providerId === 'qwen') {
@@ -338,7 +373,7 @@ function defaultModelDescription(providerId: ProviderId, modelId: string) {
   }
 
   if (modelId.startsWith('auto-gemini-')) {
-    return 'Gemini CLI router model that automatically chooses a suitable Gemini model for the task.';
+    return 'Historical Gemini router model retained for legacy thread records.';
   }
 
   return modelId.includes('flash')
@@ -371,8 +406,11 @@ function defaultModelRecommendation(
   }
 
   if (providerId === 'ollama') {
-    if (/qwen.*coder/i.test(modelId)) {
+    if (modelId === OLLAMA_DEFAULT_LOCAL_MODEL_ID) {
       return 'recommended';
+    }
+    if (modelId === OLLAMA_LIGHTWEIGHT_SMOKE_MODEL_ID) {
+      return 'fast';
     }
     return undefined;
   }
@@ -419,7 +457,9 @@ function sortModels(providerId: ProviderId, models: ProviderModel[]) {
           ? PREFERRED_QWEN_ORDER
           : providerId === 'ollama'
             ? PREFERRED_OLLAMA_ORDER
-          : PREFERRED_KIMI_ORDER;
+            : providerId === 'kimi'
+              ? PREFERRED_KIMI_ORDER
+              : PREFERRED_OPENAI_COMPATIBLE_ORDER;
 
   return [...models].sort((left, right) => {
     if (providerId === 'openai') {

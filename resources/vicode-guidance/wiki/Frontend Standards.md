@@ -4,7 +4,12 @@
 ---
 type: concept
 status: active
-updated: 2026-04-23
+updated: 2026-05-30
+aliases:
+  - frontend quality
+  - UI quality
+  - frontend design standards
+  - visual implementation standards
 ---
 
 # Frontend Standards
@@ -17,6 +22,8 @@ When a maintained frontend overlay already matches the requested direction, use 
 
 For professional product websites with no stronger repo-local direction, use [[Frontend Overlay - Polished Product Website]] as the default overlay.
 
+For project-specific recurring work, check [[Project Taste Packets]] before inventing a new visual direction. For product websites matching the user's preferred Linear, OpenAI, Notion, and Framer taste, use [[Preferred Product Website Aesthetic]].
+
 ## Shared Expectations
 
 - do not ship generic template UI by default
@@ -28,6 +35,7 @@ For professional product websites with no stronger repo-local direction, use [[F
 - use a real motion system when the interaction depends on sequencing, scroll choreography, or timeline control
 - preserve accessibility basics, especially strong focus states and reduced-motion support
 - verify responsive behavior deliberately
+- use [[Mobile Web Performance And Design]] when mobile layout, Core Web Vitals, responsive media, touch targets, client JavaScript, or mobile motion restraint could affect quality
 - run [[Frontend Quality Gate]] before calling substantial visual work done
 - prefer token-driven systems over ad hoc styling
 - avoid raw hex, radius, and timing scatter inside component code when the same role repeats more than once
@@ -36,6 +44,9 @@ For professional product websites with no stronger repo-local direction, use [[F
 - default to one dominant base and one accent for polished product sites unless the user or repo requires a richer palette
 - avoid decorative gradients, blobs, bokeh, glow, and excessive glass unless the selected source system specifically calls for them
 - keep shadows soft, rare, and hierarchy-driven; do not use heavy elevation to make weak structure feel premium
+- when the user names recurring visual dislikes, add [[UI Anti-Patterns]] as a support guard and turn the dislike into a small testable rejection rule; do not treat the anti-pattern page as the primary visual system
+- treat Apple-style web shadows as neutral, low-opacity, tokenized, and rare; default to no shadow unless elevation communicates hierarchy
+- avoid decorative meta pills, chips, and badges unless they are functional, source-backed, or explicitly requested
 
 ## Primitive Stack
 
@@ -88,8 +99,16 @@ If a live reference site is the source, inspect its computed styles and CSS stru
 ## Related Pages
 
 - [[Frontend Quality Gate]]
+- [[Mobile Web Performance And Design]]
 - [[Frontend Overlay - Polished Product Website]]
 - [[Frontend Overlay - Linear Inspired B2B SaaS]]
+- [[Project Taste Packets]]
+- [[Preferred Product Website Aesthetic]]
+- [[UI Anti-Patterns]]
+
+## Routing Note
+
+For substantial UI/UX implementation, this page and the strongest matching frontend implementation skill should lead. [[UI Anti-Patterns]] is a rejection checklist for known recurring mistakes, not a replacement for design-system extraction, reference translation, accessibility review, rendered testing, or implementation guidance.
 
 ## Sources
 

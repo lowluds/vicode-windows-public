@@ -2,13 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import { safeStorage } from 'electron';
-import { GeminiAdapter } from '../../providers/gemini/adapter';
 import { OllamaAdapter } from '../../providers/ollama/adapter';
-import { OpenAIAdapter } from '../../providers/openai/adapter';
-import { KimiAdapter } from '../../providers/kimi/adapter';
-import { QwenAdapter } from '../../providers/qwen/adapter';
+import { fetchOllamaWithRetry } from '../../providers/ollama/transport';
+import { AppRuntimeProviderAdapter } from '../../providers/app-runtime-adapter';
+import { RetiredProviderAdapter } from '../../providers/retired-adapter';
 import type {
   AutonomyDelegationProfile,
+  ProviderRunContext,
   ProviderRunHandle
 } from '../../providers/types';
 import type {
@@ -16,6 +16,9 @@ import type {
   ComposerMode,
   ComposerSubmitInput,
   ComposerSubmitResult,
+  CustomProviderDefinition,
+  CustomProviderSettings,
+  CustomProviderSettingsSaveInput,
   ExecutionPermission,
   ImageAttachment,
   PlannerAnswerInput,
@@ -28,34 +31,53 @@ import type {
   PlannerSetModeInput,
   ProviderDescriptor,
   ProviderId,
+  RunChangeArtifact,
   RunActivityInfo,
   RunRuntimeTraceMark,
   RunRuntimeTraceStage,
   RunToolApprovalDecision,
   RunToolApprovalRequest,
+  StagedWorkspaceHunkApplyInput,
+  StagedWorkspaceHunkRejectInput,
+  StagedWorkspaceHunkRevertInput,
+  StagedWorkspaceHunkReviewResult,
+  StagedWorkspaceReviewInput,
+  StagedWorkspaceReviewResult,
   TextAttachment,
   ThreadFollowUp,
   ThreadDetail,
-  RunProgressState
+  RunProgressState,
+  WorktreeReviewInput,
+  WorktreeReviewResult,
+  WorktreeCleanupInput,
+  WorktreeCleanupResult,
+  WorktreeHunkApplyInput,
+  WorktreeHunkRejectInput,
+  WorktreeHunkRevertInput,
+  WorktreeHunkReviewResult
 } from '../../shared/domain';
 import type { ThreadCollaborationSummary } from '../../shared/ipc';
 import type { AppEvent } from '../../shared/events';
 import { resolveSubagentReasoningEffort } from '../../shared/subagents';
+import { cleanFinalAssistantDisplayText } from '../../shared/assistant-text/final-display-cleanup';
 import { DatabaseService } from '../../storage/database';
 import {
   providerAuthBrand,
   providerCapabilities,
   providerCliLabel,
-  providerDisplayName
+  providerDisplayName,
+  providerRetiredMessage,
+  isRetiredProviderId
 } from '../../shared/providers';
 import { promptRequiresAttachedWorkspace } from '../../shared/workspace-run-guard';
 import { WorkspaceContextService, type WorkspaceContextResult } from './workspace-context';
 import { WorkspaceMemoryService } from './memory';
 import { GeneratedMemoryRetrievalService } from './generated-memory-retrieval';
 import { SkillContextService } from './skill-context';
+import { ProjectKnowledgeRouter } from './project-knowledge-router';
 import { captureWorkspaceSnapshot } from './workspace-changes';
 import { OllamaRuntimeService } from './ollama-runtime';
-import { OllamaFinalAnswerFormatter } from './ollama-final-answer-formatter';
+import type { OllamaFinalAnswerFormatter } from './ollama-final-answer-formatter';
 import { AgentRuntimeService } from './agent-runtime';
 import {
   normalizeProviderInfoEvent,
@@ -74,6 +96,11 @@ import {
   ExecutionContext,
   ProviderExecutionService
 } from './provider-execution-service';
+import { ProviderModelExecutionService } from './provider-model-execution-service';
+import {
+  resolveCustomProviderModelTransport,
+  resolveProviderModelTransport
+} from './provider-model-transport-registry';
 import { ToolApprovalService } from './tool-approval-service';
 import { ProviderAuthService } from './provider-auth-service';
 import {
@@ -93,7 +120,21 @@ import { ProviderRunOutputService } from './provider-run-output-service';
 import { ProviderRunEventService } from './provider-run-event-service';
 import { ProviderRunFinalizationService } from './provider-run-finalization-service';
 import { ProviderWorkspaceContextSupportService } from './provider-workspace-context-support-service';
+import { ThreadContextCompactionService } from './thread-context-compaction-service';
+import { ThreadContextCompactionTriggerService } from './thread-context-compaction-trigger';
+import { StagedWorkspaceReviewService } from './staged-workspace-review';
+import { HarnessWorktreeReviewService } from './harness-worktree-review';
+import { HarnessWorktreeCleanupService } from './harness-worktree-cleanup';
+import { evaluateHarnessWorktreeCleanupAutomation } from './harness-worktree-cleanup-policy';
+import type {
+  HarnessWorktreeCreateResult,
+  HarnessWorktreeCleanupInput,
+  HarnessWorktreeCleanupResult,
+  PrepareHarnessWorktreeSessionInput
+} from './harness-worktree-session';
 import { VicodeGuidanceService } from './vicode-guidance';
+import { ProjectKnowledgeService } from './project-knowledge';
+import { createAgentRuntimeProjectKnowledgeBridge } from './agent-runtime-project-knowledge';
 
 function createBackgroundSubagentExecutionConstraints(
   profile: AutonomyDelegationProfile
@@ -116,6 +157,144 @@ function createBackgroundSubagentExecutionConstraints(
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function sanitizeStagedWorkspaceChangeSetForRenderer(value: unknown) {
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const operations = Array.isArray(value.operations)
+    ? value.operations.map((operation) => {
+        if (!isRecord(operation)) {
+          return operation;
+        }
+        const { beforeContent: _beforeContent, proposedAfterContent: _proposedAfterContent, patchText: _patchText, ...safeOperation } = operation;
+        return safeOperation;
+      })
+    : value.operations;
+
+  return {
+    ...value,
+    operations
+  };
+}
+
+const UNSAFE_WORKTREE_RENDERER_KEYS = new Set([
+  'sourceRepoRoot',
+  'sourceWorkspaceRoot',
+  'runtimeWorkspaceRoot',
+  'worktreeRepoRoot',
+  'worktreeWorkspaceRoot'
+]);
+
+function sanitizeWorktreeRendererValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeWorktreeRendererValue(item));
+  }
+
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !UNSAFE_WORKTREE_RENDERER_KEYS.has(key))
+      .map(([key, entryValue]) => [key, sanitizeWorktreeRendererValue(entryValue)])
+  );
+}
+
+function sanitizeWorktreeChangeArtifactForRenderer(value: unknown): unknown {
+  if (!isRecord(value) || value.source !== 'worktree_diff') {
+    return value;
+  }
+
+  const files = Array.isArray(value.files)
+    ? value.files.map((file) => {
+        if (!isRecord(file)) {
+          return file;
+        }
+        const {
+          beforeContent: _beforeContent,
+          afterContent: _afterContent,
+          patchText: _patchText,
+          previewLines: _previewLines,
+          ...safeFile
+        } = file;
+        return safeFile;
+      })
+    : value.files;
+
+  return {
+    ...value,
+    files
+  };
+}
+
+function sanitizeReviewThread(thread: ThreadDetail): ThreadDetail {
+  return {
+    ...thread,
+    rawOutput: thread.rawOutput.map((event) => {
+      if (!isRecord(event.payload)) {
+        return event;
+      }
+
+      let payload = event.payload;
+      if ('stagedWorkspaceChangeSet' in payload) {
+        payload = {
+          ...payload,
+          stagedWorkspaceChangeSet: sanitizeStagedWorkspaceChangeSetForRenderer(payload.stagedWorkspaceChangeSet)
+        };
+      }
+
+      const runtimeTrace = isRecord(payload.runtimeTrace) ? payload.runtimeTrace : null;
+      if (runtimeTrace && 'detail' in runtimeTrace) {
+        payload = {
+          ...payload,
+          runtimeTrace: {
+            ...runtimeTrace,
+            detail: sanitizeWorktreeRendererValue(runtimeTrace.detail)
+          }
+        };
+      }
+
+      const activity = isRecord(payload.activity) ? payload.activity : null;
+      if (activity && 'changeArtifact' in activity) {
+        payload = {
+          ...payload,
+          activity: {
+            ...activity,
+            changeArtifact: sanitizeWorktreeChangeArtifactForRenderer(activity.changeArtifact)
+          }
+        };
+      }
+
+      const progressSnapshot = isRecord(payload.progressSnapshot) ? payload.progressSnapshot : null;
+      if (progressSnapshot && 'changeArtifact' in progressSnapshot) {
+        payload = {
+          ...payload,
+          progressSnapshot: {
+            ...progressSnapshot,
+            changeArtifact: sanitizeWorktreeChangeArtifactForRenderer(progressSnapshot.changeArtifact)
+          }
+        };
+      }
+
+      return {
+        ...event,
+        payload
+      };
+    })
+  };
+}
+
+interface ProviderWorktreeSessionHost {
+  create(input: PrepareHarnessWorktreeSessionInput): Promise<HarnessWorktreeCreateResult>;
+  cleanup(input: HarnessWorktreeCleanupInput): Promise<HarnessWorktreeCleanupResult>;
+}
+
 export class ProviderManager {
   private readonly adapters: Record<ProviderId, ProviderAdapter>;
   private readonly workspaceContext: WorkspaceContextService;
@@ -124,7 +303,6 @@ export class ProviderManager {
   private readonly runningByThread = new Map<string, string>();
   private readonly plannerRunsByThread = new Map<string, string>();
   private readonly emitter = new EventEmitter();
-  private readonly ollamaFinalAnswerFormatter: OllamaFinalAnswerFormatter;
   private readonly agentRuntime: AgentRuntimeService;
   private readonly executionService: ProviderExecutionService;
   private readonly toolApprovalService: ToolApprovalService;
@@ -136,6 +314,8 @@ export class ProviderManager {
   private readonly runProgress: ProviderRunProgressService;
   private readonly promptTextService: ProviderPromptTextService;
   private readonly summaryTextService: ProviderSummaryTextService;
+  private readonly threadContextCompaction: ThreadContextCompactionService;
+  private readonly threadContextCompactionTrigger: ThreadContextCompactionTriggerService;
   private readonly descriptorService: ProviderDescriptorService;
   private readonly followUpService: ProviderFollowUpService;
   private readonly contextSupport: ProviderContextSupportService;
@@ -145,6 +325,9 @@ export class ProviderManager {
   private readonly runOutput: ProviderRunOutputService;
   private readonly runEvents: ProviderRunEventService;
   private readonly runFinalization: ProviderRunFinalizationService;
+  private readonly stagedWorkspaceReview: StagedWorkspaceReviewService;
+  private readonly worktreeReview: HarnessWorktreeReviewService;
+  private readonly worktreeCleanup: HarnessWorktreeCleanupService | null;
   private disposed = false;
 
   private get runProgressByRun() {
@@ -160,18 +343,25 @@ export class ProviderManager {
     adapters?: Record<ProviderId, ProviderAdapter>,
     workspaceContext?: WorkspaceContextService,
     ollamaRuntime = new OllamaRuntimeService(),
-    agentRuntime = new AgentRuntimeService(),
-    ollamaFinalAnswerFormatter = new OllamaFinalAnswerFormatter(ollamaRuntime)
+    agentRuntime?: AgentRuntimeService,
+    _ollamaFinalAnswerFormatter?: OllamaFinalAnswerFormatter,
+    private readonly harnessWorktreeSessions?: ProviderWorktreeSessionHost
   ) {
-    this.agentRuntime = agentRuntime;
-    this.ollamaFinalAnswerFormatter = ollamaFinalAnswerFormatter;
+    const projectKnowledgeService = new ProjectKnowledgeService({ indexReader: db });
+    this.agentRuntime = agentRuntime ?? new AgentRuntimeService(
+      undefined,
+      undefined,
+      undefined,
+      createAgentRuntimeProjectKnowledgeBridge(db, projectKnowledgeService)
+    );
     this.adapters =
       adapters ?? {
-        openai: new OpenAIAdapter(),
-        gemini: new GeminiAdapter(),
-        qwen: new QwenAdapter(),
-        ollama: new OllamaAdapter(ollamaRuntime, agentRuntime),
-        kimi: new KimiAdapter()
+        openai: new RetiredProviderAdapter('openai'),
+        gemini: new RetiredProviderAdapter('gemini'),
+        qwen: new RetiredProviderAdapter('qwen'),
+        ollama: new OllamaAdapter(ollamaRuntime, this.agentRuntime),
+        kimi: new RetiredProviderAdapter('kimi'),
+        openai_compatible: new AppRuntimeProviderAdapter('openai_compatible')
       };
     this.skillContext = new SkillContextService(db);
     this.workspaceContext =
@@ -179,6 +369,7 @@ export class ProviderManager {
       new WorkspaceContextService({
         memoryRetriever: new WorkspaceMemoryService(db),
         generatedMemoryRetriever: new GeneratedMemoryRetrievalService(db),
+        projectKnowledgeRetriever: new ProjectKnowledgeRouter(projectKnowledgeService),
         skillResolver: this.skillContext
       });
     this.toolApprovalService = new ToolApprovalService({
@@ -192,7 +383,7 @@ export class ProviderManager {
       adapters: this.adapters,
       emit: (event) => this.emit(event),
       getProvider: (providerId, options) => this.getProvider(providerId, options),
-      resolveAvailableAuthMode: (auth, account) => this.descriptorService.resolveAvailableAuthMode(auth, account),
+      resolveAvailableAuthMode: (providerId, auth, account) => this.descriptorService.resolveAvailableAuthMode(providerId, auth, account),
       syncProviderAccount: (providerId, account, auth) => this.descriptorService.syncProviderAccount(providerId, account, auth)
     });
     this.modelService = new ProviderModelService({
@@ -205,13 +396,18 @@ export class ProviderManager {
     this.runtimeToolService = new ProviderRuntimeToolService({
       agentRuntime: this.agentRuntime,
       projectPolicy: this.projectPolicy,
-      requestToolApproval: (input, runtimeCommandPolicy) =>
-        this.toolApprovalService.requestToolApproval(input, runtimeCommandPolicy)
+      requestToolApproval: (input, runtimeCommandPolicy, options) =>
+        this.toolApprovalService.requestToolApproval(input, runtimeCommandPolicy, options)
     });
     this.runEvents = new ProviderRunEventService({
       db: this.db,
       emit: (event) => this.emit(event)
     });
+    this.stagedWorkspaceReview = new StagedWorkspaceReviewService(this.db);
+    this.worktreeReview = new HarnessWorktreeReviewService(this.db);
+    this.worktreeCleanup = this.harnessWorktreeSessions
+      ? new HarnessWorktreeCleanupService(this.db, this.harnessWorktreeSessions)
+      : null;
     this.runProgress = new ProviderRunProgressService({
       addProgressEvent: (threadId, runId, progress) =>
         this.db.addRunEvent(threadId, runId, 'info', {
@@ -237,6 +433,37 @@ export class ProviderManager {
       resolveUsableModelId: (providerId, modelId) => this.modelService.resolveUsableModelId(providerId, modelId),
       decryptApiKey: (encryptedApiKey) => this.decryptApiKey(encryptedApiKey),
       resolveOllamaTransportMode: (providerId) => this.resolveOllamaTransportMode(providerId)
+    });
+    this.threadContextCompaction = new ThreadContextCompactionService({
+      db: this.db,
+      summarize: ({ thread, prompt }) =>
+        this.summaryTextService.generateThreadContextCompactionSummary(thread, prompt)
+    });
+    this.threadContextCompactionTrigger = new ThreadContextCompactionTriggerService({
+      compactionService: this.threadContextCompaction,
+      onCompacted: ({ threadId, runId, compaction }) => {
+        const event = this.db.addRunEvent(threadId, runId, 'info', {
+          message: 'Context automatically compacted',
+          eventKind: 'tool_activity',
+          transcriptVisible: true,
+          activity: {
+            kind: 'context_compaction',
+            summary: 'Context automatically compacted',
+            text: 'Older thread context was summarized so the run can continue within the model context window.',
+            providerEventType: 'vicode_thread_context_compaction'
+          } satisfies RunActivityInfo,
+          threadCompaction: {
+            id: compaction.id,
+            sourceStartEventId: compaction.sourceStartEventId,
+            sourceEndEventId: compaction.sourceEndEventId,
+            inputTokenEstimate: compaction.inputTokenEstimate,
+            outputTokenEstimate: compaction.outputTokenEstimate
+          }
+        });
+        if (event) {
+          this.emit({ type: 'raw.event', event });
+        }
+      }
     });
     this.descriptorService = new ProviderDescriptorService({
       db: this.db,
@@ -269,7 +496,7 @@ export class ProviderManager {
       this.contextSupport
     );
     this.vicodeGuidance = new VicodeGuidanceService();
-    this.runOutput = new ProviderRunOutputService(db, ollamaFinalAnswerFormatter);
+    this.runOutput = new ProviderRunOutputService(db);
     this.runFinalization = new ProviderRunFinalizationService({
       db: this.db,
       runProgress: this.runProgress,
@@ -301,11 +528,13 @@ export class ProviderManager {
         this.modelService.resolveExecutionModelId(providerId, requestedModelId, imageAttachments),
       decryptApiKey: (encrypted) => this.decryptApiKey(encrypted),
       resolveOllamaTransportMode: (providerId) => this.resolveOllamaTransportMode(providerId),
-      executeProviderRuntimeToolCall: (input) => this.executeProviderRuntimeToolCall(input as never),
+      executeProviderRuntimeToolCall: (input) => this.runtimeToolService.executeProviderRuntimeToolCall(input as never),
       collectRunDeltaText: (threadId, runId) => this.runOutput.collectRunDeltaText(threadId, runId),
       collectAssistantText: (threadId, runId) => this.runOutput.collectAssistantText(threadId, runId),
       recordInfoEvent: (threadId, runId, normalizedInfo) =>
         this.runEvents.recordInfoEvent(threadId, runId, normalizedInfo),
+      recordRuntimeTraceMark: (threadId, runId, stage, payload) =>
+        this.runEvents.recordRuntimeTraceMark(threadId, runId, stage as RunRuntimeTraceStage, payload ?? null),
       recordNativePlannerCloseout: (threadId, runId, providerId, summary, text) =>
         this.runEvents.recordNativePlannerCloseout(threadId, runId, providerId, summary, text),
       setPlannerRunId: (threadId, runId) => {
@@ -328,9 +557,30 @@ export class ProviderManager {
       stopRun: (runId) => this.stopRun(runId),
       readTurnSkillIds: (metadata) => this.readTurnSkillIds(metadata)
     });
+    const providerModelExecutionService = new ProviderModelExecutionService({
+      agentRuntime: this.agentRuntime,
+      resolveTransport: (input) =>
+        input.providerId === 'openai_compatible'
+          ? this.resolveCustomProviderTransport(input.customProviderId)
+          : resolveProviderModelTransport({
+              ...input,
+              ollamaRuntimeBaseUrl: ollamaRuntime.baseUrl,
+              fetchOllamaWithRetry: (baseUrl, path, options, apiKey, timeoutMs) =>
+                fetchOllamaWithRetry({
+                  runtime: ollamaRuntime,
+                  fetchImpl: globalThis.fetch,
+                  baseUrl,
+                  path,
+                  options,
+                  apiKey,
+                  timeoutMs
+                })
+            })
+    });
     this.executionService = new ProviderExecutionService({
       adapters: this.adapters,
       db: this.db,
+      providerModelExecutionService,
       isDisposed: () => this.disposed,
       assertProviderRunPermission: (providerId, executionPermission) =>
         this.assertProviderRunPermission(providerId, executionPermission),
@@ -345,10 +595,24 @@ export class ProviderManager {
           memoryBlocks as WorkspaceContextResult['memoryBlocks'],
           generatedMemoryBlocks as WorkspaceContextResult['generatedMemoryBlocks']
         ),
+      createProjectKnowledgeActivity: (projectKnowledgeBlocks, routerEvidence) =>
+        this.workspaceContextSupport.createProjectKnowledgeActivity(
+          projectKnowledgeBlocks as WorkspaceContextResult['projectKnowledgeBlocks'],
+          routerEvidence as WorkspaceContextResult['projectKnowledgeRouter']
+        ),
+      createSkillActivity: (workspaceContext) =>
+        this.workspaceContextSupport.createSkillActivity({
+          selectedSkillIds: workspaceContext.selectedSkillIds,
+          autoSelectedSkillIds: workspaceContext.autoSelectedSkillIds ?? [],
+          mentionedSkillIds: workspaceContext.mentionedSkillIds ?? []
+        }),
       resolveVicodeGuidance: (input) => this.vicodeGuidance.resolveForPrompt(input),
       createGeneratedMemoryTraceDetail: (input) =>
         this.workspaceContextSupport.createGeneratedMemoryTraceDetail(input),
       countQueuedSteerFollowUps: (thread) => this.contextSupport.countQueuedSteerFollowUps(thread),
+      createHarnessWorktreeSession: this.harnessWorktreeSessions
+        ? (input) => this.harnessWorktreeSessions!.create(input)
+        : undefined,
       resolveExecutionModelId: (providerId, requestedModelId, imageAttachments) =>
         this.modelService.resolveExecutionModelId(providerId, requestedModelId, imageAttachments),
       resolveImageAttachmentRouting: (providerId, executionModelId, imageAttachments) =>
@@ -362,9 +626,12 @@ export class ProviderManager {
       advanceRunProgress: (runId) => this.runProgress.advance(runId),
       refreshDerivedRunProgress: (threadId, runId, providerId, modelId) =>
         this.refreshDerivedRunProgress(threadId, runId, providerId, modelId),
+      maybeCreateThreadContextCompactionFromContextUsage: (input) => {
+        void this.threadContextCompactionTrigger.maybeCreateFromContextUsage(input);
+      },
       usesAppAuthoritativeToolApproval: (providerId) => this.runtimeToolService.usesAppAuthoritativeToolApproval(providerId),
-      requestToolApproval: (request, runtimeCommandPolicy) =>
-        this.toolApprovalService.requestToolApproval(request, runtimeCommandPolicy),
+      requestToolApproval: (request, runtimeCommandPolicy, options) =>
+        this.toolApprovalService.requestToolApproval(request, runtimeCommandPolicy, options),
       executeProviderRuntimeToolCall: (input) => this.runtimeToolService.executeProviderRuntimeToolCall(input as never),
       collectAssistantText: (threadId, runId) => this.runOutput.collectAssistantText(threadId, runId),
       collectRunDeltaText: (threadId, runId) => this.runOutput.collectRunDeltaText(threadId, runId),
@@ -376,14 +643,15 @@ export class ProviderManager {
       },
       finalizeSuccessfulExecutionRun: (input) => this.finalizeSuccessfulExecutionRun(input),
       finalizeExecutionRunFailure: (input) => this.finalizeExecutionRunFailure(input),
-      shouldFinalizeWithProviderCleanup: (providerId, output) =>
-        providerId === 'ollama' && this.ollamaFinalAnswerFormatter.shouldRewrite(output),
+      shouldFinalizeWithProviderCleanup: () => false,
       finalizeSuccessfulExecutionRunWithProviderCleanup: (input) =>
         this.runOutput.finalizeSuccessfulExecutionRunWithProviderCleanup(
           input,
           (next) => this.finalizeSuccessfulExecutionRun(next),
           () => this.disposed
-        )
+        ),
+      finalizeProviderModelAssistantOutput: (context, output) =>
+        this.finalizeProviderModelAssistantOutput(context, output)
     });
   }
 
@@ -431,12 +699,107 @@ export class ProviderManager {
     return this.toolApprovalService.listPendingToolApprovals();
   }
 
+  hasActiveRuns() {
+    return this.running.size > 0;
+  }
+
   async approveToolApproval(approvalId: string) {
     this.toolApprovalService.approveToolApproval(approvalId);
   }
 
   async rejectToolApproval(approvalId: string) {
     this.toolApprovalService.rejectToolApproval(approvalId);
+  }
+
+  async applyStagedWorkspaceChange(input: StagedWorkspaceReviewInput): Promise<StagedWorkspaceReviewResult> {
+    const workspaceRoot = this.resolveStagedWorkspaceReviewWorkspace(input.threadId);
+    const decision = await this.stagedWorkspaceReview.apply({
+      ...input,
+      workspaceRoot
+    });
+    return this.createStagedWorkspaceReviewResult(input.threadId, decision);
+  }
+
+  async rejectStagedWorkspaceChange(input: StagedWorkspaceReviewInput): Promise<StagedWorkspaceReviewResult> {
+    const decision = await this.stagedWorkspaceReview.reject(input);
+    return this.createStagedWorkspaceReviewResult(input.threadId, decision);
+  }
+
+  async revertStagedWorkspaceChange(input: StagedWorkspaceReviewInput): Promise<StagedWorkspaceReviewResult> {
+    const workspaceRoot = this.resolveStagedWorkspaceReviewWorkspace(input.threadId);
+    const decision = await this.stagedWorkspaceReview.revert({
+      ...input,
+      workspaceRoot
+    });
+    return this.createStagedWorkspaceReviewResult(input.threadId, decision);
+  }
+
+  async previewStagedWorkspaceChange(input: StagedWorkspaceReviewInput): Promise<RunChangeArtifact> {
+    return this.stagedWorkspaceReview.preview(input);
+  }
+
+  async applyStagedWorkspaceHunks(input: StagedWorkspaceHunkApplyInput): Promise<StagedWorkspaceHunkReviewResult> {
+    const workspaceRoot = this.resolveStagedWorkspaceReviewWorkspace(input.threadId);
+    const decision = await this.stagedWorkspaceReview.applyHunks({
+      ...input,
+      workspaceRoot
+    });
+    return this.createStagedWorkspaceHunkReviewResult(input.threadId, decision);
+  }
+
+  async rejectStagedWorkspaceHunks(input: StagedWorkspaceHunkRejectInput): Promise<StagedWorkspaceHunkReviewResult> {
+    const decision = await this.stagedWorkspaceReview.rejectHunks(input);
+    return this.createStagedWorkspaceHunkReviewResult(input.threadId, decision);
+  }
+
+  async revertStagedWorkspaceHunks(input: StagedWorkspaceHunkRevertInput): Promise<StagedWorkspaceHunkReviewResult> {
+    const workspaceRoot = this.resolveStagedWorkspaceReviewWorkspace(input.threadId);
+    const decision = await this.stagedWorkspaceReview.revertHunks({
+      ...input,
+      workspaceRoot
+    });
+    return this.createStagedWorkspaceHunkReviewResult(input.threadId, decision);
+  }
+
+  async applyWorktreeReview(input: WorktreeReviewInput): Promise<WorktreeReviewResult> {
+    const decision = await this.worktreeReview.apply(input);
+    return this.createWorktreeReviewResult(input.threadId, decision);
+  }
+
+  async rejectWorktreeReview(input: WorktreeReviewInput): Promise<WorktreeReviewResult> {
+    const decision = await this.worktreeReview.reject(input);
+    await this.maybeAutoCleanupWorktreeAfterReview(decision);
+    return this.createWorktreeReviewResult(input.threadId, decision);
+  }
+
+  async revertWorktreeReview(input: WorktreeReviewInput): Promise<WorktreeReviewResult> {
+    const decision = await this.worktreeReview.revert(input);
+    await this.maybeAutoCleanupWorktreeAfterReview(decision);
+    return this.createWorktreeReviewResult(input.threadId, decision);
+  }
+
+  async applyWorktreeHunks(input: WorktreeHunkApplyInput): Promise<WorktreeHunkReviewResult> {
+    const decision = await this.worktreeReview.applyHunks(input);
+    return this.createWorktreeHunkReviewResult(input.threadId, decision);
+  }
+
+  async rejectWorktreeHunks(input: WorktreeHunkRejectInput): Promise<WorktreeHunkReviewResult> {
+    const decision = await this.worktreeReview.rejectHunks(input);
+    return this.createWorktreeHunkReviewResult(input.threadId, decision);
+  }
+
+  async revertWorktreeHunks(input: WorktreeHunkRevertInput): Promise<WorktreeHunkReviewResult> {
+    const decision = await this.worktreeReview.revertHunks(input);
+    return this.createWorktreeHunkReviewResult(input.threadId, decision);
+  }
+
+  async cleanupWorktreeReview(input: WorktreeCleanupInput): Promise<WorktreeCleanupResult> {
+    if (!this.worktreeCleanup) {
+      throw new Error('Worktree cleanup service is unavailable.');
+    }
+
+    const decision = await this.worktreeCleanup.cleanup(input);
+    return this.createWorktreeCleanupResult(input.threadId, decision);
   }
 
   async setThreadExecutionPermission(
@@ -478,6 +841,24 @@ export class ProviderManager {
 
   async saveApiKey(providerId: ProviderId, apiKey: string) {
     return this.authService.saveApiKey(providerId, apiKey);
+  }
+
+  listCustomProviderSettings(): CustomProviderSettings[] {
+    return this.db.listCustomProviders().map((provider) => this.mapCustomProviderSettings(provider));
+  }
+
+  saveCustomProviderSettings(input: CustomProviderSettingsSaveInput): CustomProviderSettings {
+    const { apiKey, ...settings } = input;
+    return this.mapCustomProviderSettings(
+      this.db.saveCustomProvider({
+        ...settings,
+        encryptedApiKey: this.encryptApiKey(apiKey)
+      })
+    );
+  }
+
+  deleteCustomProviderSettings(providerId: string) {
+    this.db.deleteCustomProvider(providerId);
   }
 
   async submitComposer(input: ComposerSubmitInput): Promise<ComposerSubmitResult> {
@@ -572,7 +953,7 @@ export class ProviderManager {
     const thread = this.db.getThread(input.threadId);
     const plan = this.db.approvePlannerPlan(thread.id, input.planId);
     const latestAnswers = this.db.getLatestPlannerQuestionSet(thread.id)?.answers ?? null;
-    const executionPrompt = 'Implement the approved plan.';
+    const executionPrompt = 'Implement the approved plan to completion.';
 
     const result = await this.startExecutionRun(
       {
@@ -855,6 +1236,14 @@ export class ProviderManager {
     });
   }
 
+  private async finalizeProviderModelAssistantOutput(_context: ProviderRunContext, output: string) {
+    const trimmed = output.trim();
+    if (!trimmed) {
+      return trimmed;
+    }
+    return cleanFinalAssistantDisplayText(trimmed);
+  }
+
   private finalizeSuccessfulExecutionRun(input: {
     threadId: string;
     runId: string;
@@ -892,11 +1281,57 @@ export class ProviderManager {
     return safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(buffer) : buffer.toString('utf8');
   }
 
+  private encryptApiKey(value: string) {
+    return safeStorage.isEncryptionAvailable()
+      ? safeStorage.encryptString(value).toString('base64')
+      : Buffer.from(value, 'utf8').toString('base64');
+  }
+
+  private resolveCustomProviderTransport(customProviderId: string | null | undefined) {
+    if (!customProviderId?.trim()) {
+      return null;
+    }
+
+    let provider: CustomProviderDefinition;
+    try {
+      provider = this.db.getCustomProvider(customProviderId);
+    } catch {
+      return null;
+    }
+
+    return resolveCustomProviderModelTransport({
+      provider,
+      decryptApiKey: (encryptedApiKey) => this.decryptApiKey(encryptedApiKey)
+    });
+  }
+
+  private mapCustomProviderSettings(provider: CustomProviderDefinition): CustomProviderSettings {
+    return {
+      id: provider.id,
+      name: provider.name,
+      transportKind: provider.transportKind,
+      baseUrl: provider.baseUrl,
+      defaultModelId: provider.defaultModelId,
+      enabled: provider.enabled,
+      hasApiKey: provider.encryptedApiKey.length > 0,
+      createdAt: provider.createdAt,
+      updatedAt: provider.updatedAt
+    };
+  }
+
   private shouldSuggestThreadTitle(thread: ThreadDetail, prompt: string) {
     return thread.title.trim() === 'New thread' && thread.turns.length === 0 && Boolean(prompt.trim());
   }
 
   private assertProviderRunPermission(providerId: ProviderId, executionPermission: ComposerSubmitInput['executionPermission']) {
+    if (
+      providerId === 'qwen' ||
+      providerId === 'kimi' ||
+      (isRetiredProviderId(providerId) && this.adapters[providerId] instanceof RetiredProviderAdapter)
+    ) {
+      throw new Error(providerRetiredMessage(providerId));
+    }
+
     if (
       providerCapabilities(providerId).requiresFullAccessForAppRuns &&
       executionPermission !== 'full_access'
@@ -923,6 +1358,115 @@ export class ProviderManager {
     throw new Error(
       'This project does not have a workspace folder yet. Attach a folder before asking Vicode to inspect files, write files, run commands, or answer workspace path questions.'
     );
+  }
+
+  private resolveStagedWorkspaceReviewWorkspace(threadId: string) {
+    const thread = this.db.getThread(threadId);
+    const project = this.db.getProject(thread.projectId);
+    if (!project.folderPath) {
+      throw new Error(
+        'This project does not have a workspace folder yet. Attach a folder before applying staged workspace changes.'
+      );
+    }
+
+    if (!existsSync(project.folderPath)) {
+      throw new Error(`Workspace folder is unavailable: ${project.folderPath}.`);
+    }
+
+    return project.folderPath;
+  }
+
+  private createStagedWorkspaceReviewResult(
+    threadId: string,
+    decision: StagedWorkspaceReviewResult['decision']
+  ): StagedWorkspaceReviewResult {
+    const thread = sanitizeReviewThread(this.db.getThread(threadId));
+    this.emit({ type: 'thread.detail', thread });
+    this.emit({ type: 'thread.updated', thread: this.db.getThreadSummary(threadId) });
+    return {
+      thread,
+      decision
+    };
+  }
+
+  private createStagedWorkspaceHunkReviewResult(
+    threadId: string,
+    decision: StagedWorkspaceHunkReviewResult['decision']
+  ): StagedWorkspaceHunkReviewResult {
+    const thread = sanitizeReviewThread(this.db.getThread(threadId));
+    this.emit({ type: 'thread.detail', thread });
+    this.emit({ type: 'thread.updated', thread: this.db.getThreadSummary(threadId) });
+    return {
+      thread,
+      decision
+    };
+  }
+
+  private createWorktreeReviewResult(
+    threadId: string,
+    decision: WorktreeReviewResult['decision']
+  ): WorktreeReviewResult {
+    const thread = sanitizeReviewThread(this.db.getThread(threadId));
+    this.emit({ type: 'thread.detail', thread });
+    this.emit({ type: 'thread.updated', thread: this.db.getThreadSummary(threadId) });
+    return {
+      thread,
+      decision
+    };
+  }
+
+  private createWorktreeHunkReviewResult(
+    threadId: string,
+    decision: WorktreeHunkReviewResult['decision']
+  ): WorktreeHunkReviewResult {
+    const thread = sanitizeReviewThread(this.db.getThread(threadId));
+    this.emit({ type: 'thread.detail', thread });
+    this.emit({ type: 'thread.updated', thread: this.db.getThreadSummary(threadId) });
+    return {
+      thread,
+      decision
+    };
+  }
+
+  private async maybeAutoCleanupWorktreeAfterReview(
+    decision: WorktreeReviewResult['decision']
+  ): Promise<void> {
+    if (!this.worktreeCleanup) {
+      return;
+    }
+
+    const thread = this.db.getThread(decision.threadId);
+    const automation = evaluateHarnessWorktreeCleanupAutomation({
+      runEvents: thread.rawOutput,
+      reviewDecision: decision
+    });
+
+    if (automation.action !== 'attempt_cleanup') {
+      return;
+    }
+
+    try {
+      await this.worktreeCleanup.cleanup({
+        threadId: decision.threadId,
+        runId: decision.runId
+      });
+    } catch {
+      // Cleanup is a follow-up lifecycle action; a cleanup resolution problem
+      // must not turn a successful review decision into a failed review.
+    }
+  }
+
+  private createWorktreeCleanupResult(
+    threadId: string,
+    decision: WorktreeCleanupResult['decision']
+  ): WorktreeCleanupResult {
+    const thread = sanitizeReviewThread(this.db.getThread(threadId));
+    this.emit({ type: 'thread.detail', thread });
+    this.emit({ type: 'thread.updated', thread: this.db.getThreadSummary(threadId) });
+    return {
+      thread,
+      decision
+    };
   }
 
   private clearPendingToolApprovals(runId?: string, decision: RunToolApprovalDecision = 'cancelled') {

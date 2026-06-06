@@ -153,28 +153,26 @@ export class JobRunReactionService {
       return;
     }
 
-    const fileName = result.relativePath.split(/[\\/]/u).pop() ?? result.relativePath;
     const isDailyCheckpoint = actionType === 'daily_note_capture';
     const summary =
       isDailyCheckpoint
-        ? 'Checkpoint saved'
+        ? 'Project checkpoint saved'
         : actionType === 'memory_promotion'
-          ? 'Auto-updated MEMORY.md'
-          : 'Auto-updated USER.md';
+          ? 'Project memory saved'
+          : 'Preference saved';
     const text =
       isDailyCheckpoint
         ? reason === 'context_pressure'
-          ? `Saved a durable note to ${fileName} before compaction risk increased.`
-          : `Captured this thread in ${fileName}.`
+          ? 'Saved a project checkpoint before compaction risk increased.'
+          : 'Saved a project checkpoint from this thread.'
         : actionType === 'memory_promotion'
-          ? 'Promoted durable thread guidance into MEMORY.md.'
-          : 'Persisted stable user preferences into USER.md.';
+          ? 'Saved durable project guidance.'
+          : 'Saved stable user preferences.';
 
     const event = this.db.addRunEvent(threadId, runId, 'info', {
       activity: {
         kind: isDailyCheckpoint ? 'memory_checkpoint' : 'file_write',
         summary,
-        path: result.targetPath,
         text
       }
     });

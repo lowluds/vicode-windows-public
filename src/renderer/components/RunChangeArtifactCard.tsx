@@ -1,7 +1,21 @@
 import { Component, Suspense, lazy, useState, type ReactNode } from 'react';
-import type { RunChangeArtifact, RunChangedFileArtifact } from '../../shared/domain';
-import { ChevronDownIcon, ChevronRightIcon } from './icons';
-import { DisclosureButton, SurfaceCard } from './ui';
+import type {
+  RunChangeArtifact,
+  RunChangedFileArtifact,
+  StagedWorkspaceHunkApplyInput,
+  StagedWorkspaceHunkRejectInput,
+  StagedWorkspaceHunkRevertInput,
+  StagedWorkspaceHunkReviewDecision,
+  StagedWorkspaceReviewInput,
+  WorktreeHunkApplyInput,
+  WorktreeHunkRejectInput,
+  WorktreeHunkRevertInput,
+  WorktreeHunkReviewDecision,
+  WorktreeReviewInput
+} from '../../shared/domain';
+import { parseRunChangeHunks, type RunChangeHunkArtifact } from '../../shared/hunk-review';
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CloseIcon, UndoIcon } from './icons';
+import { ActionButton, DangerButton, DisclosureButton, SurfaceCard } from './ui';
 import { cx } from './ui/utils';
 
 const MonacoDiffEditor = lazy(async () => {
@@ -46,6 +60,186 @@ function formatFileStatus(file: RunChangedFileArtifact) {
   return 'Updated';
 }
 
+function normalizeArtifactPath(path: string) {
+  return path.replace(/\\/gu, '/');
+}
+
+function formatHunkRange(hunk: RunChangeHunkArtifact) {
+  const range = hunk.afterRange.startLine !== null && hunk.afterRange.lineCount > 0
+    ? hunk.afterRange
+    : hunk.beforeRange;
+  if (range.startLine === null || range.lineCount === 0) {
+    return 'File change';
+  }
+  const endLine = range.startLine + range.lineCount - 1;
+  return endLine === range.startLine ? `Line ${range.startLine}` : `Lines ${range.startLine}-${endLine}`;
+}
+
+function hunkStatusLabel(
+  hunk: RunChangeHunkArtifact,
+  decision: StagedWorkspaceHunkReviewDecision | WorktreeHunkReviewDecision | null
+) {
+  if (!decision || !decision.hunkIds.includes(hunk.id)) {
+    return 'Pending';
+  }
+  if (decision.status === 'failed') {
+    return 'Failed';
+  }
+  if (decision.status === 'reverted' && decision.acceptedHunkIds.includes(hunk.id)) {
+    return 'Reverted';
+  }
+  if (decision.acceptedHunkIds.includes(hunk.id)) {
+    return decision.status === 'applied' ? 'Applied' : decision.status;
+  }
+  if (decision.rejectedHunkIds.includes(hunk.id)) {
+    return 'Rejected';
+  }
+  return decision.status;
+}
+
+interface BaseHunkReviewControlsProps {
+  decision: StagedWorkspaceHunkReviewDecision | WorktreeHunkReviewDecision | null;
+  hunks: RunChangeHunkArtifact[];
+  isResolving?: boolean;
+}
+
+interface StagedHunkReviewControlsProps extends BaseHunkReviewControlsProps {
+  mode: 'staged';
+  baseInput: StagedWorkspaceReviewInput;
+  onApplyHunks?: (input: StagedWorkspaceHunkApplyInput) => void | Promise<void>;
+  onRejectHunks?: (input: StagedWorkspaceHunkRejectInput) => void | Promise<void>;
+  onRevertHunks?: (input: StagedWorkspaceHunkRevertInput) => void | Promise<void>;
+}
+
+interface WorktreeHunkReviewControlsProps extends BaseHunkReviewControlsProps {
+  mode: 'worktree';
+  baseInput: WorktreeReviewInput;
+  onApplyHunks?: (input: WorktreeHunkApplyInput) => void | Promise<void>;
+  onRejectHunks?: (input: WorktreeHunkRejectInput) => void | Promise<void>;
+  onRevertHunks?: (input: WorktreeHunkRevertInput) => void | Promise<void>;
+}
+
+type HunkReviewControlsProps = StagedHunkReviewControlsProps | WorktreeHunkReviewControlsProps;
+type StagedHunkReviewConfig = Omit<StagedHunkReviewControlsProps, 'mode' | 'hunks'>;
+type WorktreeHunkReviewConfig = Omit<WorktreeHunkReviewControlsProps, 'mode' | 'hunks'>;
+type HunkReviewConfig = Omit<StagedHunkReviewControlsProps, 'hunks'> | Omit<WorktreeHunkReviewControlsProps, 'hunks'>;
+
+function HunkReviewControls(props: HunkReviewControlsProps) {
+  const {
+  decision,
+  hunks,
+  isResolving = false
+  } = props;
+  if (hunks.length === 0) {
+    return null;
+  }
+
+  const canRenderActions = Boolean(props.onApplyHunks && props.onRejectHunks);
+  const hasAppliedDecision = decision?.action === 'applied' && decision.status === 'applied';
+
+  return (
+    <div className="run-hunk-review flex flex-col gap-2 rounded-[var(--ui-radius-md)] border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-alpha-03)] p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[12px] font-semibold text-[color:var(--ui-text-title)]">
+          Hunk review
+        </span>
+        {hasAppliedDecision && props.onRevertHunks ? (
+          <DangerButton
+            size="compact"
+            leadingIcon={<UndoIcon />}
+            disabled={isResolving}
+            onClick={() => {
+              if (props.mode === 'staged') {
+                void props.onRevertHunks?.(props.baseInput);
+                return;
+              }
+              void props.onRevertHunks?.(props.baseInput);
+            }}
+          >
+            Revert hunks
+          </DangerButton>
+        ) : null}
+      </div>
+      <div className="flex flex-col gap-2">
+        {hunks.map((hunk, index) => {
+          const status = hunkStatusLabel(hunk, decision);
+          const hunkActionable = canRenderActions
+            && hunk.partialApplySupported
+            && hunk.supportKind === 'partial'
+            && !hasAppliedDecision
+            && status !== 'Applied'
+            && status !== 'Rejected'
+            && status !== 'Reverted';
+          return (
+            <div
+              key={hunk.id}
+              className="run-hunk-review-row flex flex-wrap items-center justify-between gap-2 rounded-[var(--ui-radius-sm)] border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-surface-1)] px-3 py-2"
+              data-testid="run-hunk-review-row"
+              data-hunk-id={hunk.id}
+            >
+              <div className="flex min-w-0 flex-col gap-1">
+                <span className="text-[12px] font-medium text-[color:var(--ui-text-title)]">
+                  Hunk {index + 1} - {formatHunkRange(hunk)}
+                </span>
+                <span className="text-[11px] text-[color:var(--ui-text-subtle)]">
+                  {status}
+                  {hunk.unsupportedReason ? ` - ${hunk.unsupportedReason}` : ''}
+                </span>
+              </div>
+              {hunkActionable ? (
+                <div className="flex shrink-0 items-center gap-2">
+                  <ActionButton
+                    size="compact"
+                    leadingIcon={<CheckIcon />}
+                    disabled={isResolving}
+                    onClick={() => {
+                      if (props.mode === 'staged') {
+                        void props.onApplyHunks?.({
+                          ...props.baseInput,
+                          acceptedHunkIds: [hunk.id],
+                          rejectedHunkIds: []
+                        });
+                        return;
+                      }
+                      void props.onApplyHunks?.({
+                        ...props.baseInput,
+                        acceptedHunkIds: [hunk.id],
+                        rejectedHunkIds: []
+                      });
+                    }}
+                  >
+                    Apply hunk
+                  </ActionButton>
+                  <DangerButton
+                    size="compact"
+                    leadingIcon={<CloseIcon />}
+                    disabled={isResolving}
+                    onClick={() => {
+                      if (props.mode === 'staged') {
+                        void props.onRejectHunks?.({
+                          ...props.baseInput,
+                          hunkIds: [hunk.id]
+                        });
+                        return;
+                      }
+                      void props.onRejectHunks?.({
+                        ...props.baseInput,
+                        hunkIds: [hunk.id]
+                      });
+                    }}
+                  >
+                    Reject hunk
+                  </DangerButton>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function isProviderReportedArtifact(artifact: RunChangeArtifact) {
   return artifact.source === 'provider_reported';
 }
@@ -68,14 +262,24 @@ function renderPreviewLines(file: RunChangedFileArtifact) {
 
 export function RunChangeArtifactCard({
   artifact,
-  label
+  label,
+  stagedHunkReview,
+  worktreeHunkReview
 }: {
   artifact: RunChangeArtifact;
   label?: string | null;
+  stagedHunkReview?: StagedHunkReviewConfig;
+  worktreeHunkReview?: WorktreeHunkReviewConfig;
 }) {
   const [expandedPath, setExpandedPath] = useState<string | null>(null);
   const summary = formatChangeSummary(artifact);
   const providerReported = isProviderReportedArtifact(artifact);
+  const hunkReview: HunkReviewConfig | null = stagedHunkReview
+    ? { mode: 'staged', ...stagedHunkReview }
+    : worktreeHunkReview
+      ? { mode: 'worktree', ...worktreeHunkReview }
+      : null;
+  const hunkParseResult = hunkReview ? parseRunChangeHunks(artifact) : null;
 
   return (
     <SurfaceCard
@@ -111,6 +315,9 @@ export function RunChangeArtifactCard({
       <div className="run-change-card-files flex flex-col">
         {artifact.files.map((file) => {
           const expanded = expandedPath === file.path;
+          const fileHunks = hunkParseResult?.artifactSupported
+            ? hunkParseResult.hunks.filter((hunk) => hunk.filePath === normalizeArtifactPath(file.path))
+            : [];
           return (
             <div
               key={file.path}
@@ -150,6 +357,14 @@ export function RunChangeArtifactCard({
                         </span>
                       ) : null}
                     </div>
+                  {hunkReview && !file.previewTruncated ? (
+                    <div className="mb-3">
+                      <HunkReviewControls
+                        {...hunkReview}
+                        hunks={fileHunks}
+                      />
+                    </div>
+                  ) : null}
                   <div
                     className="run-change-preview-code ui-detail-scroll rounded-[16px] border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-code-bg)]"
                     role="region"

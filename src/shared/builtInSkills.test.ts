@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { builtInSkillSeeds } from './builtInSkills';
+import { SURFACED_PROVIDER_IDS } from './providers';
 
 describe('built-in skill seeds', () => {
   it('defines unique built-in skill ids and names', () => {
@@ -15,14 +16,30 @@ describe('built-in skill seeds', () => {
     }
   });
 
+  it('targets the surfaced beta providers by default', () => {
+    for (const skill of builtInSkillSeeds) {
+      expect(skill.providerTargets).toEqual([...SURFACED_PROVIDER_IDS]);
+    }
+  });
+
   it('keeps Vicode-specific guardrails on higher-risk built-ins', () => {
     const byId = new Map(builtInSkillSeeds.map((skill) => [skill.id, skill]));
 
-    expect(byId.get('built-in-planner')?.instructions).toContain('do not replace or fake the provider-native planner state machine');
-    expect(byId.get('built-in-pdf-toolkit')?.instructions).toContain('Do not imply that a file was inspected');
-    expect(byId.get('built-in-spreadsheet-analyst')?.instructions).toContain('Do not invent columns, formulas, or certainty');
-    expect(byId.get('built-in-doc-writer')?.instructions).toContain('preserve the source intent');
-    expect(byId.get('built-in-slide-writer')?.instructions).toContain('Prefer slide-ready structure over long prose');
     expect(byId.get('built-in-reviewer')?.instructions).toContain('Lead with the highest-signal findings');
+    expect(byId.get('built-in-llm-wiki')?.instructions).toContain('Treat Project Knowledge as Vicode-owned guidance');
+    expect(byId.get('built-in-llm-wiki')?.instructions).toContain('frontmatter titles');
+    expect(byId.get('built-in-llm-wiki')?.instructions).toContain('Do not mutate');
+  });
+
+  it('does not ship experimental presets that overlap native slash commands', () => {
+    expect(builtInSkillSeeds.map((skill) => skill.id)).not.toEqual(
+      expect.arrayContaining([
+        'built-in-planner',
+        'built-in-pdf-toolkit',
+        'built-in-spreadsheet-analyst',
+        'built-in-doc-writer',
+        'built-in-slide-writer'
+      ])
+    );
   });
 });

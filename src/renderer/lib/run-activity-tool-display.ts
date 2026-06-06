@@ -1,5 +1,6 @@
 import type { RunActivityInfo } from '../../shared/domain';
-import type { RunTranscriptActivityItem, RunTranscriptItem } from './run-activity';
+import type { RunTranscriptActivityItem, RunTranscriptItem } from './run-activity/types';
+import { formatVisibleRunErrorMessage } from './error-format';
 
 function clean(value: string) {
   return value.replace(/\s+/g, ' ').trim();
@@ -24,6 +25,25 @@ function normalizeFriendlyToolDetailLine(toolName: string | null, line: string) 
   }
 
   switch (toolName) {
+    case 'list_directory':
+      return trimmed
+        .replace(/^path:\s*/iu, 'Folder: ')
+        .replace(/^max entries:\s*/iu, 'Entry limit: ')
+        .replace(/^max_entries:\s*/iu, 'Entry limit: ');
+    case 'read_file':
+      return trimmed.replace(/^path:\s*/iu, 'File: ');
+    case 'search_text':
+      return trimmed
+        .replace(/^query:\s*/iu, 'Search query: ')
+        .replace(/^path:\s*/iu, 'Path: ')
+        .replace(/^max results:\s*/iu, 'Results limit: ')
+        .replace(/^max_results:\s*/iu, 'Results limit: ');
+    case 'write_file':
+      return trimmed
+        .replace(/^path:\s*/iu, 'File: ')
+        .replace(/^content:\s*.+$/iu, 'Content: provided');
+    case 'apply_patch':
+      return trimmed.replace(/^patch:\s*.+$/iu, 'Patch: provided');
     case 'web_search':
       return trimmed
         .replace(/^query:\s*/iu, 'Search query: ')
@@ -47,6 +67,32 @@ function normalizeFriendlyToolDetailLine(toolName: string | null, line: string) 
           (_match, value: string) =>
             `Stay on one site: ${formatYesNo(value.toLowerCase() === 'true')}`
         );
+    case 'browser_preview_check':
+      return trimmed
+        .replace(/^url:\s*/iu, 'Preview URL: ')
+        .replace(/^expected text:\s*/iu, 'Expected text: ')
+        .replace(/^console errors:\s*/iu, 'Console errors: ')
+        .replace(/^load errors:\s*/iu, 'Load errors: ')
+        .replace(/^screenshot:\s*/iu, 'Screenshot: ');
+    case 'use_mcp_tool':
+      return trimmed
+        .replace(/^calling mcp tool\s+/iu, 'Tool: ')
+        .replace(/^completed mcp tool\s+/iu, 'Tool: ')
+        .replace(/^failed mcp tool\s+/iu, 'Tool: ')
+        .replace(/^server:\s*/iu, 'Server: ')
+        .replace(/^tool:\s*/iu, 'Tool: ');
+    case 'create_skill_bundle':
+      return trimmed
+        .replace(/^folder_name:\s*/iu, 'Skill folder: ')
+        .replace(/^scope:\s*/iu, 'Scope: ')
+        .replace(/^files:\s*.+$/iu, 'Files: provided');
+    case 'create_plugin_bundle':
+      return trimmed
+        .replace(/^folder_name:\s*/iu, 'Plugin folder: ')
+        .replace(/^scope:\s*/iu, 'Scope: ')
+        .replace(/^files:\s*.+$/iu, 'Files: provided');
+    case 'spawn_subagents':
+      return trimmed.replace(/^tasks:\s*.+$/iu, 'Helpers: provided');
     case 'mkdir':
     case 'create_directory':
       return trimmed.replace(/^path:\s*/iu, 'Folder: ');
@@ -74,6 +120,16 @@ function normalizeFriendlyToolDetailText(
 
 function formatFriendlyToolCallLabel(toolName: string | null, fallback: string) {
   switch (toolName) {
+    case 'list_directory':
+      return 'Listing files';
+    case 'read_file':
+      return 'Reading file';
+    case 'search_text':
+      return 'Searching workspace';
+    case 'write_file':
+      return 'Writing file';
+    case 'apply_patch':
+      return 'Applying patch';
     case 'mkdir':
     case 'create_directory':
       return 'Creating folder';
@@ -87,6 +143,16 @@ function formatFriendlyToolCallLabel(toolName: string | null, fallback: string) 
       return 'Crawling a site';
     case 'map_site':
       return 'Mapping a site';
+    case 'browser_preview_check':
+      return 'Checking preview';
+    case 'use_mcp_tool':
+      return 'Using MCP tool';
+    case 'create_skill_bundle':
+      return 'Creating skill';
+    case 'create_plugin_bundle':
+      return 'Creating plugin';
+    case 'spawn_subagents':
+      return 'Starting helper agents';
     default:
       return fallback;
   }
@@ -103,6 +169,16 @@ function formatFriendlyToolResultLabel(
     status?.toLowerCase() === 'stopped';
 
   switch (toolName) {
+    case 'list_directory':
+      return isError ? 'Could not list files' : 'Listed files';
+    case 'read_file':
+      return isError ? 'Could not read file' : 'Read file';
+    case 'search_text':
+      return isError ? 'Workspace search failed' : 'Searched workspace';
+    case 'write_file':
+      return isError ? 'Could not write file' : 'Wrote file';
+    case 'apply_patch':
+      return isError ? 'Could not apply patch' : 'Applied patch';
     case 'mkdir':
     case 'create_directory':
       return isError ? 'Could not create folder' : 'Created folder';
@@ -116,9 +192,41 @@ function formatFriendlyToolResultLabel(
       return isError ? 'Site crawl failed' : 'Crawled the site';
     case 'map_site':
       return isError ? 'Site map failed' : 'Mapped the site';
+    case 'browser_preview_check':
+      return isError ? 'Preview needs attention' : 'Checked preview';
+    case 'use_mcp_tool':
+      return isError ? 'MCP tool failed' : 'Used MCP tool';
+    case 'create_skill_bundle':
+      return isError ? 'Could not create skill' : 'Created skill';
+    case 'create_plugin_bundle':
+      return isError ? 'Could not create plugin' : 'Created plugin';
+    case 'spawn_subagents':
+      return isError ? 'Could not start helper agents' : 'Started helper agents';
     default:
       return fallback;
   }
+}
+
+function isCommandToolName(toolName: string | null) {
+  return toolName === 'run_command' || toolName === 'exec_command';
+}
+
+function normalizeCommandToolErrorDetail(detail: string) {
+  return detail
+    .replace(/^run_command requires Full access\./iu, 'Command requires Full access.')
+    .replace(/^exec_command requires Full access\./iu, 'Command requires Full access.')
+    .replace(/^run_command is disabled for this workspace\./iu, 'Commands are disabled for this workspace.')
+    .replace(/^exec_command is disabled for this workspace\./iu, 'Commands are disabled for this workspace.')
+    .replace(/^run_command is blocked by this workspace network policy\./iu, 'Command is blocked by this workspace network policy.')
+    .replace(/^exec_command is blocked by this workspace network policy\./iu, 'Command is blocked by this workspace network policy.')
+    .replace(/^run_command is blocked by runtime launcher policy\./iu, 'Command is blocked by runtime launcher policy.')
+    .replace(/^exec_command is blocked by runtime launcher policy\./iu, 'Command is blocked by runtime launcher policy.')
+    .replace(/^run_command is blocked by runtime path policy\./iu, 'Command is blocked by runtime path policy.')
+    .replace(/^exec_command is blocked by runtime path policy\./iu, 'Command is blocked by runtime path policy.')
+    .replace(/^run_command was not approved by the user\./iu, 'Command was not approved by the user.')
+    .replace(/^exec_command was not approved by the user\./iu, 'Command was not approved by the user.')
+    .replace(/^run_command requires a runtime approval handler/iu, 'Command requires a runtime approval handler')
+    .replace(/^exec_command requires a runtime approval handler/iu, 'Command requires a runtime approval handler');
 }
 
 export function deriveFriendlyToolCallDisplay(
@@ -135,24 +243,31 @@ export function deriveFriendlyToolCallDisplay(
 }
 
 export function deriveToolResultDisplay(activity: RunActivityInfo) {
-  if (activity.kind === 'tool_result' && activity.toolName !== 'run_command') {
+  if (activity.kind === 'tool_result' && !isCommandToolName(activity.toolName ?? null)) {
+    const rawText = activity.text ?? activity.summary;
+    const isError =
+      activity.status?.toLowerCase() === 'error' || activity.status?.toLowerCase() === 'failed';
+    const text =
+      isError
+        ? formatVisibleRunErrorMessage(rawText)
+        : normalizeFriendlyToolDetailText(
+          activity.toolName ?? null,
+          rawText
+        ) ?? activity.summary;
+    const fallbackLabel = isError && text !== rawText ? text : activity.summary;
     return {
       label: formatFriendlyToolResultLabel(
         activity.toolName ?? null,
         activity.status ?? null,
-        activity.summary
+        fallbackLabel
       ),
-      text:
-        normalizeFriendlyToolDetailText(
-          activity.toolName ?? null,
-          activity.text ?? activity.summary
-        ) ?? activity.summary
+      text
     };
   }
 
   if (
     activity.kind !== 'tool_result' ||
-    activity.toolName !== 'run_command' ||
+    !isCommandToolName(activity.toolName ?? null) ||
     activity.status !== 'error'
   ) {
     return {
@@ -162,6 +277,7 @@ export function deriveToolResultDisplay(activity: RunActivityInfo) {
   }
 
   const detail = activity.text ?? activity.summary;
+  const friendlyDetail = normalizeCommandToolErrorDetail(detail);
   const command = clean(activity.command ?? '');
   const isVerificationCommand =
     /^(?:npm|pnpm|yarn|bun|npx|vite|vitest|playwright|pytest|cargo|go|dotnet|python\b.*-m\s+pytest\b)/iu.test(
@@ -173,96 +289,96 @@ export function deriveToolResultDisplay(activity: RunActivityInfo) {
   const blockedPrefix = isVerificationCommand
     ? 'Blocked verification command'
     : 'Blocked command';
-  if (detail.startsWith('run_command requires Full access.')) {
+  if (/^(?:run_command|exec_command) requires Full access\./iu.test(detail)) {
     return {
       label: `${blockedPrefix}: Full access required`,
-      text: detail
+      text: friendlyDetail
     };
   }
-  if (detail.startsWith('run_command is disabled for this workspace.')) {
+  if (/^(?:run_command|exec_command) is disabled for this workspace\./iu.test(detail)) {
     return {
       label: `${blockedPrefix}: workspace commands disabled`,
-      text: detail
+      text: friendlyDetail
     };
   }
   if (
     detail.startsWith(
-      'run_command is blocked by this workspace network policy.'
+      `${activity.toolName} is blocked by this workspace network policy.`
     )
   ) {
     return {
       label: `${blockedPrefix}: workspace network blocked`,
-      text: detail
+      text: friendlyDetail
     };
   }
   if (
     detail.startsWith(
-      'run_command is blocked by runtime launcher policy. Nested shell launchers'
+      `${activity.toolName} is blocked by runtime launcher policy. Nested shell launchers`
     )
   ) {
     return {
       label: `${blockedPrefix}: nested shell launcher`,
-      text: detail
+      text: friendlyDetail
     };
   }
   if (
     detail.startsWith(
-      'run_command is blocked by runtime launcher policy. Inline interpreter commands'
+      `${activity.toolName} is blocked by runtime launcher policy. Inline interpreter commands`
     )
   ) {
     return {
       label: `${blockedPrefix}: inline interpreter`,
-      text: detail
+      text: friendlyDetail
     };
   }
   if (
     detail.startsWith(
-      'run_command is blocked by runtime launcher policy. Remote shell commands'
+      `${activity.toolName} is blocked by runtime launcher policy. Remote shell commands`
     )
   ) {
     return {
       label: `${blockedPrefix}: remote shell launcher`,
-      text: detail
+      text: friendlyDetail
     };
   }
   if (
     detail.startsWith(
-      'run_command is blocked by runtime path policy. The command references an absolute path outside the workspace'
+      `${activity.toolName} is blocked by runtime path policy. The command references an absolute path outside the workspace`
     )
   ) {
     return {
       label: `${blockedPrefix}: outside workspace path`,
-      text: detail
+      text: friendlyDetail
     };
   }
   if (
     detail.startsWith(
-      'run_command is blocked by runtime path policy. The command references a relative path that resolves outside the workspace'
+      `${activity.toolName} is blocked by runtime path policy. The command references a relative path that resolves outside the workspace`
     )
   ) {
     return {
       label: `${blockedPrefix}: path escape`,
-      text: detail
+      text: friendlyDetail
     };
   }
-  if (detail.startsWith('run_command was not approved by the user.')) {
+  if (/^(?:run_command|exec_command) was not approved by the user\./iu.test(detail)) {
     return {
       label: isVerificationCommand
         ? 'Verification command denied'
         : 'Command denied',
-      text: detail
+      text: friendlyDetail
     };
   }
-  if (detail.startsWith('run_command requires a runtime approval handler')) {
+  if (/^(?:run_command|exec_command) requires a runtime approval handler/iu.test(detail)) {
     return {
       label: `${blockedPrefix}: approval unavailable`,
-      text: detail
+      text: friendlyDetail
     };
   }
 
   return {
-    label: activity.summary,
-    text: detail
+    label: 'Command failed',
+    text: friendlyDetail
   };
 }
 
@@ -311,6 +427,28 @@ function shouldSuppressToolCallBeforeConcreteAction(
   return false;
 }
 
+function shouldSuppressToolResultBeforeConcreteAction(
+  toolResultItem: RunTranscriptActivityItem,
+  nextItem: RunTranscriptItem | undefined
+) {
+  if (!nextItem || nextItem.kind !== 'activity_line') {
+    return false;
+  }
+
+  switch (toolResultItem.toolName) {
+    case 'web_search':
+    case 'research_topic':
+    case 'extract_web_page':
+    case 'crawl_site':
+    case 'map_site':
+      return nextItem.activityKind === 'web_search';
+    default:
+      break;
+  }
+
+  return false;
+}
+
 export function compactRedundantToolCalls(items: RunTranscriptItem[]) {
   const results: RunTranscriptItem[] = [];
 
@@ -320,6 +458,13 @@ export function compactRedundantToolCalls(items: RunTranscriptItem[]) {
       item?.kind === 'activity_line' &&
       item.activityKind === 'tool_call' &&
       shouldSuppressToolCallBeforeConcreteAction(item, items[index + 1])
+    ) {
+      continue;
+    }
+    if (
+      item?.kind === 'activity_line' &&
+      item.activityKind === 'tool_result' &&
+      shouldSuppressToolResultBeforeConcreteAction(item, items[index + 1])
     ) {
       continue;
     }
@@ -346,6 +491,7 @@ function shouldSuppressToolResultAfterConcreteAction(
 
   if (
     /^Failed (?:run_command|exec_command)\b/i.test(item.label) ||
+    /^Command failed\b/i.test(item.label) ||
     /^Blocked command\b/i.test(item.label) ||
     /^Blocked verification command\b/i.test(item.label)
   ) {

@@ -2,7 +2,7 @@
 
 import type { AnchorHTMLAttributes, ComponentProps, HTMLAttributes, MouseEvent } from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui';
-import { ChevronDownIcon, GlobeIcon } from '../icons';
+import { ChevronDownIcon } from '../icons';
 import { cx } from '../ui/utils';
 
 export function Sources({ className, ...props }: ComponentProps<typeof Collapsible>) {
@@ -17,7 +17,7 @@ export function SourcesTrigger({
   return (
     <CollapsibleTrigger
       className={cx(
-        'group inline-flex w-fit items-center gap-2 rounded-[14px] border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-input-bg)] px-3.5 py-2 text-[12px] font-medium text-[color:var(--ui-text-muted)] shadow-[var(--ui-field-shadow)] transition-[background-color,color,transform] hover:bg-[color:var(--ui-input-bg-focus)] hover:text-[color:var(--ui-text-title)] focus-visible:border-[color:var(--ui-border-soft)] focus-visible:bg-[color:var(--ui-input-bg-focus)] focus-visible:text-[color:var(--ui-text-title)] focus-visible:outline-none data-[state=open]:bg-[color:var(--ui-input-bg-focus)] data-[state=open]:text-[color:var(--ui-text-title)]',
+        'ai-sources-trigger group inline-flex w-fit items-center gap-1.5 rounded-[var(--ui-radius-sm)] border border-transparent bg-transparent px-1.5 py-1 text-[12px] font-medium text-[color:var(--ui-text-muted)] shadow-none transition-colors hover:bg-[color:var(--ui-alpha-04)] hover:text-[color:var(--ui-text)] focus-visible:border-[color:var(--ui-border-soft)] focus-visible:bg-[color:var(--ui-alpha-04)] focus-visible:text-[color:var(--ui-text)] focus-visible:outline-none data-[state=open]:bg-[color:var(--ui-alpha-04)] data-[state=open]:text-[color:var(--ui-text)]',
         className
       )}
       {...props}
@@ -35,7 +35,7 @@ export function SourcesContent({ className, ...props }: HTMLAttributes<HTMLDivEl
     <CollapsibleContent>
       <div
         className={cx(
-          'flex flex-col gap-2 rounded-[18px] border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-menu-bg)] p-2 shadow-[var(--ui-shadow-menu)] backdrop-blur-[10px]',
+          'ai-sources-content flex flex-col gap-1.5 rounded-[var(--ui-radius-md)] border border-[color:var(--ui-alpha-06)] bg-[color:var(--ui-alpha-025)] p-1.5 shadow-none',
           className
         )}
         {...props}
@@ -66,7 +66,7 @@ export function Source({ className, excerpt, href, onClick, snippet, title, ...p
   return (
     <a
       className={cx(
-        'group flex flex-col gap-1.5 rounded-[14px] border border-[color:var(--ui-border-soft)] bg-[color:var(--ui-surface)] px-3 py-2.5 transition-colors hover:bg-[color:var(--ui-input-bg-focus)] focus-visible:border-[color:var(--ui-border-soft)] focus-visible:bg-[color:var(--ui-input-bg-focus)] focus-visible:outline-none',
+        'ai-source-row group flex flex-col gap-1 rounded-[var(--ui-radius-sm)] border border-transparent bg-transparent px-2.5 py-2 transition-colors hover:bg-[color:var(--ui-alpha-04)] focus-visible:border-[color:var(--ui-border-soft)] focus-visible:bg-[color:var(--ui-alpha-04)] focus-visible:outline-none',
         className
       )}
       href={href}
@@ -75,8 +75,7 @@ export function Source({ className, excerpt, href, onClick, snippet, title, ...p
       onClick={handleClick}
       {...props}
     >
-      <span className="flex items-center gap-2 text-[13px] font-medium text-[color:var(--ui-text-title)]">
-        <GlobeIcon size={13} />
+      <span className="flex items-center gap-2 text-[12.5px] font-medium text-[color:var(--ui-text)]">
         <span className="truncate">{title}</span>
       </span>
       {snippet ? <span className="text-[12px] leading-5 text-[color:var(--ui-text)]">{snippet}</span> : null}

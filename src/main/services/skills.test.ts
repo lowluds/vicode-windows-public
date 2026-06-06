@@ -1,12 +1,10 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PROVIDER_IDS, type ProviderId, type ProviderModel, type SkillDefinition } from '../../shared/domain';
-import type { DiscoveredNativeSkill, ProviderAdapter, ProviderRunCallbacks, ProviderRunContext, ProviderRunHandle } from '../../providers/types';
+import type { SkillDefinition } from '../../shared/domain';
 
 let mockedHome = '';
-const runHiddenExecutableMock = vi.fn();
 const fetchMock = vi.fn();
 
 vi.mock('node:os', async () => {
@@ -17,14 +15,6 @@ vi.mock('node:os', async () => {
   };
 });
 
-vi.mock('../../providers/util', async () => {
-  const actual = await vi.importActual<typeof import('../../providers/util')>('../../providers/util');
-  return {
-    ...actual,
-    runHiddenExecutable: runHiddenExecutableMock
-  };
-});
-
 describe('SkillCatalogService', () => {
   let root = '';
   let db!: {
@@ -32,15 +22,16 @@ describe('SkillCatalogService', () => {
     getSkill: (skillId: string) => SkillDefinition;
     upsertSkill: (skill: SkillDefinition) => SkillDefinition;
     deleteSkill: (skillId: string) => void;
+    getPreferences: () => { skillsLibraryPath: string | null };
   };
+  let skillsLibraryPath: string | null = null;
 
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), 'vicode-skills-'));
     mockedHome = join(root, 'home');
-    runHiddenExecutableMock.mockReset();
-    runHiddenExecutableMock.mockResolvedValue({ stdout: '', stderr: '' });
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
+    skillsLibraryPath = null;
     const skills = new Map<string, SkillDefinition>();
     db = {
       listSkills: () => [...skills.values()],
@@ -57,7 +48,8 @@ describe('SkillCatalogService', () => {
       },
       deleteSkill: (skillId: string) => {
         skills.delete(skillId);
-      }
+      },
+      getPreferences: () => ({ skillsLibraryPath })
     };
   });
 
@@ -66,53 +58,23 @@ describe('SkillCatalogService', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  function createAdapter(nativeSkills: DiscoveredNativeSkill[], providerId: ProviderId = 'openai'): ProviderAdapter {
-    return {
-      id: providerId,
-      label:
-        providerId === 'openai'
-          ? 'OpenAI'
-          : providerId === 'gemini'
-            ? 'Gemini'
-            : providerId === 'qwen'
-              ? 'Qwen'
-              : 'Kimi',
-      listStaticModels: (): ProviderModel[] => [],
-      discoverApiModels: async () => null,
-      discoverRuntimeModels: async () => null,
-      detectInstall: async () => ({ installed: true, cliPath: null }),
-      getAuthState: async () => ({ authState: 'disconnected', authMode: null }),
-      startAuth: async () => {},
-      clearAuth: async () => {},
-      discoverNativeSkills: async () => nativeSkills,
-      validateProjectContext: () => ({ valid: true }),
-      startRun: async (_context: ProviderRunContext, _callbacks: ProviderRunCallbacks): Promise<ProviderRunHandle> => ({
-        runId: 'test-run',
-        cancel: async () => {}
-      })
-    };
-  }
-
-  function createAdapters(overrides: Partial<Record<ProviderId, ProviderAdapter>> = {}): Record<ProviderId, ProviderAdapter> {
-    return {
-      ...Object.fromEntries(PROVIDER_IDS.map((providerId) => [providerId, createAdapter([], providerId)])),
-      ...overrides
-    } as Record<ProviderId, ProviderAdapter>;
-  }
-
-  it('throws a clear error when injected adapters are incomplete', async () => {
+  it('does not require provider adapters for the app-managed skill catalog', async () => {
     const { SkillCatalogService } = await import('./skills');
 
     expect(
       () =>
-        new SkillCatalogService(
+        new (SkillCatalogService as unknown as new (
+          db: typeof db,
+          statePath: string,
+          legacyAdapters?: unknown
+        ) => unknown)(
           db as never,
           join(root, 'state'),
           {
-            openai: createAdapter([], 'openai')
-          } as unknown as Record<ProviderId, ProviderAdapter>
+            openai: { id: 'openai' }
+          }
         )
-    ).toThrowError('SkillCatalogService requires adapters for: gemini, qwen, ollama, kimi');
+    ).not.toThrow();
   });
 
   it('removes stale generated live-cert skills during startup refresh', async () => {
@@ -233,7 +195,7 @@ describe('SkillCatalogService', () => {
     expect(skills.some((skill) => skill.id === 'skill-react-landing-direction')).toBe(false);
   });
 
-  it('writes canonical skill files without exporting into the Codex app home', async () => {
+  it('ignores legacy Codex export metadata while writing canonical skill files', async () => {
     const { SkillCatalogService } = await import('./skills');
     const service = new SkillCatalogService(db as never, join(root, 'state'));
 
@@ -243,7 +205,6 @@ describe('SkillCatalogService', () => {
       instructions: 'Use a premium frontend system.',
       scope: 'global',
       providerTargets: ['openai', 'gemini'],
-      syncTargets: ['openai'],
       enabled: true,
       projectId: null
     });
@@ -253,14 +214,32 @@ describe('SkillCatalogService', () => {
     expect(readFileSync(String(skill.path), 'utf8')).toContain('Premium Frontend Build');
 
     const exportedPath = join(mockedHome, '.codex', 'skills');
-    const syncState = (skill.metadata.syncState as Record<string, { exported: boolean; path: string | null; error?: string | null }>).openai;
     expect(existsSync(exportedPath)).toBe(false);
-    expect(syncState?.exported).toBe(false);
-    expect(syncState?.path).toBeNull();
-    expect(syncState?.error).toMatch(/does not write to the Codex app home/i);
+    expect(skill.metadata).not.toHaveProperty('syncTargets');
+    expect(readFileSync(join(dirname(String(skill.path)), 'skill.json'), 'utf8')).not.toContain('syncTargets');
   });
 
-  it('detects file-backed imported skills from the Vicode state folder after an explicit refresh', async () => {
+  it('ignores legacy provider export metadata while writing canonical skill files', async () => {
+    const { SkillCatalogService } = await import('./skills');
+    const service = new SkillCatalogService(db as never, join(root, 'state'));
+
+    const skill = service.saveSkill({
+      name: 'Gemini Review Helper',
+      description: 'Review code with Gemini.',
+      instructions: 'Lead with findings.',
+      scope: 'global',
+      providerTargets: ['gemini'],
+      enabled: true,
+      projectId: null
+    });
+
+    const exportedPath = join(mockedHome, '.gemini', 'skills');
+    expect(existsSync(exportedPath)).toBe(false);
+    expect(skill.metadata).not.toHaveProperty('syncTargets');
+    expect(readFileSync(join(dirname(String(skill.path)), 'skill.json'), 'utf8')).not.toContain('syncTargets');
+  });
+
+  it('detects file-backed imported skills without preserving legacy provider export metadata', async () => {
     const statePath = join(root, 'state');
     const importedFolder = join(statePath, 'skills', 'user', 'ci-triage');
     mkdirSync(importedFolder, { recursive: true });
@@ -303,30 +282,46 @@ describe('SkillCatalogService', () => {
     expect(imported?.scope).toBe('global');
     expect(imported?.providerTargets).toEqual(['openai', 'gemini', 'qwen']);
     expect(imported?.metadata.slug).toBe('ci-triage');
-    expect(imported?.metadata.syncTargets).toEqual(['openai']);
+    expect(imported?.metadata).not.toHaveProperty('syncTargets');
     expect(imported?.path).toBe(join(importedFolder, 'SKILL.md'));
+    expect(readFileSync(join(importedFolder, 'skill.json'), 'utf8')).not.toContain('syncTargets');
   });
 
-  it('removes provider exports when sync is disabled', async () => {
+  it('rescans configured external skill folders into the app skill catalog', async () => {
+    const externalRoot = join(root, 'external-skills');
+    const externalSkillFolder = join(externalRoot, 'ableton-browser-guide');
+    mkdirSync(externalSkillFolder, { recursive: true });
+    writeFileSync(
+      join(externalSkillFolder, 'SKILL.md'),
+      [
+        '---',
+        'name: Ableton Browser Guide',
+        'description: Applies dense browser UI patterns.',
+        '---',
+        '',
+        'Translate Ableton browser concepts into Vicode UI without copying it literally.'
+      ].join('\n'),
+      'utf8'
+    );
+    writeFileSync(
+      join(externalSkillFolder, '.vicode-skill.json'),
+      JSON.stringify({ enabled: true, category: 'design' }, null, 2),
+      'utf8'
+    );
+    skillsLibraryPath = externalRoot;
+
     const { SkillCatalogService } = await import('./skills');
     const service = new SkillCatalogService(db as never, join(root, 'state'));
+    const skills = await service.rescanLibrarySkills();
+    const imported = skills.find((skill) => skill.name === 'Ableton Browser Guide');
 
-    const skill = service.saveSkill({
-      name: 'Reviewer',
-      description: 'Review code critically.',
-      instructions: 'Lead with findings.',
-      scope: 'global',
-      providerTargets: ['openai'],
-      syncTargets: ['openai'],
-      enabled: true,
-      projectId: null
-    });
-
-    const synced = service.syncSkill(skill.id, 'openai', false);
-    const syncState = (synced.metadata.syncState as Record<string, { exported: boolean; path: string | null }>).openai;
-
-    expect(syncState.exported).toBe(false);
-    expect(syncState.path).toBeNull();
+    expect(imported).toBeTruthy();
+    expect(imported?.origin).toBe('custom_local');
+    expect(imported?.scope).toBe('global');
+    expect(imported?.enabled).toBe(true);
+    expect(imported?.metadata.category).toBe('design');
+    expect(imported?.path).toBe(join(root, 'state', 'skills', 'user', 'ableton-browser-guide', 'SKILL.md'));
+    expect(readFileSync(String(imported?.path), 'utf8')).toContain('Ableton Browser Guide');
   });
 
   it('does not delete existing files under the Codex app home when disabling sync', async () => {
@@ -363,148 +358,136 @@ describe('SkillCatalogService', () => {
       updatedAt: new Date().toISOString()
     });
 
-    const synced = service.syncSkill('skill-reviewer', 'openai', false);
+    const synced = service.saveSkill({
+      id: 'skill-reviewer',
+      name: 'Reviewer',
+      description: 'Review code critically.',
+      instructions: 'Lead with findings.',
+      scope: 'global',
+      providerTargets: ['openai'],
+      enabled: true,
+      projectId: null
+    });
     const syncState = (synced.metadata.syncState as Record<string, { exported: boolean; path: string | null; error?: string | null }>).openai;
 
     expect(existsSync(codexSkillPath)).toBe(true);
     expect(readFileSync(codexSkillPath, 'utf8')).toContain('Codex-owned skill');
     expect(syncState.exported).toBe(false);
     expect(syncState.path).toBeNull();
-    expect(syncState.error).toMatch(/did not remove provider files inside the Codex app home/i);
+    expect(synced.metadata).not.toHaveProperty('syncTargets');
   });
 
-  it('refuses to enable Codex provider-folder sync from Vicode', async () => {
+  it('does not delete existing files under provider-owned skill folders when disabling sync', async () => {
     const { SkillCatalogService } = await import('./skills');
     const service = new SkillCatalogService(db as never, join(root, 'state'));
+    const geminiSkillFolder = join(mockedHome, '.gemini', 'skills', 'reviewer');
+    const geminiSkillPath = join(geminiSkillFolder, 'SKILL.md');
+    mkdirSync(geminiSkillFolder, { recursive: true });
+    writeFileSync(geminiSkillPath, '# Reviewer\n\nKeep this Gemini-owned skill.\n', 'utf8');
 
-    const skill = service.saveSkill({
-      name: 'Reviewer',
-      description: 'Review code critically.',
-      instructions: 'Lead with findings.',
-      scope: 'global',
-      providerTargets: ['openai'],
-      syncTargets: [],
-      enabled: true,
-      projectId: null
-    });
-
-    expect(() => service.syncSkill(skill.id, 'openai', true)).toThrow(/does not write to the Codex app home/i);
-    expect(existsSync(join(mockedHome, '.codex', 'skills'))).toBe(false);
-  });
-
-  it('discovers provider-native skills and skips exported Vicode copies', async () => {
-    const { SkillCatalogService } = await import('./skills');
-    const service = new SkillCatalogService(
-      db as never,
-      join(root, 'state'),
-      createAdapters({
-        openai: createAdapter([
-          {
-            id: 'provider-native:openai:skill:cloudflare-deploy',
-            name: 'Cloudflare Deploy',
-            description: 'Deploy to Cloudflare.',
-            instructions: 'Deploy with the provider runtime.',
-            path: join(mockedHome, '.codex', 'skills', 'cloudflare-deploy', 'SKILL.md'),
-            providerTargets: ['openai'],
-            attachMode: 'runtime',
-            kind: 'skill',
-            metadata: { providerOrigin: 'openai', browseUrl: 'https://developers.openai.com/codex/skills/' }
-          },
-          {
-            id: 'provider-native:openai:skill:reviewer--abcd1234',
-            name: 'Reviewer Export',
-            description: 'Exported custom reviewer.',
-            instructions: 'Lead with findings.',
-            path: '__TO_BE_REPLACED__',
-            providerTargets: ['openai'],
-            attachMode: 'runtime',
-            kind: 'skill',
-            metadata: { providerOrigin: 'openai' }
-          }
-        ]),
-        gemini: {
-          ...createAdapter([], 'gemini'),
-          id: 'gemini',
-          label: 'Gemini'
-        }
-      })
-    );
-
-    const saved = service.saveSkill({
-      name: 'Reviewer',
-      description: 'Review code critically.',
-      instructions: 'Lead with findings.',
-      scope: 'global',
-      providerTargets: ['openai'],
-      syncTargets: [],
-      enabled: true,
-      projectId: null
-    });
-    const exportedPath = join(mockedHome, '.codex', 'skills', 'reviewer--abcd1234', 'SKILL.md');
     db.upsertSkill({
-      ...saved,
+      id: 'skill-gemini-reviewer',
+      name: 'Gemini Reviewer',
+      description: 'Review code critically.',
+      instructions: 'Lead with findings.',
+      origin: 'custom_local',
+      scope: 'global',
+      providerTargets: ['gemini'],
+      enabled: true,
+      projectId: null,
       metadata: {
-        ...saved.metadata,
+        syncTargets: ['gemini'],
         syncState: {
-          openai: {
+          gemini: {
             exported: true,
-            path: exportedPath,
+            path: geminiSkillPath,
             updatedAt: new Date().toISOString(),
             error: null
           }
         }
-      }
-    });
-    const openAiAdapter = (
-      service as unknown as {
-        adapters: Record<ProviderId, ProviderAdapter>;
-      }
-    ).adapters.openai;
-    vi.spyOn(openAiAdapter, 'discoverNativeSkills').mockResolvedValueOnce([
-      {
-        id: 'provider-native:openai:skill:cloudflare-deploy',
-        name: 'Cloudflare Deploy',
-        description: 'Deploy to Cloudflare.',
-        instructions: 'Deploy with the provider runtime.',
-        path: join(mockedHome, '.codex', 'skills', 'cloudflare-deploy', 'SKILL.md'),
-        providerTargets: ['openai'],
-        attachMode: 'runtime',
-        kind: 'skill',
-        metadata: { providerOrigin: 'openai', browseUrl: 'https://developers.openai.com/codex/skills/' }
       },
-      {
-        id: 'provider-native:openai:skill:reviewer--abcd1234',
-        name: 'Reviewer Export',
-        description: 'Exported custom reviewer.',
-        instructions: 'Lead with findings.',
-        path: exportedPath,
-        providerTargets: ['openai'],
-        attachMode: 'runtime',
-        kind: 'skill',
-        metadata: { providerOrigin: 'openai' }
-      }
-    ]);
+      path: join(root, 'state', 'skills', 'user', 'gemini-reviewer--skill-ge', 'SKILL.md'),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    const synced = service.saveSkill({
+      id: 'skill-gemini-reviewer',
+      name: 'Gemini Reviewer',
+      description: 'Review code critically.',
+      instructions: 'Lead with findings.',
+      scope: 'global',
+      providerTargets: ['gemini'],
+      enabled: true,
+      projectId: null
+    });
+    const syncState = (synced.metadata.syncState as Record<string, { exported: boolean; path: string | null; error?: string | null }>).gemini;
+
+    expect(existsSync(geminiSkillPath)).toBe(true);
+    expect(readFileSync(geminiSkillPath, 'utf8')).toContain('Gemini-owned skill');
+    expect(syncState.exported).toBe(false);
+    expect(syncState.path).toBeNull();
+    expect(synced.metadata).not.toHaveProperty('syncTargets');
+  });
+
+  it('clears legacy provider export metadata during ordinary skill toggles', async () => {
+    const { SkillCatalogService } = await import('./skills');
+    const service = new SkillCatalogService(db as never, join(root, 'state'));
+
+    db.upsertSkill({
+      id: 'skill-legacy-sync',
+      name: 'Legacy Sync',
+      description: 'Legacy provider export metadata.',
+      instructions: 'Stay app-managed.',
+      origin: 'custom_local',
+      scope: 'global',
+      providerTargets: ['gemini'],
+      enabled: false,
+      projectId: null,
+      metadata: {
+        syncTargets: ['gemini']
+      },
+      path: join(root, 'state', 'skills', 'user', 'legacy-sync--skill-le', 'SKILL.md'),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    const toggled = service.toggleSkill('skill-legacy-sync', true);
+
+    expect(toggled.enabled).toBe(true);
+    expect(toggled.metadata).not.toHaveProperty('syncTargets');
+    expect(existsSync(join(mockedHome, '.gemini', 'skills'))).toBe(false);
+    expect(readFileSync(join(dirname(String(toggled.path)), 'skill.json'), 'utf8')).not.toContain('syncTargets');
+  });
+
+  it('keeps provider-native skills out of the Vicode catalog during listing', async () => {
+    const { SkillCatalogService } = await import('./skills');
+    const service = new SkillCatalogService(db as never, join(root, 'state'));
+
+    db.upsertSkill({
+      id: 'provider-native:openai:skill:legacy-codex',
+      name: 'Legacy Codex',
+      description: 'Provider-owned skill.',
+      instructions: 'Use the provider runtime.',
+      origin: 'provider_native',
+      scope: 'global',
+      providerTargets: ['openai'],
+      enabled: true,
+      projectId: null,
+      metadata: { providerOrigin: 'openai' },
+      path: join(mockedHome, '.codex', 'skills', 'legacy-codex', 'SKILL.md'),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
 
     const skills = await service.listSkills();
 
-    expect(skills.some((skill) => skill.id === 'provider-native:openai:skill:cloudflare-deploy')).toBe(true);
-    expect(skills.some((skill) => skill.id === 'provider-native:openai:skill:reviewer--abcd1234')).toBe(false);
+    expect(skills.some((skill) => skill.id === 'provider-native:openai:skill:legacy-codex')).toBe(false);
   });
 
   it('reads provider-native skill detail from the source file', async () => {
     const { SkillCatalogService } = await import('./skills');
-    const service = new SkillCatalogService(
-      db as never,
-      join(root, 'state'),
-      createAdapters({
-        openai: createAdapter([], 'openai'),
-        gemini: {
-          ...createAdapter([], 'gemini'),
-          id: 'gemini',
-          label: 'Gemini'
-        }
-      })
-    );
+    const service = new SkillCatalogService(db as never, join(root, 'state'));
 
     const nativeFolder = join(root, 'native-skill');
     const nativePath = join(nativeFolder, 'SKILL.md');
@@ -540,20 +523,47 @@ describe('SkillCatalogService', () => {
     expect(detail.attachMode).toBe('runtime');
   });
 
-  it('uninstalls provider-native Gemini extensions from the provider folder', async () => {
+  it('does not expose unreadable provider-native skill file text in skill details', async () => {
     const { SkillCatalogService } = await import('./skills');
-    const service = new SkillCatalogService(
-      db as never,
-      join(root, 'state'),
-      createAdapters({
-        openai: createAdapter([], 'openai'),
-        gemini: {
-          ...createAdapter([], 'gemini'),
-          id: 'gemini',
-          label: 'Gemini'
-        }
-      })
-    );
+    const service = new SkillCatalogService(db as never, join(root, 'state'));
+
+    const nativeFolder = join(root, 'native-broken-skill');
+    const nativePath = join(nativeFolder, 'SKILL.md');
+    db.upsertSkill({
+      id: 'provider-native:openai:skill:broken-skill',
+      name: 'Broken Skill',
+      description: 'Installed Codex skill. The local skill file appears unreadable.',
+      instructions: 'Installed Codex skill. The local skill file appears unreadable.',
+      origin: 'provider_native',
+      scope: 'global',
+      providerTargets: ['openai'],
+      enabled: true,
+      projectId: null,
+      metadata: {
+        providerOrigin: 'openai',
+        kind: 'skill',
+        attachMode: 'runtime',
+        browseUrl: 'https://github.com/openai/skills/tree/main/skills/.curated'
+      },
+      path: nativePath,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    const fs = await import('node:fs');
+    fs.mkdirSync(nativeFolder, { recursive: true });
+    fs.writeFileSync(nativePath, '\0'.repeat(512), 'utf8');
+
+    const detail = service.getSkillDetail('provider-native:openai:skill:broken-skill');
+
+    expect(detail.markdown).toContain('Broken Skill');
+    expect(detail.markdown).toContain('could not be read as text');
+    expect(detail.markdown).not.toContain('\0');
+  });
+
+  it('hides provider-native Gemini extensions without deleting provider-owned files', async () => {
+    const { SkillCatalogService } = await import('./skills');
+    const service = new SkillCatalogService(db as never, join(root, 'state'));
 
     const extensionDir = join(mockedHome, '.gemini', 'extensions', 'superpowers');
     const extensionPath = join(extensionDir, 'GEMINI.md');
@@ -582,69 +592,42 @@ describe('SkillCatalogService', () => {
     });
 
     service.removeSkill('provider-native:gemini:extension:superpowers');
+    const skills = await service.listSkills();
 
-    expect(existsSync(extensionDir)).toBe(false);
-    expect(() => db.getSkill('provider-native:gemini:extension:superpowers')).toThrow();
+    expect(existsSync(extensionPath)).toBe(true);
+    expect(skills.some((skill) => skill.id === 'provider-native:gemini:extension:superpowers')).toBe(false);
   });
 
-  it('does not install provider-native OpenAI skills into the Codex app home', async () => {
+  it('hides Codex-native skills from Vicode without deleting files in the Codex app home', async () => {
+    const codexSkillDir = join(mockedHome, '.codex', 'skills', 'content-strategy');
+    const codexSkillPath = join(codexSkillDir, 'SKILL.md');
+    const fs = await import('node:fs');
+    fs.mkdirSync(codexSkillDir, { recursive: true });
+    fs.writeFileSync(codexSkillPath, '# Content Strategy\n', 'utf8');
+
     const { SkillCatalogService } = await import('./skills');
     const service = new SkillCatalogService(db as never, join(root, 'state'));
-    const codexSkillDir = join(mockedHome, '.codex', 'skills', 'cloudflare-deploy');
-    const codexSkillPath = join(codexSkillDir, 'SKILL.md');
-    mkdirSync(codexSkillDir, { recursive: true });
-    writeFileSync(codexSkillPath, '# Existing Codex Skill\n', 'utf8');
-
-    await expect(
-      service.installSuggestedSkill({
-        installKind: 'provider_native',
-        providerId: 'openai',
-        token: 'cloudflare-deploy'
-      })
-    ).rejects.toThrow(/does not install provider-native Codex skills/i);
-
-    expect(existsSync(codexSkillPath)).toBe(true);
-    expect(readFileSync(codexSkillPath, 'utf8')).toContain('Existing Codex Skill');
-  });
-
-  it('installs Gemini extensions without opening an external terminal', async () => {
-    const { SkillCatalogService } = await import('./skills');
-    const service = new SkillCatalogService(
-      db as never,
-      join(root, 'state'),
-      createAdapters({
-        openai: createAdapter([], 'openai'),
-        gemini: {
-          ...createAdapter([], 'gemini'),
-          id: 'gemini',
-          label: 'Gemini',
-          detectInstall: async () => ({
-            installed: true,
-            cliPath: 'C:\\Users\\test\\AppData\\Roaming\\npm\\gemini.cmd'
-          })
-        }
-      })
-    );
-
-    const result = await service.installSuggestedSkill({
-      installKind: 'provider_native',
-      providerId: 'gemini',
-      token: '@browserbase/mcp-server-browserbase',
-      installTarget: '@browserbase/mcp-server-browserbase'
+    db.upsertSkill({
+      id: 'provider-native:openai:skill:content-strategy',
+      name: 'content-strategy',
+      description: 'Installed Codex skill.',
+      instructions: 'Use the provider runtime.',
+      origin: 'provider_native',
+      scope: 'global',
+      providerTargets: ['openai'],
+      enabled: true,
+      projectId: null,
+      metadata: { providerOrigin: 'openai' },
+      path: codexSkillPath,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     });
 
-    expect(runHiddenExecutableMock).toHaveBeenCalledTimes(1);
-    expect(runHiddenExecutableMock).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.arrayContaining([
-        'extensions',
-        'install',
-        '@browserbase/mcp-server-browserbase',
-        '--consent'
-      ])
-    );
-    expect(result.status).toBe('completed');
-    expect(result.message).toContain('Installed Gemini extension');
+    service.removeSkill('provider-native:openai:skill:content-strategy');
+    const skills = await service.listSkills();
+
+    expect(existsSync(codexSkillPath)).toBe(true);
+    expect(skills.some((skill) => skill.id === 'provider-native:openai:skill:content-strategy')).toBe(false);
   });
 
   it('installs GitHub-backed skills as Vicode-managed cross-provider skills', async () => {
@@ -679,7 +662,7 @@ describe('SkillCatalogService', () => {
       description: 'Create, edit, and analyze Word documents.',
       browseUrl: 'https://github.com/anthropics/skills/tree/main/skills/docx',
       category: 'documents',
-      providerTargets: ['openai', 'gemini']
+      providerTargets: ['openai', 'ollama']
     });
 
     const skills = await service.listSkills();
@@ -688,7 +671,7 @@ describe('SkillCatalogService', () => {
     expect(result.status).toBe('completed');
     expect(result.providerId).toBeNull();
     expect(installed).toBeTruthy();
-    expect(installed?.providerTargets).toEqual(['openai', 'gemini']);
+    expect(installed?.providerTargets).toEqual(['openai', 'ollama']);
     expect(installed?.metadata.category).toBe('documents');
     expect(installed?.metadata.browseUrl).toBe('https://github.com/anthropics/skills/tree/main/skills/docx');
   });

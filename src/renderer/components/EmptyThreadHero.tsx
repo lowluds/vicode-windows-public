@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { PrimaryButton } from './ui';
-import wolfLogo from '../assets/wolf-logo.png';
+import { ThemedWolfLogo } from './ThemedWolfLogo';
 
 export const EmptyThreadHero = memo(
   function EmptyThreadHero({
@@ -13,7 +13,7 @@ export const EmptyThreadHero = memo(
     return (
       <div className="empty-thread-state empty-thread-state-centered" aria-label="Empty thread workspace">
         <div className="empty-thread-prompt">
-          <img className="empty-thread-prompt-logo" src={wolfLogo} alt="Vicode logo" />
+          <ThemedWolfLogo className="empty-thread-prompt-logo" />
           <h3 className="empty-thread-prompt-title">Start building</h3>
           {showOpenProjectAction ? (
             <>

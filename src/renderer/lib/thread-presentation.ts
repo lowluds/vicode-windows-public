@@ -9,8 +9,7 @@ import type {
   ThreadDetail,
   ThreadSummary
 } from '../../shared/domain';
-
-const SURFACED_PROVIDER_IDS = new Set<ProviderId>(['openai', 'gemini', 'ollama']);
+import { isSurfacedProviderId } from '../../shared/providers';
 
 export function formatTime(value: string | null) {
   if (!value) {
@@ -33,7 +32,7 @@ export function mergeBootstrapRecords<T extends { id: string }>(current: T[], in
 }
 
 export function surfaceProviders(providers: ProviderDescriptor[]) {
-  return providers.filter((provider) => SURFACED_PROVIDER_IDS.has(provider.id));
+  return providers.filter((provider) => isSurfacedProviderId(provider.id));
 }
 
 function threadSortValue(thread: ThreadSummary) {

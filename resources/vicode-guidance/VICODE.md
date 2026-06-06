@@ -15,6 +15,7 @@ The packaged guidance is a curated Obsidian-style markdown vault:
 
 - `VICODE.md` is the entrypoint and router.
 - `wiki/` mirrors the selected pages from the source wiki vault.
+- The bundle also includes first-party Vicode starter knowledge for Ollama, Project Knowledge, source quality, tool trust, coding workflows, and evals.
 - Prefer Obsidian routes such as `[[Task Routing]]` when available.
 - Fall back to packaged markdown paths such as `wiki/Task Routing.md` when Obsidian is not available.
 - Use `manifest.json` to map page titles, aliases, Obsidian routes, and packaged file paths.
@@ -35,13 +36,15 @@ Use `[[Task Routing]]` first. Choose one lead page for the task family, then add
 
 Use `[[Source-Backed Workflow]]` before substantial implementation, debugging, refactoring, or source-sensitive work.
 
-## Using Disclosure
+## Disclosure Labels
 
-When a run uses Vicode wiki pages, skills, external references, or app/tool capabilities, start the response with one short line:
+When a run uses skills, local context, or external evidence, keep disclosure lines short and specific:
 
-`Using: <references>`
+- `Using:` for active skills and app/tool capabilities.
+- `Context:` for user-connected Project Knowledge, workspace memory, or workspace instructions.
+- `Sources:` for external evidence such as web pages, public docs, papers, URLs, search results, or uploaded source material.
 
-Name only the references actually used. Include the same important references in the final summary when they shaped the work.
+Packaged Vicode guidance pages are internal routing context. Do not list them in `Using:`, `Context:`, or `Sources:` unless the user asks what internal guidance shaped the run.
 
 ## Default Rules
 
