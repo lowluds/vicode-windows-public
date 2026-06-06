@@ -12,8 +12,8 @@ body:
     id: version
     attributes:
       label: Vicode version
-      description: Example: 0.2.5
-      placeholder: 0.2.5
+      description: Example: 0.2.8
+      placeholder: 0.2.8
     validations:
       required: true
   - type: dropdown
@@ -31,9 +31,8 @@ body:
     attributes:
       label: Provider
       options:
-        - OpenAI / Codex CLI
-        - Gemini CLI
-        - Ollama
+        - Local Ollama
+        - Custom API / OpenAI-compatible
         - Other / not provider-specific
     validations:
       required: true
